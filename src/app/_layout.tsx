@@ -1,18 +1,29 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { Stack } from 'expo-router';
+import { TrainingProvider } from '../context/TrainingContext';
+import { useEffect, useState } from 'react';
+import { supabase } from '../context/TrainingContext';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+export default function Layout() {
+  const [session, setSession] = useState(null);
 
-SplashScreen.preventAutoHideAsync();
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+    supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+  }, []);
+
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <TrainingProvider session={session}>
+      <Stack screenOptions={{ headerShown: true }}>
+        <Stack.Screen name="index" options={{ title: 'Training Dashboard' }} />
+        <Stack.Screen name="plans" options={{ title: 'Workout Plans' }} />
+        <Stack.Screen name="history" options={{ title: 'Workout History' }} />
+        <Stack.Screen name="active-workout" options={{ title: 'Active Workout', headerShown: false }} />
+      </Stack>
+    </TrainingProvider>
   );
 }
