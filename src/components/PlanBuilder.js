@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ScrollView, 
-  TextInput, Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager, Modal, KeyboardAvoidingView
+  TextInput, Alert, ActivityIndicator, Platform, UIManager, Modal, KeyboardAvoidingView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../context/TrainingContext';
+import { supabase, TrainingContext } from '../context/TrainingContext';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -13,6 +13,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 const MODALITIES = ['Yoga', 'Plyometrics', 'Calisthenics', 'Cardio', 'Weightlifting'];
 
 export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
+  const { session } = useContext(TrainingContext);
+  const userId = session?.user?.id;
+  
   const [activeTab, setActiveTab] = useState('plans');
   const [standardPlans, setStandardPlans] = useState([]);
   const [customPlans, setCustomPlans] = useState([]);
@@ -52,7 +55,14 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   const [isAddWsModalVisible, setIsAddWsModalVisible] = useState(false);
   const [activePlanForWs, setActivePlanForWs] = useState(null);
   const [selectedDayForAnchored, setSelectedDayForAnchored] = useState('Monday');
+  const [selectedTimeForAnchored, setSelectedTimeForAnchored] = useState('Any Time');
   const [selectedWsIdForAttach, setSelectedWsIdForAttach] = useState(null);
+
+  // Edit Day Modal
+  const [isEditDayModalVisible, setIsEditDayModalVisible] = useState(false);
+  const [editDayPwId, setEditDayPwId] = useState(null);
+  const [editDaySelectedDay, setEditDaySelectedDay] = useState('Monday');
+  const [editDaySelectedTime, setEditDaySelectedTime] = useState('Any Time');
   
   // For attaching worksession modal
   const [newWsName, setNewWsName] = useState('');
@@ -76,57 +86,72 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   };
 
   const fetchData = async () => {
+    if (!userId) return;
     setLoading(true);
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData?.user?.id) return;
-
-      const { data: plansData, error: plansError } = await supabase
-        .from('training_plans')
-        .select(`
-          id, name, is_standard_template, user_id, schedule_type,
-          goal_category, intensity, sessions_per_week, description,
-          plan_worksessions (
-            id, day_name, order_index, worksession_id,
-            worksessions (
-              id, name, modality,
-              worksession_exercises (
-                id, target_sets, target_reps,
-                exercises (id, name, category)
+      const [plansRes, wsRes] = await Promise.all([
+        supabase
+          .from('training_plans')
+          .select(`
+            id, name, is_standard_template, user_id, schedule_type,
+            goal_category, intensity, sessions_per_week, description,
+            plan_worksessions (
+              id, day_name, order_index, worksession_id,
+              worksessions (
+                id, name, modality,
+                worksession_exercises (
+                  id, target_sets, target_reps, tracking_type, target_time,
+                  exercises (id, name, category)
+                )
               )
             )
-          )
-        `);
+          `),
+        supabase
+          .from('worksessions')
+          .select(`
+            id, name, modality, user_id,
+            worksession_exercises (
+              id, target_sets, target_reps, tracking_type, target_time,
+              exercises (id, name, category)
+            )
+          `)
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+      ]);
 
-      if (plansError) throw plansError;
+      if (plansRes.error) throw plansRes.error;
+      if (wsRes.error) throw wsRes.error;
 
-      plansData.forEach(p => {
-        if (p.plan_worksessions) {
-          p.plan_worksessions.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-        }
-      });
+      const plansData = plansRes.data;
+      if (plansData) {
+        const dayOrder = { 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6, 'Sunday': 7 };
+        plansData.forEach(p => {
+          if (p.plan_worksessions) {
+            if (p.schedule_type === 'anchored') {
+              p.plan_worksessions.sort((a, b) => {
+                const dayA = a.day_name.split(' ')[0];
+                const dayB = b.day_name.split(' ')[0];
+                const timeA = a.day_name.split(' ')[1] || '';
+                const timeB = b.day_name.split(' ')[1] || '';
+                const diff = (dayOrder[dayA] || 8) - (dayOrder[dayB] || 8);
+                if (diff !== 0) return diff;
+                if (timeA === 'AM' && timeB === 'PM') return -1;
+                if (timeA === 'PM' && timeB === 'AM') return 1;
+                return 0;
+              });
+            } else {
+              p.plan_worksessions.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+            }
+          }
+        });
 
-      const standards = plansData.filter(p => p.is_standard_template);
-      const customs = plansData.filter(p => !p.is_standard_template && p.user_id === userData.user.id);
+        const standards = plansData.filter(p => p.is_standard_template);
+        const customs = plansData.filter(p => !p.is_standard_template && p.user_id === userId);
 
-      const { data: wsData, error: wsError } = await supabase
-        .from('worksessions')
-        .select(`
-          id, name, modality, user_id,
-          worksession_exercises (
-            id, target_sets, target_reps,
-            exercises (id, name, category)
-          )
-        `)
-        .eq('user_id', userData.user.id)
-        .order('created_at', { ascending: false });
-
-      if (wsError) throw wsError;
-
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setStandardPlans(standards);
-      setCustomPlans(customs);
-      setWorksessions(wsData);
+        setStandardPlans(standards);
+        setCustomPlans(customs);
+      }
+      setWorksessions(wsRes.data);
     } catch (e) {
       console.error('Error fetching data', e);
       Alert.alert('Error', 'Failed to fetch data.');
@@ -170,12 +195,11 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
     setLoading(true);
     try {
       let currentWsId = draftWsId;
-      const { data: userData } = await supabase.auth.getUser();
 
       if (!currentWsId) {
         // Create new worksession
         const { data, error } = await supabase.from('worksessions').insert([{
-          user_id: userData.user.id,
+          user_id: userId,
           name: draftWsName,
           modality: draftWsModality
         }]).select().single();
@@ -198,8 +222,10 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
         const inserts = draftExercises.map(ex => ({
           worksession_id: currentWsId,
           exercise_id: ex.exercise_id || ex.exercises?.id, 
-          target_sets: ex.target_sets || 3,
-          target_reps: ex.target_reps || 10
+          tracking_type: ex.tracking_type || 'reps',
+          target_sets: ex.target_sets || 0,
+          target_reps: ex.target_reps || 0,
+          target_time: ex.target_time || 0
         }));
         const { error: insertError } = await supabase.from('worksession_exercises').insert(inserts);
         if (insertError) throw insertError;
@@ -223,8 +249,10 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       id: `temp-${Date.now()}`,
       exercise_id: exerciseId,
       exercises: { id: exerciseId, name: exObj.name, category: exObj.category },
+      tracking_type: 'reps',
       target_sets: 3,
-      target_reps: 10
+      target_reps: 10,
+      target_time: 60
     }]);
     setIsExerciseModalVisible(false);
   };
@@ -268,9 +296,6 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   const handleCopyPlan = async (planToCopy) => {
     setLoading(true);
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user.id;
-
       // 1. Create new plan
       const { data: newPlan, error: planError } = await supabase.from('training_plans').insert([{
         user_id: userId,
@@ -306,8 +331,10 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               const exerciseInserts = oldWs.worksession_exercises.map(ex => ({
                 worksession_id: newWsId,
                 exercise_id: ex.exercises?.id,
-                target_sets: ex.target_sets,
-                target_reps: ex.target_reps
+                tracking_type: ex.tracking_type || 'reps',
+                target_sets: ex.target_sets || 0,
+                target_reps: ex.target_reps || 0,
+                target_time: ex.target_time || 0
               }));
               const { error: exError } = await supabase.from('worksession_exercises').insert(exerciseInserts);
               if (exError) throw exError;
@@ -341,9 +368,8 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       return;
     }
     try {
-      const { data: userData } = await supabase.auth.getUser();
       await supabase.from('training_plans').insert([{
-        user_id: userData.user.id,
+        user_id: userId,
         name: newPlanName,
         schedule_type: newPlanSchedule,
         is_standard_template: false,
@@ -400,7 +426,8 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
     try {
       const plan = customPlans.find(p => p.id === activePlanForWs) || standardPlans.find(p => p.id === activePlanForWs);
       const nextIndex = (plan.plan_worksessions?.length || 0) + 1;
-      const defaultName = plan.schedule_type === 'anchored' ? selectedDayForAnchored : `Worksession ${nextIndex}`;
+      const timeSuffix = selectedTimeForAnchored === 'Any Time' ? '' : ` ${selectedTimeForAnchored}`;
+      const defaultName = plan.schedule_type === 'anchored' ? `${selectedDayForAnchored}${timeSuffix}` : `Worksession ${nextIndex}`;
 
       await supabase.from('plan_worksessions').insert([{
         plan_id: plan.id,
@@ -412,6 +439,45 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       await fetchData();
     } catch (e) {
       Alert.alert('Error', 'Failed to attach worksession.');
+    }
+  };
+
+  const moveWorksessionInPlan = async (planId, currentIndex, direction) => {
+    const plan = customPlans.find(p => p.id === planId) || standardPlans.find(p => p.id === planId);
+    if (!plan) return;
+    
+    const newWorksessions = [...(plan.plan_worksessions || [])];
+    if (direction === 'up' && currentIndex > 0) {
+      const temp = newWorksessions[currentIndex];
+      newWorksessions[currentIndex] = newWorksessions[currentIndex - 1];
+      newWorksessions[currentIndex - 1] = temp;
+    } else if (direction === 'down' && currentIndex < newWorksessions.length - 1) {
+      const temp = newWorksessions[currentIndex];
+      newWorksessions[currentIndex] = newWorksessions[currentIndex + 1];
+      newWorksessions[currentIndex + 1] = temp;
+    } else {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      for (let i = 0; i < newWorksessions.length; i++) {
+        await supabase.from('plan_worksessions').update({ order_index: i + 1 }).eq('id', newWorksessions[i].id);
+      }
+      await fetchData();
+    } catch (e) {
+      Alert.alert('Error', 'Failed to reorder.');
+      setLoading(false);
+    }
+  };
+
+  const updateWorksessionDay = async (pwId, newDayName) => {
+    try {
+      await supabase.from('plan_worksessions').update({ day_name: newDayName }).eq('id', pwId);
+      setIsEditDayModalVisible(false);
+      await fetchData();
+    } catch (e) {
+      Alert.alert('Error', 'Failed to update day.');
     }
   };
 
@@ -440,9 +506,8 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
 
     try {
       if (newWsName.trim()) {
-        const { data: userData } = await supabase.auth.getUser();
         const { data: wsData, error: wsError } = await supabase.from('worksessions').insert([{
-          user_id: userData.user.id,
+          user_id: userId,
           name: newWsName,
           modality: MODALITIES[0]
         }]).select().single();
@@ -465,9 +530,8 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
     }
     setLoading(true);
     try {
-      const { data: userData } = await supabase.auth.getUser();
       await supabase.from('exercises').insert([{
-        user_id: userData.user.id,
+        user_id: userId,
         name: newExerciseName,
         category: newExerciseCategory
       }]);
@@ -519,7 +583,9 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
 
         <View style={styles.exerciseSummaryList}>
           {ws.worksession_exercises?.map(te => (
-            <Text key={te.id} style={styles.exerciseSummaryText}>• {te.exercises?.name} ({te.target_sets}x{te.target_reps})</Text>
+            <Text key={te.id} style={styles.exerciseSummaryText}>
+              • {te.exercises?.name} {te.tracking_type === 'time' ? `(${te.target_time} sec)` : `(${te.target_sets}x${te.target_reps})`}
+            </Text>
           ))}
           {(!ws.worksession_exercises || ws.worksession_exercises.length === 0) && (
             <Text style={styles.exerciseSummaryText}>No exercises added.</Text>
@@ -596,12 +662,33 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
 
         {isEditing && (
           <View style={styles.editExercisesContainer}>
-            {plan.plan_worksessions?.map((pw) => (
+            {plan.plan_worksessions?.map((pw, index) => (
               <View key={pw.id} style={styles.exerciseEditRow}>
-                <View>
+                {plan.schedule_type !== 'anchored' && (
+                  <View style={styles.exerciseEditReorderArrows}>
+                    <TouchableOpacity onPress={() => moveWorksessionInPlan(plan.id, index, 'up')} disabled={index === 0}>
+                      <Ionicons name="chevron-up" size={24} color={index === 0 ? '#444' : '#00D09E'} />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => moveWorksessionInPlan(plan.id, index, 'down')} disabled={index === plan.plan_worksessions.length - 1}>
+                      <Ionicons name="chevron-down" size={24} color={index === plan.plan_worksessions.length - 1 ? '#444' : '#00D09E'} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+                <View style={{ flex: 1, paddingLeft: plan.schedule_type === 'anchored' ? 0 : 10 }}>
                   <Text style={styles.exerciseEditName}>{pw.worksessions?.name}</Text>
                   {plan.schedule_type === 'anchored' && (
-                    <Text style={styles.exerciseEditDetails}>{pw.day_name}</Text>
+                    <TouchableOpacity 
+                      style={[styles.smallToggle, { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#3A3A45', borderColor: '#4A4A55' }]}
+                      onPress={() => {
+                        setEditDayPwId(pw.id);
+                        const parts = pw.day_name.split(' ');
+                        setEditDaySelectedDay(parts[0] || 'Monday');
+                        setEditDaySelectedTime(parts[1] || 'Any Time');
+                        setIsEditDayModalVisible(true);
+                      }}
+                    >
+                      <Text style={{ color: '#FFF', fontSize: 13, fontWeight: 'bold' }}>{pw.day_name}</Text>
+                    </TouchableOpacity>
                   )}
                 </View>
                 <TouchableOpacity onPress={() => handleRemoveWorksessionFromPlan(pw.id)} style={{ padding: 5 }}>
@@ -852,29 +939,69 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                   </View>
                   <View style={{ flex: 1, paddingLeft: 10 }}>
                     <Text style={styles.exerciseEditName}>{ex.exercises?.name}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                      <TextInput 
-                        style={styles.smallInput} 
-                        value={ex.target_sets?.toString()} 
-                        keyboardType="numeric"
-                        onChangeText={(text) => {
+                    
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, marginBottom: 4 }}>
+                      <TouchableOpacity 
+                        style={[styles.smallToggle, (!ex.tracking_type || ex.tracking_type === 'reps') && styles.smallToggleActive]}
+                        onPress={() => {
                           const newDraft = [...draftExercises];
-                          newDraft[index].target_sets = parseInt(text) || 0;
+                          newDraft[index].tracking_type = 'reps';
                           setDraftExercises(newDraft);
-                        }}
-                      />
-                      <Text style={{ color: '#888', marginHorizontal: 4 }}>sets x</Text>
-                      <TextInput 
-                        style={styles.smallInput} 
-                        value={ex.target_reps?.toString()} 
-                        keyboardType="numeric"
-                        onChangeText={(text) => {
+                        }}>
+                        <Text style={[styles.smallToggleText, (!ex.tracking_type || ex.tracking_type === 'reps') && styles.smallToggleTextActive]}>Reps</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.smallToggle, ex.tracking_type === 'time' && styles.smallToggleActive, { marginLeft: 5 }]}
+                        onPress={() => {
                           const newDraft = [...draftExercises];
-                          newDraft[index].target_reps = parseInt(text) || 0;
+                          newDraft[index].tracking_type = 'time';
                           setDraftExercises(newDraft);
-                        }}
-                      />
-                      <Text style={{ color: '#888', marginLeft: 4 }}>reps</Text>
+                        }}>
+                        <Text style={[styles.smallToggleText, ex.tracking_type === 'time' && styles.smallToggleTextActive]}>Time</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      {ex.tracking_type === 'time' ? (
+                        <>
+                          <TextInput 
+                            style={styles.smallInput} 
+                            value={ex.target_time?.toString() || '60'} 
+                            keyboardType="numeric"
+                            onChangeText={(text) => {
+                              const newDraft = [...draftExercises];
+                              newDraft[index].target_time = parseInt(text) || 0;
+                              setDraftExercises(newDraft);
+                            }}
+                          />
+                          <Text style={{ color: '#888', marginHorizontal: 4 }}>seconds</Text>
+                        </>
+                      ) : (
+                        <>
+                          <TextInput 
+                            style={styles.smallInput} 
+                            value={ex.target_sets?.toString() || '3'} 
+                            keyboardType="numeric"
+                            onChangeText={(text) => {
+                              const newDraft = [...draftExercises];
+                              newDraft[index].target_sets = parseInt(text) || 0;
+                              setDraftExercises(newDraft);
+                            }}
+                          />
+                          <Text style={{ color: '#888', marginHorizontal: 4 }}>sets x</Text>
+                          <TextInput 
+                            style={styles.smallInput} 
+                            value={ex.target_reps?.toString() || '10'} 
+                            keyboardType="numeric"
+                            onChangeText={(text) => {
+                              const newDraft = [...draftExercises];
+                              newDraft[index].target_reps = parseInt(text) || 0;
+                              setDraftExercises(newDraft);
+                            }}
+                          />
+                          <Text style={{ color: '#888', marginLeft: 4 }}>reps</Text>
+                        </>
+                      )}
                     </View>
                   </View>
                   <TouchableOpacity onPress={() => removeDraftExercise(index)} style={{ padding: 5 }}>
@@ -992,7 +1119,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               return isAnchored ? (
                 <View style={{ marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#3A3A45', paddingBottom: 15 }}>
                   <Text style={styles.label}>Select Day</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
                     {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => (
                       <TouchableOpacity 
                         key={day} 
@@ -1003,12 +1130,72 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
+                  <Text style={styles.label}>Select Time (Optional)</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {['Any Time', 'AM', 'PM'].map(time => (
+                      <TouchableOpacity 
+                        key={time} 
+                        style={[styles.filterPill, selectedTimeForAnchored === time && styles.filterPillActive]} 
+                        onPress={() => setSelectedTimeForAnchored(time)}
+                      >
+                        <Text style={[styles.filterText, selectedTimeForAnchored === time && styles.filterTextActive]}>{time}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
               ) : null;
             })()}
             
             <TouchableOpacity style={styles.saveButton} onPress={handleFinalAddWorksession}>
               <Text style={styles.saveButtonText}>Add Worksession to Plan</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={isEditDayModalVisible} animationType="slide" transparent={true}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.exerciseModalContent, { height: 'auto', paddingBottom: 40 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Change Day</Text>
+              <TouchableOpacity onPress={() => setIsEditDayModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+            <View style={{ marginBottom: 15 }}>
+              <Text style={styles.label}>Select Day</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => (
+                  <TouchableOpacity 
+                    key={day} 
+                    style={[styles.filterPill, editDaySelectedDay === day && styles.filterPillActive]} 
+                    onPress={() => setEditDaySelectedDay(day)}
+                  >
+                    <Text style={[styles.filterText, editDaySelectedDay === day && styles.filterTextActive]}>{day}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <Text style={styles.label}>Select Time (Optional)</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {['Any Time', 'AM', 'PM'].map(time => (
+                  <TouchableOpacity 
+                    key={time} 
+                    style={[styles.filterPill, editDaySelectedTime === time && styles.filterPillActive]} 
+                    onPress={() => setEditDaySelectedTime(time)}
+                  >
+                    <Text style={[styles.filterText, editDaySelectedTime === time && styles.filterTextActive]}>{time}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+            <TouchableOpacity 
+              style={styles.saveButton} 
+              onPress={() => {
+                const timeSuffix = editDaySelectedTime === 'Any Time' ? '' : ` ${editDaySelectedTime}`;
+                updateWorksessionDay(editDayPwId, `${editDaySelectedDay}${timeSuffix}`);
+              }}
+            >
+              <Text style={styles.saveButtonText}>Save Day</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1083,5 +1270,9 @@ const styles = StyleSheet.create({
   focusSaveText: { color: '#00D09E', fontSize: 16, fontWeight: 'bold' },
   focusTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   focusContent: { flex: 1, padding: 20 },
-  draftExercisesContainer: { marginTop: 20, paddingBottom: 50 }
+  draftExercisesContainer: { marginTop: 20, paddingBottom: 50 },
+  smallToggle: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#1E1E24', borderWidth: 1, borderColor: '#3A3A45' },
+  smallToggleActive: { backgroundColor: '#00D09E20', borderColor: '#00D09E' },
+  smallToggleText: { color: '#888', fontSize: 12 },
+  smallToggleTextActive: { color: '#00D09E', fontWeight: 'bold' }
 });

@@ -28,8 +28,14 @@ export default function SettingsScreen() {
             <View style={styles.row}>
               <Ionicons name="person-circle-outline" size={24} color="#00D09E" style={styles.icon} />
               <View style={styles.rowText}>
-                <Text style={styles.label}>Email</Text>
-                <Text style={styles.value}>{session?.user?.email || 'Not logged in'}</Text>
+                <Text style={styles.label}>Account</Text>
+                <Text style={styles.value}>
+                  {session?.user?.user_metadata?.full_name || 
+                   session?.user?.user_metadata?.name || 
+                   session?.user?.user_metadata?.username || 
+                   session?.user?.email || 
+                   (session?.user ? 'Anonymous User' : 'Not logged in')}
+                </Text>
               </View>
             </View>
           </View>
@@ -85,10 +91,12 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color="#FF453A" style={styles.logoutIcon} />
-          <Text style={styles.logoutText}>Log Out</Text>
-        </TouchableOpacity>
+        {session && (
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={20} color="#FF453A" style={styles.logoutIcon} />
+            <Text style={styles.logoutText}>Log Out</Text>
+          </TouchableOpacity>
+        )}
 
       </ScrollView>
     </SafeAreaView>

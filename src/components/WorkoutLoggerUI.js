@@ -114,9 +114,9 @@ export default function WorkoutLoggerUI() {
 
   const defaultPlan = availablePlans.find(p => p.id === workspaces.defaultPlanId);
   const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-  const anchoredWsForToday = defaultPlan?.schedule_type === 'anchored' 
-    ? defaultPlan.plan_worksessions?.find(pw => pw.day_name === todayDayName)?.worksessions
-    : null;
+  const anchoredWsListForToday = defaultPlan?.schedule_type === 'anchored' 
+    ? defaultPlan.plan_worksessions?.filter(pw => pw.day_name.startsWith(todayDayName))
+    : [];
 
   let nextWorksessionStr = defaultPlan?.name || "Workout";
   if (defaultPlan) {
@@ -151,21 +151,25 @@ export default function WorkoutLoggerUI() {
     } else {
       const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const today = new Date();
-      let nextWs = null;
+      let nextWsList = [];
       let nextWsDayName = null;
       for (let i = 0; i < 7; i++) {
         const checkDate = new Date(today);
         checkDate.setDate(today.getDate() + i);
         const dayName = daysOfWeek[checkDate.getDay()];
-        const ws = defaultPlan.plan_worksessions?.find(pw => pw.day_name === dayName)?.worksessions;
-        if (ws) {
-          nextWs = ws;
+        const wsList = defaultPlan.plan_worksessions?.filter(pw => pw.day_name.startsWith(dayName));
+        if (wsList && wsList.length > 0) {
+          nextWsList = wsList.map(pw => pw.worksessions);
           nextWsDayName = i === 0 ? 'Today' : dayName;
           break;
         }
       }
-      if (nextWs) nextWorksessionStr = moveProfile.workouts.length > 0 ? `Next up: ${nextWsDayName} - ${nextWs.name}` : `Next Session: ${nextWsDayName} - ${nextWs.name}`;
-      else nextWorksessionStr = "No upcoming sessions";
+      if (nextWsList.length > 0) {
+        const sessionNames = nextWsList.map(ws => ws.name).join(' & ');
+        nextWorksessionStr = moveProfile.workouts.length > 0 ? `Next up: ${nextWsDayName} - ${sessionNames}` : `Next Session: ${nextWsDayName} - ${sessionNames}`;
+      } else {
+        nextWorksessionStr = "No upcoming sessions";
+      }
     }
   }
 
@@ -234,8 +238,8 @@ export default function WorkoutLoggerUI() {
                   if (defaultPlan.schedule_type === 'floating' || defaultPlan.schedule_type === 'flexible') {
                     setShowWorksessionModal(true);
                   } else {
-                    if (anchoredWsForToday) {
-                      startActiveSession(defaultPlan, anchoredWsForToday);
+                    if (anchoredWsListForToday.length === 1) {
+                      startActiveSession(defaultPlan, anchoredWsListForToday[0].worksessions);
                     } else {
                       setShowWorksessionModal(true);
                     }
@@ -255,23 +259,30 @@ export default function WorkoutLoggerUI() {
             <Text style={{ color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 20 }}>Select Worksession</Text>
             
             <ScrollView style={{ width: '100%', maxHeight: 300 }}>
-              {defaultPlan?.plan_worksessions?.map(pw => (
-                <TouchableOpacity 
-                  key={pw.id} 
-                  style={{
-                    padding: 15, borderRadius: 12, marginBottom: 10,
-                    backgroundColor: '#2A2A31'
-                  }}
-                  onPress={() => {
-                    setShowWorksessionModal(false);
-                    startActiveSession(defaultPlan, pw.worksessions);
-                  }}
-                >
-                  <Text style={{ color: '#FFF', fontWeight: 'bold', textAlign: 'center' }}>
-                    {pw.worksessions?.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {(() => {
+                let listToRender = defaultPlan?.plan_worksessions || [];
+                // If anchored and there are multiple for today, show today's only. Or just show all if none for today
+                if (defaultPlan?.schedule_type === 'anchored' && anchoredWsListForToday.length > 1) {
+                  listToRender = anchoredWsListForToday;
+                }
+                return listToRender.map(pw => (
+                  <TouchableOpacity 
+                    key={pw.id} 
+                    style={{
+                      padding: 15, borderRadius: 12, marginBottom: 10,
+                      backgroundColor: '#2A2A31'
+                    }}
+                    onPress={() => {
+                      setShowWorksessionModal(false);
+                      startActiveSession(defaultPlan, pw.worksessions);
+                    }}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: 'bold', textAlign: 'center' }}>
+                      {pw.worksessions?.name} {defaultPlan.schedule_type === 'anchored' ? `(${pw.day_name})` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ));
+              })()}
             </ScrollView>
             
             <TouchableOpacity 
