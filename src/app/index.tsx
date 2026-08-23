@@ -11,6 +11,7 @@ export default function DashboardScreen() {
         <View style={styles.navHeader}>
           <Link href="/plans" style={styles.navLink}>Workout Plans</Link>
           <Link href="/history" style={styles.navLink}>History</Link>
+          <Link href="/settings" style={styles.navLink}>Settings</Link>
         </View>
         <WorkoutLoggerUI />
       </ScrollView>

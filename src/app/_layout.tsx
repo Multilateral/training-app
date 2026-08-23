@@ -23,6 +23,7 @@ export default function Layout() {
         <Stack.Screen name="plans" options={{ title: 'Workout Plans' }} />
         <Stack.Screen name="history" options={{ title: 'Workout History' }} />
         <Stack.Screen name="active-workout" options={{ title: 'Active Workout', headerShown: false }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       </Stack>
     </TrainingProvider>
   );
