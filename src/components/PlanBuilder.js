@@ -12,9 +12,78 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const MODALITIES = ['Yoga', 'Plyometrics', 'Calisthenics', 'Cardio', 'Weightlifting'];
 
+export const EQUIPMENT_OPTIONS = [
+  'TRX',
+  'Floor Mat',
+  'Pull-up Bar',
+  'Dumbbell / Barbell',
+  'Bodyweight',
+  'Cardio Equipment',
+  'Dip Station',
+  'Plyo Box',
+  'Sports Equipment',
+  'Other'
+];
+
+export const MUSCLE_OPTIONS = [
+  'Chest',
+  'Back',
+  'Legs',
+  'Arms',
+  'Core',
+  'Shoulders',
+  'Full Body',
+  'Cardio',
+  'Yoga',
+  'Sports'
+];
+
+export const getExerciseEquipment = (exercise) => {
+  if (exercise?.equipment) return exercise.equipment;
+  const name = (exercise?.name || '').toLowerCase();
+  const cat = (exercise?.category || '').toLowerCase();
+  
+  if (name.includes('trx')) return 'TRX';
+  if (name.includes('pull-up') || name.includes('muscle-up')) return 'Pull-up Bar';
+  if (name.includes('dip')) return 'Dip Station';
+  if (name.includes('barbell') || name.includes('dumbbell') || name.includes('bench press') || name.includes('deadlift') || name.includes('overhead press') || name.includes('curl')) return 'Dumbbell / Barbell';
+  if (name.includes('box jump')) return 'Plyo Box';
+  if (name.includes('jump rope')) return 'Cardio Equipment';
+  if (name.includes('treadmill') || name.includes('cycl') || name.includes('rowing') || name.includes('stair')) return 'Cardio Equipment';
+  if (cat === 'yoga' || name.includes('dog') || name.includes('pose') || name.includes('chaturanga') || name.includes('plank') || name.includes('push-up')) return 'Floor Mat';
+  if (cat === 'collective sports' || name.includes('ball') || name.includes('tennis') || name.includes('hockey') || name.includes('cricket') || name.includes('badminton') || name.includes('rugby')) return 'Sports Equipment';
+  return 'Bodyweight';
+};
+
+export const getExerciseMuscleGroup = (exercise) => {
+  if (exercise?.muscle_group) return exercise.muscle_group;
+  const cat = exercise?.category || '';
+  const name = (exercise?.name || '').toLowerCase();
+  
+  if (['Chest', 'Back', 'Legs', 'Arms', 'Core', 'Shoulders', 'Full Body'].includes(cat)) {
+    return cat;
+  }
+  
+  if (name.includes('chest') || name.includes('bench press') || name.includes('push-up')) return 'Chest';
+  if (name.includes('row') || name.includes('pull-up') || name.includes('deadlift') || name.includes('y-fly') || name.includes('t-fly') || name.includes('alligator')) return 'Back';
+  if (name.includes('squat') || name.includes('lunge') || name.includes('hamstring') || name.includes('box jump')) return 'Legs';
+  if (name.includes('curl') || name.includes('tricep') || name.includes('dip') || name.includes('muscle-up')) return 'Arms';
+  if (name.includes('overhead press')) return 'Shoulders';
+  if (name.includes('plank') || name.includes('pike') || name.includes('climber') || name.includes('core')) return 'Core';
+  if (cat === 'Cardio' || name.includes('running') || name.includes('cycling') || name.includes('treadmill') || name.includes('rowing') || name.includes('jump rope')) return 'Cardio';
+  if (cat === 'Yoga' || name.includes('dog') || name.includes('pose')) return 'Yoga';
+  if (cat === 'Collective Sports') return 'Sports';
+  
+  return cat || 'Full Body';
+};
+
+const ADMIN_EMAILS = ['condrea.vlad@gmail.com', 'condrea.vlad@icloud.com'];
+
 export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   const { session } = useContext(TrainingContext);
   const userId = session?.user?.id;
+  const userEmail = session?.user?.email?.toLowerCase();
+  const isAdmin = !!userEmail && ADMIN_EMAILS.includes(userEmail);
   
   const [activeTab, setActiveTab] = useState('plans');
   const [standardPlans, setStandardPlans] = useState([]);
@@ -71,17 +140,26 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   const [isCreatingExercise, setIsCreatingExercise] = useState(false);
   const [newExerciseName, setNewExerciseName] = useState('');
   const [newExerciseCategory, setNewExerciseCategory] = useState('Chest');
+  const [newExerciseEquipment, setNewExerciseEquipment] = useState('Bodyweight');
+  const [isDefaultExercise, setIsDefaultExercise] = useState(false);
   const [globalExerciseSearchQuery, setGlobalExerciseSearchQuery] = useState('');
+  const [exerciseSortMode, setExerciseSortMode] = useState('muscle'); // 'muscle' | 'equipment' | 'alpha'
+  const [exerciseFilterTag, setExerciseFilterTag] = useState('All');
+  const [pickerSortMode, setPickerSortMode] = useState('muscle'); // for worksession modal
 
   useEffect(() => {
     fetchData();
     fetchExercises();
-  }, []);
+  }, [userId]);
 
   const fetchExercises = async () => {
-    const { data, error } = await supabase.from('exercises').select('*').order('name');
-    if (!error && data) {
-      setExercisesList(data);
+    try {
+      const { data, error } = await supabase.from('exercises').select('*').order('name');
+      if (!error && data) {
+        setExercisesList(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch exercises:', err);
     }
   };
 
@@ -530,47 +608,133 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
     }
     setLoading(true);
     try {
-      await supabase.from('exercises').insert([{
-        user_id: userId,
-        name: newExerciseName,
-        category: newExerciseCategory
+      const makeDefault = isAdmin && isDefaultExercise;
+      const cat = newExerciseCategory.trim() || 'Chest';
+      const eq = newExerciseEquipment.trim() || 'Bodyweight';
+      const { error } = await supabase.from('exercises').insert([{
+        user_id: makeDefault ? null : userId,
+        name: newExerciseName.trim(),
+        category: cat,
+        muscle_group: cat,
+        equipment: eq,
+        is_default: makeDefault
       }]);
+      if (error) throw error;
       setIsCreatingExercise(false);
       setNewExerciseName('');
       setNewExerciseCategory('Chest');
+      setNewExerciseEquipment('Bodyweight');
+      setIsDefaultExercise(false);
       await fetchExercises();
+      Alert.alert('Success', makeDefault ? 'Default exercise created for all users!' : 'Custom exercise created successfully!');
     } catch (e) {
-      Alert.alert('Error', 'Failed to create exercise.');
+      console.error('Failed to create exercise:', e);
+      Alert.alert('Error', e.message || 'Failed to create exercise.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteExercise = async (id) => {
-    Alert.alert('Delete Exercise', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await supabase.from('exercises').delete().eq('id', id);
-          await fetchExercises();
-        } catch (e) {
-          Alert.alert('Error', 'Failed to delete.');
+  const handlePromoteToDefault = async (exercise) => {
+    Alert.alert(
+      'Make Default Exercise',
+      `Promote "${exercise.name}" to a default library exercise for all users?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Promote',
+          onPress: async () => {
+            setLoading(true);
+            try {
+              const { error } = await supabase
+                .from('exercises')
+                .update({ is_default: true, user_id: null })
+                .eq('id', exercise.id);
+              if (error) throw error;
+              await fetchExercises();
+              Alert.alert('Success', `"${exercise.name}" is now a default exercise for all users!`);
+            } catch (e) {
+              Alert.alert('Error', e.message || 'Failed to promote exercise.');
+            } finally {
+              setLoading(false);
+            }
+          }
         }
-      }}
-    ]);
+      ]
+    );
+  };
+
+  const handleDeleteExercise = async (exercise) => {
+    const isDefault = exercise.is_default || !exercise.user_id;
+    Alert.alert(
+      'Delete Exercise',
+      isDefault
+        ? `Are you sure you want to delete default exercise "${exercise.name}"? This removes it for all users.`
+        : `Delete "${exercise.name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setLoading(true);
+            try {
+              const { error } = await supabase.from('exercises').delete().eq('id', exercise.id);
+              if (error) throw error;
+              await fetchExercises();
+            } catch (e) {
+              Alert.alert('Error', e.message || 'Failed to delete.');
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const renderExerciseCard = (exercise) => {
+    const isOwner = exercise.user_id === userId;
+    const isDefault = exercise.is_default || !exercise.user_id;
+    const eq = getExerciseEquipment(exercise);
+    const mg = getExerciseMuscleGroup(exercise);
+
     return (
       <View key={exercise.id} style={styles.planCard}>
         <View style={styles.planHeader}>
-          <Text style={styles.planName}>{exercise.name}</Text>
-          <View style={styles.metadataBadge}><Text style={styles.metadataText}>{exercise.category}</Text></View>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Text style={styles.planName}>{exercise.name}</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <View style={[styles.metadataBadge, { backgroundColor: '#252530' }]}>
+                <Text style={styles.metadataText}>💪 {mg}</Text>
+              </View>
+              <View style={[styles.metadataBadge, { backgroundColor: '#1C2833' }]}>
+                <Text style={[styles.metadataText, { color: '#60A5FA' }]}>⚙️ {eq}</Text>
+              </View>
+              <View style={[styles.metadataBadge, { backgroundColor: isDefault ? '#1A2E26' : '#332414' }]}>
+                <Text style={[styles.metadataText, { color: isDefault ? '#00D09E' : '#FFA726' }]}>
+                  {isDefault ? 'Default' : 'Custom'}
+                </Text>
+              </View>
+            </View>
+          </View>
         </View>
         <View style={styles.cardActions}>
-          <TouchableOpacity onPress={() => handleDeleteExercise(exercise.id)} style={styles.actionIcon}>
-            <Ionicons name="trash" size={18} color="#FF4C4C" />
-          </TouchableOpacity>
+          {isAdmin && !isDefault && (
+            <TouchableOpacity 
+              onPress={() => handlePromoteToDefault(exercise)} 
+              style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3A331E', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, gap: 5 }]}
+            >
+              <Ionicons name="globe-outline" size={16} color="#FFD700" />
+              <Text style={{ color: '#FFD700', fontSize: 12, fontWeight: 'bold' }}>Make Default</Text>
+            </TouchableOpacity>
+          )}
+
+          {(isOwner || isAdmin) && (
+            <TouchableOpacity onPress={() => handleDeleteExercise(exercise)} style={styles.actionIcon}>
+              <Ionicons name="trash" size={18} color="#FF4C4C" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -789,11 +953,58 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                 <View style={{ marginBottom: 15 }}>
                   <TextInput
                     style={[styles.input, { marginBottom: 10, padding: 12 }]}
-                    placeholder="Search exercises..."
+                    placeholder="Search by name, muscle, or equipment..."
                     placeholderTextColor="#666"
                     value={globalExerciseSearchQuery}
                     onChangeText={setGlobalExerciseSearchQuery}
                   />
+
+                  {/* SORT / GROUP BY SEGMENTED CONTROL */}
+                  <View style={styles.sortBarContainer}>
+                    <Text style={styles.sortBarLabel}>GROUP BY:</Text>
+                    <View style={styles.sortSegmentGroup}>
+                      <TouchableOpacity 
+                        style={[styles.sortSegment, exerciseSortMode === 'muscle' && styles.sortSegmentActive]} 
+                        onPress={() => { setExerciseSortMode('muscle'); setExerciseFilterTag('All'); }}
+                      >
+                        <Text style={[styles.sortSegmentText, exerciseSortMode === 'muscle' && styles.sortSegmentTextActive]}>
+                          Muscle
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.sortSegment, exerciseSortMode === 'equipment' && styles.sortSegmentActive]} 
+                        onPress={() => { setExerciseSortMode('equipment'); setExerciseFilterTag('All'); }}
+                      >
+                        <Text style={[styles.sortSegmentText, exerciseSortMode === 'equipment' && styles.sortSegmentTextActive]}>
+                          Equipment
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.sortSegment, exerciseSortMode === 'alpha' && styles.sortSegmentActive]} 
+                        onPress={() => { setExerciseSortMode('alpha'); setExerciseFilterTag('All'); }}
+                      >
+                        <Text style={[styles.sortSegmentText, exerciseSortMode === 'alpha' && styles.sortSegmentTextActive]}>
+                          A-Z
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* HORIZONTAL FILTER PILLS */}
+                  {exerciseSortMode !== 'alpha' && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                      {['All', ...(exerciseSortMode === 'equipment' ? EQUIPMENT_OPTIONS : MUSCLE_OPTIONS)].map(tag => (
+                        <TouchableOpacity
+                          key={tag}
+                          style={[styles.filterPill, exerciseFilterTag === tag && styles.filterPillActive]}
+                          onPress={() => setExerciseFilterTag(tag)}
+                        >
+                          <Text style={[styles.filterText, exerciseFilterTag === tag && styles.filterTextActive]}>{tag}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+
                   <TouchableOpacity style={styles.createButton} onPress={() => setIsCreatingExercise(true)}>
                     <Ionicons name="add" size={24} color="#FFF" />
                     <Text style={styles.createButtonText}>Create Exercise</Text>
@@ -810,27 +1021,114 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                   <Text style={styles.label}>Exercise Name</Text>
                   <TextInput style={styles.input} placeholder="e.g., Bench Press" placeholderTextColor="#666" value={newExerciseName} onChangeText={setNewExerciseName} />
                   
-                  <Text style={styles.label}>Category</Text>
-                  <TextInput style={styles.input} placeholder="e.g., Chest" placeholderTextColor="#666" value={newExerciseCategory} onChangeText={setNewExerciseCategory} />
+                  <Text style={styles.label}>Muscle Group</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                    {MUSCLE_OPTIONS.map(m => (
+                      <TouchableOpacity 
+                        key={m} 
+                        style={[styles.smallPill, newExerciseCategory === m && styles.smallPillActive]}
+                        onPress={() => setNewExerciseCategory(m)}
+                      >
+                        <Text style={[styles.smallPillText, newExerciseCategory === m && styles.smallPillTextActive]}>{m}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <TextInput style={[styles.input, { marginBottom: 12 }]} placeholder="Or custom muscle group..." placeholderTextColor="#666" value={newExerciseCategory} onChangeText={setNewExerciseCategory} />
+
+                  <Text style={styles.label}>Equipment</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                    {EQUIPMENT_OPTIONS.map(eq => (
+                      <TouchableOpacity 
+                        key={eq} 
+                        style={[styles.smallPill, newExerciseEquipment === eq && styles.smallPillActive]}
+                        onPress={() => setNewExerciseEquipment(eq)}
+                      >
+                        <Text style={[styles.smallPillText, newExerciseEquipment === eq && styles.smallPillTextActive]}>{eq}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <TextInput style={[styles.input, { marginBottom: 12 }]} placeholder="Or custom equipment..." placeholderTextColor="#666" value={newExerciseEquipment} onChangeText={setNewExerciseEquipment} />
+
+                  {isAdmin && (
+                    <TouchableOpacity 
+                      style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, marginTop: 5 }}
+                      onPress={() => setIsDefaultExercise(!isDefaultExercise)}
+                    >
+                      <Ionicons 
+                        name={isDefaultExercise ? "checkbox" : "square-outline"} 
+                        size={22} 
+                        color={isDefaultExercise ? "#FFD700" : "#888"} 
+                      />
+                      <Text style={{ color: '#FFF', marginLeft: 8, fontSize: 14 }}>
+                        Make default for all users (Global Library)
+                      </Text>
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity style={styles.saveButton} onPress={handleCreateExercise}><Text style={styles.saveButtonText}>Save Exercise</Text></TouchableOpacity>
                 </View>
               )}
 
               {activeTab === 'exercises' && (() => {
-                const filtered = exercisesList.filter(ex => 
-                  ex.name.toLowerCase().includes(globalExerciseSearchQuery.toLowerCase()) || 
-                  ex.category.toLowerCase().includes(globalExerciseSearchQuery.toLowerCase())
-                );
+                const search = globalExerciseSearchQuery.toLowerCase();
+                const filtered = exercisesList.filter(ex => {
+                  const nameMatch = ex.name.toLowerCase().includes(search);
+                  const catMatch = (ex.category || '').toLowerCase().includes(search);
+                  const eqMatch = getExerciseEquipment(ex).toLowerCase().includes(search);
+                  const mgMatch = getExerciseMuscleGroup(ex).toLowerCase().includes(search);
+                  const matchesSearch = nameMatch || catMatch || eqMatch || mgMatch;
+
+                  if (!matchesSearch) return false;
+                  if (exerciseFilterTag === 'All') return true;
+
+                  if (exerciseSortMode === 'equipment') {
+                    return getExerciseEquipment(ex) === exerciseFilterTag;
+                  }
+                  if (exerciseSortMode === 'muscle') {
+                    return getExerciseMuscleGroup(ex) === exerciseFilterTag;
+                  }
+                  return true;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <View style={{ alignItems: 'center', marginTop: 30, paddingBottom: 40 }}>
+                      <Text style={{ color: '#888', fontSize: 16 }}>No exercises found matching your filter.</Text>
+                    </View>
+                  );
+                }
+
+                if (exerciseSortMode === 'alpha') {
+                  const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+                  return (
+                    <View style={{ marginBottom: 20 }}>
+                      <Text style={{ color: '#AAA', fontSize: 14, fontWeight: 'bold', marginBottom: 10 }}>
+                        All Exercises ({sorted.length})
+                      </Text>
+                      {sorted.map(renderExerciseCard)}
+                    </View>
+                  );
+                }
+
+                // Group by equipment or muscle
                 const grouped = filtered.reduce((acc, ex) => {
-                  if (!acc[ex.category]) acc[ex.category] = [];
-                  acc[ex.category].push(ex);
+                  const groupKey = exerciseSortMode === 'equipment' 
+                    ? getExerciseEquipment(ex) 
+                    : getExerciseMuscleGroup(ex);
+                  if (!acc[groupKey]) acc[groupKey] = [];
+                  acc[groupKey].push(ex);
                   return acc;
                 }, {});
-                return Object.keys(grouped).sort().map(category => (
-                  <View key={category} style={{ marginBottom: 10 }}>
-                    <Text style={{ color: '#AAA', fontSize: 16, fontWeight: 'bold', marginBottom: 10, marginTop: 5 }}>{category}</Text>
-                    {grouped[category].map(renderExerciseCard)}
+
+                return Object.keys(grouped).sort().map(groupKey => (
+                  <View key={groupKey} style={{ marginBottom: 15 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, marginTop: 5 }}>
+                      <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold' }}>{groupKey}</Text>
+                      <View style={{ backgroundColor: '#2A2A35', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 }}>
+                        <Text style={{ color: '#888', fontSize: 12, fontWeight: 'bold' }}>{grouped[groupKey].length}</Text>
+                      </View>
+                    </View>
+                    {grouped[groupKey].map(renderExerciseCard)}
                   </View>
                 ));
               })()}
@@ -1030,16 +1328,35 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
             </View>
 
             <TextInput
-              style={[styles.input, { marginHorizontal: 20, marginBottom: 15 }]}
-              placeholder="Search exercises..."
+              style={[styles.input, { marginHorizontal: 20, marginBottom: 10 }]}
+              placeholder="Search by name, muscle, equipment..."
               placeholderTextColor="#888"
               value={exerciseSearchQuery}
               onChangeText={setExerciseSearchQuery}
             />
+
+            {/* Toggle Sort: Muscle vs Equipment in Worksession Modal */}
+            <View style={{ flexDirection: 'row', paddingHorizontal: 20, alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <Text style={{ color: '#888', fontSize: 12, fontWeight: 'bold' }}>FILTER BY:</Text>
+              <View style={{ flexDirection: 'row', backgroundColor: '#1E1E24', borderRadius: 8, padding: 2, borderWidth: 1, borderColor: '#3A3A45' }}>
+                <TouchableOpacity 
+                  style={[styles.smallToggle, pickerSortMode === 'muscle' && styles.smallToggleActive]}
+                  onPress={() => { setPickerSortMode('muscle'); setSelectedExerciseFilter('All'); }}
+                >
+                  <Text style={[styles.smallToggleText, pickerSortMode === 'muscle' && styles.smallToggleTextActive]}>Muscle</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.smallToggle, pickerSortMode === 'equipment' && styles.smallToggleActive]}
+                  onPress={() => { setPickerSortMode('equipment'); setSelectedExerciseFilter('All'); }}
+                >
+                  <Text style={[styles.smallToggleText, pickerSortMode === 'equipment' && styles.smallToggleTextActive]}>Equipment</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
             
             <View style={styles.filterScrollContainer}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {['All', ...MODALITIES].map(cat => (
+                {['All', ...(pickerSortMode === 'equipment' ? EQUIPMENT_OPTIONS : MUSCLE_OPTIONS)].map(cat => (
                   <TouchableOpacity key={cat} style={[styles.filterPill, selectedExerciseFilter === cat && styles.filterPillActive]} onPress={() => setSelectedExerciseFilter(cat)}>
                     <Text style={[styles.filterText, selectedExerciseFilter === cat && styles.filterTextActive]}>{cat}</Text>
                   </TouchableOpacity>
@@ -1053,13 +1370,35 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               keyboardShouldPersistTaps="handled"
             >
               {exercisesList
-                .filter(e => selectedExerciseFilter === 'All' || e.category === selectedExerciseFilter)
-                .filter(e => e.name.toLowerCase().includes(exerciseSearchQuery.toLowerCase()))
+                .filter(e => {
+                  if (selectedExerciseFilter === 'All') return true;
+                  if (pickerSortMode === 'equipment') {
+                    return getExerciseEquipment(e) === selectedExerciseFilter;
+                  }
+                  return getExerciseMuscleGroup(e) === selectedExerciseFilter;
+                })
+                .filter(e => {
+                  const q = exerciseSearchQuery.toLowerCase();
+                  return e.name.toLowerCase().includes(q) || 
+                         getExerciseMuscleGroup(e).toLowerCase().includes(q) || 
+                         getExerciseEquipment(e).toLowerCase().includes(q);
+                })
                 .map(ex => (
                 <TouchableOpacity key={ex.id} style={styles.exerciseListItem} onPress={() => handleAddExerciseToDraft(ex.id)}>
-                  <View>
-                    <Text style={styles.exerciseListItemName}>{ex.name}</Text>
-                    <Text style={styles.exerciseListItemCategory}>{ex.category}</Text>
+                  <View style={{ flex: 1, marginRight: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Text style={styles.exerciseListItemName}>{ex.name}</Text>
+                      {ex.user_id && !ex.is_default && (
+                        <View style={[styles.metadataBadge, { backgroundColor: '#332414', paddingHorizontal: 6, paddingVertical: 2 }]}>
+                          <Text style={[styles.metadataText, { color: '#FFA726', fontSize: 10 }]}>Custom</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, alignItems: 'center' }}>
+                      <Text style={{ color: '#00D09E', fontSize: 12, fontWeight: '600' }}>💪 {getExerciseMuscleGroup(ex)}</Text>
+                      <Text style={{ color: '#666', fontSize: 11 }}>•</Text>
+                      <Text style={{ color: '#60A5FA', fontSize: 12, fontWeight: '600' }}>⚙️ {getExerciseEquipment(ex)}</Text>
+                    </View>
                   </View>
                   <Ionicons name="add-circle" size={24} color="#00D09E" />
                 </TouchableOpacity>
@@ -1274,5 +1613,16 @@ const styles = StyleSheet.create({
   smallToggle: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#1E1E24', borderWidth: 1, borderColor: '#3A3A45' },
   smallToggleActive: { backgroundColor: '#00D09E20', borderColor: '#00D09E' },
   smallToggleText: { color: '#888', fontSize: 12 },
-  smallToggleTextActive: { color: '#00D09E', fontWeight: 'bold' }
+  smallToggleTextActive: { color: '#00D09E', fontWeight: 'bold' },
+  sortBarContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, marginTop: 4 },
+  sortBarLabel: { color: '#888', fontSize: 12, fontWeight: 'bold', letterSpacing: 0.5 },
+  sortSegmentGroup: { flexDirection: 'row', backgroundColor: '#1E1E24', borderRadius: 8, padding: 3, borderWidth: 1, borderColor: '#3A3A45' },
+  sortSegment: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  sortSegmentActive: { backgroundColor: '#00D09E25' },
+  sortSegmentText: { color: '#888', fontSize: 12, fontWeight: '600' },
+  sortSegmentTextActive: { color: '#00D09E', fontWeight: 'bold' },
+  smallPill: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#1E1E24', borderRadius: 16, marginRight: 8, borderWidth: 1, borderColor: '#3A3A45' },
+  smallPillActive: { backgroundColor: '#00D09E20', borderColor: '#00D09E' },
+  smallPillText: { color: '#888', fontSize: 12 },
+  smallPillTextActive: { color: '#00D09E', fontWeight: 'bold' }
 });
