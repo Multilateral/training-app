@@ -53,8 +53,8 @@ export default function AuthScreen() {
           Alert.alert('Success', 'Account created! Please check your email for a confirmation link.');
         }
       }
-    } catch (error) {
-      Alert.alert('Authentication Failed', error.message || 'An error occurred during authentication.');
+    } catch (error: any) {
+      Alert.alert('Authentication Failed', error?.message || 'An error occurred during authentication.');
     } finally {
       setLoading(false);
     }

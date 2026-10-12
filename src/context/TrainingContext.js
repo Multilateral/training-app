@@ -62,6 +62,23 @@ export const TrainingProvider = ({ children, session }) => {
   }, [activeSessionMetadata, activeSessionState, activeSessionTimer]);
 
   useEffect(() => {
+    const loadCachedWorkspaces = async () => {
+      try {
+        const cached = await AsyncStorage.getItem('@workspaces_data');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed === 'object') {
+            setWorkspaces(prev => ({ ...prev, ...parsed }));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load cached workspaces', e);
+      }
+    };
+    loadCachedWorkspaces();
+  }, []);
+
+  useEffect(() => {
     if (session?.user) {
       loadDatabase();
     }
@@ -78,9 +95,10 @@ export const TrainingProvider = ({ children, session }) => {
       if (data) {
         if (data.history_data) setHistory(data.history_data);
         if (data.workspaces_data) {
-          setWorkspaces({
-            ...data.workspaces_data,
-          });
+          setWorkspaces(data.workspaces_data);
+          try {
+            await AsyncStorage.setItem('@workspaces_data', JSON.stringify(data.workspaces_data));
+          } catch (e) {}
         }
       }
     } catch (error) {
@@ -95,14 +113,17 @@ export const TrainingProvider = ({ children, session }) => {
     if (!session?.user?.id) return;
 
     try {
+      const payload = {
+        id: session.user.id,
+        history_data: newHistory,
+        updated_at: new Date().toISOString()
+      };
+      if (workspaces && Object.keys(workspaces).length > 0 && workspaces.defaultPlanId !== null) {
+        payload.workspaces_data = workspaces;
+      }
       await supabase
         .from('user_profiles')
-        .upsert({
-          id: session.user.id,
-          history_data: newHistory,
-          workspaces_data: workspaces,
-          updated_at: new Date().toISOString()
-        });
+        .upsert(payload);
     } catch (error) {
       console.error("Failed to save database: ", error);
     }
@@ -114,6 +135,9 @@ export const TrainingProvider = ({ children, session }) => {
 
   const updateWorkspaces = async (newWorkspaces) => {
     setWorkspaces(newWorkspaces);
+    try {
+      await AsyncStorage.setItem('@workspaces_data', JSON.stringify(newWorkspaces));
+    } catch (e) {}
 
     if (!session?.user?.id) return;
 

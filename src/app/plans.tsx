@@ -6,7 +6,7 @@ import { TrainingContext } from '../context/TrainingContext';
 export default function PlansScreen() {
   const { workspaces, updateWorkspaces } = useContext(TrainingContext);
   
-  const handleSetDefaultPlan = (planId) => {
+  const handleSetDefaultPlan = (planId: string) => {
     updateWorkspaces({ ...workspaces, defaultPlanId: planId });
   };
 

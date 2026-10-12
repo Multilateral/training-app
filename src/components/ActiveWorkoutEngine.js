@@ -4,6 +4,12 @@ import { useKeepAwake } from 'expo-keep-awake';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { supabase, TrainingContext as HealthContext } from '../context/TrainingContext';
+import { 
+  getExerciseInstructions, 
+  getExerciseDifficulty, 
+  getExerciseMechanics, 
+  getWorksessionExerciseCue 
+} from '../data/recoveryMetadata';
 
 export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFinish }) {
   useKeepAwake();
@@ -30,15 +36,27 @@ export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFi
           for (let i = 0; i < numSets; i++) {
              initialSets.push({
                id: `s_${te.id}_${i}`,
-               reps: te.target_reps || 10,
+               reps: te.tracking_type === 'time' ? (te.target_time || 30) : (te.target_reps || 10),
                weight: 0,
                done: false,
                loggedId: null
              });
           }
+          const cue = te.notes || getWorksessionExerciseCue(worksession, te.exercises?.id || te.exercise_id);
+          const inst = getExerciseInstructions(te.exercises) || getExerciseInstructions({ id: te.exercise_id, name: te.exercises?.name });
+          const diff = getExerciseDifficulty(te.exercises) || getExerciseDifficulty({ id: te.exercise_id, name: te.exercises?.name });
+          const mech = getExerciseMechanics(te.exercises) || getExerciseMechanics({ id: te.exercise_id, name: te.exercises?.name });
+
           return {
             id: te.id,
+            exercise_id: te.exercises?.id || te.exercise_id,
             name: te.exercises?.name || 'Unknown Exercise',
+            cue,
+            instructions: inst,
+            difficulty: diff,
+            mechanics: mech,
+            tracking_type: te.tracking_type,
+            target_time: te.target_time,
             sets: initialSets
           };
         });
@@ -153,12 +171,49 @@ export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFi
         ) : (
           exercises.map((ex, exIndex) => (
             <View key={ex.id} style={styles.exerciseCard}>
-              <Text style={styles.exerciseName}>{ex.name}</Text>
+              <View style={{ marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                  <Text style={styles.exerciseName}>{ex.name}</Text>
+                  {ex.cue && (
+                    <View style={{ backgroundColor: '#00D09E20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                      <Text style={{ color: '#00D09E', fontSize: 11, fontWeight: '700' }}>{ex.cue}</Text>
+                    </View>
+                  )}
+                </View>
+                
+                {(ex.difficulty || ex.mechanics) && (
+                  <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                    {ex.difficulty && (
+                      <View style={{ backgroundColor: '#2A1F3D', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ color: '#C084FC', fontSize: 10, fontWeight: '600' }}>🎯 {ex.difficulty}</Text>
+                      </View>
+                    )}
+                    {ex.mechanics && (
+                      <View style={{ backgroundColor: '#1E293B', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ color: '#38BDF8', fontSize: 10, fontWeight: '600' }}>⚡ {ex.mechanics}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {ex.instructions && (
+                  <View style={{ backgroundColor: '#161620', borderRadius: 8, padding: 9, marginTop: 8, borderLeftWidth: 3, borderLeftColor: '#00D09E' }}>
+                    <Text style={{ color: '#00D09E', fontSize: 10, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 }}>
+                      Form & Execution Cue
+                    </Text>
+                    <Text style={{ color: '#D1D5DB', fontSize: 12, lineHeight: 16 }}>
+                      {ex.instructions}
+                    </Text>
+                  </View>
+                )}
+              </View>
               
               <View style={styles.setsHeader}>
                 <Text style={styles.setHeaderText}>Set</Text>
                 <Text style={[styles.setHeaderText, { flex: 2, textAlign: 'center' }]}>Weight</Text>
-                <Text style={[styles.setHeaderText, { flex: 2, textAlign: 'center' }]}>Reps</Text>
+                <Text style={[styles.setHeaderText, { flex: 2, textAlign: 'center' }]}>
+                  {ex.tracking_type === 'time' ? 'Seconds' : 'Reps'}
+                </Text>
                 <Text style={[styles.setHeaderText, { width: 50, textAlign: 'center' }]}>Done</Text>
               </View>
 

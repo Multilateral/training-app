@@ -11,13 +11,13 @@ export default function ActiveWorkoutScreen() {
   let parsedWorksession = null;
   
   try {
-    if (plan) parsedPlan = JSON.parse(plan);
-    if (worksession) parsedWorksession = JSON.parse(worksession);
+    if (typeof plan === 'string') parsedPlan = JSON.parse(plan);
+    if (typeof worksession === 'string') parsedWorksession = JSON.parse(worksession);
   } catch(e) {
     console.error("Failed to parse params", e);
   }
 
-  const handleFinish = (durationMins) => {
+  const handleFinish = (durationMins?: number) => {
     router.replace('/');
   };
 

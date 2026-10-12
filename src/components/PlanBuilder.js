@@ -4,7 +4,15 @@ import {
   TextInput, Alert, ActivityIndicator, Platform, UIManager, Modal, KeyboardAvoidingView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { supabase, TrainingContext } from '../context/TrainingContext';
+import { 
+  getExerciseInstructions, 
+  getExerciseDifficulty, 
+  getExerciseMechanics, 
+  getWorksessionDescription, 
+  getWorksessionExerciseCue 
+} from '../data/recoveryMetadata';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -15,6 +23,7 @@ const MODALITIES = ['Yoga', 'Plyometrics', 'Calisthenics', 'Cardio', 'Weightlift
 export const EQUIPMENT_OPTIONS = [
   'TRX',
   'Floor Mat',
+  'Resistance Band',
   'Pull-up Bar',
   'Dumbbell / Barbell',
   'Bodyweight',
@@ -35,7 +44,12 @@ export const MUSCLE_OPTIONS = [
   'Full Body',
   'Cardio',
   'Yoga',
-  'Sports'
+  'Sports',
+  'Knee Rehab',
+  'Lower Back Pain',
+  'Shoulder Rehab',
+  'Ankle & Achilles',
+  'Recovery'
 ];
 
 export const getExerciseEquipment = (exercise) => {
@@ -80,10 +94,42 @@ export const getExerciseMuscleGroup = (exercise) => {
 const ADMIN_EMAILS = ['condrea.vlad@gmail.com', 'condrea.vlad@icloud.com'];
 
 export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
+  const router = useRouter();
   const { session } = useContext(TrainingContext);
   const userId = session?.user?.id;
   const userEmail = session?.user?.email?.toLowerCase();
   const isAdmin = !!userEmail && ADMIN_EMAILS.includes(userEmail);
+
+  const handleStartSession = async (plan, worksession) => {
+    if (!worksession) {
+      Alert.alert('Error', 'No worksession selected.');
+      return;
+    }
+    try {
+      const uid = userId || (await supabase.auth.getUser())?.data?.user?.id;
+      if (!uid) {
+        Alert.alert('Error', 'User session not found.');
+        return;
+      }
+      const { data, error } = await supabase.from('active_sessions').insert([{
+        user_id: uid,
+        start_time: new Date().toISOString()
+      }]).select().single();
+
+      if (error) throw error;
+      router.push({
+        pathname: '/active-workout',
+        params: {
+          sessionId: data.id,
+          plan: plan ? JSON.stringify(plan) : JSON.stringify({ name: worksession.name || 'Custom Session' }),
+          worksession: JSON.stringify(worksession)
+        }
+      });
+    } catch (e) {
+      console.error('Failed to start session', e);
+      Alert.alert('Error', 'Failed to start session.');
+    }
+  };
   
   const [activeTab, setActiveTab] = useState('plans');
   const [standardPlans, setStandardPlans] = useState([]);
@@ -193,7 +239,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               exercises (id, name, category)
             )
           `)
-          .eq('user_id', userId)
+          .or(`user_id.eq.${userId},user_id.is.null,id.in.(b0000001-0000-4000-a000-000000000001,b0000001-0000-4000-a000-000000000002,b0000001-0000-4000-a000-000000000003,b0000001-0000-4000-a000-000000000004)`)
           .order('created_at', { ascending: false })
       ]);
 
@@ -698,6 +744,9 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
     const isDefault = exercise.is_default || !exercise.user_id;
     const eq = getExerciseEquipment(exercise);
     const mg = getExerciseMuscleGroup(exercise);
+    const instructions = getExerciseInstructions(exercise);
+    const difficulty = getExerciseDifficulty(exercise);
+    const mechanics = getExerciseMechanics(exercise);
 
     return (
       <View key={exercise.id} style={styles.planCard}>
@@ -711,6 +760,16 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               <View style={[styles.metadataBadge, { backgroundColor: '#1C2833' }]}>
                 <Text style={[styles.metadataText, { color: '#60A5FA' }]}>⚙️ {eq}</Text>
               </View>
+              {difficulty && (
+                <View style={[styles.metadataBadge, { backgroundColor: '#2A1F3D' }]}>
+                  <Text style={[styles.metadataText, { color: '#C084FC' }]}>🎯 {difficulty}</Text>
+                </View>
+              )}
+              {mechanics && (
+                <View style={[styles.metadataBadge, { backgroundColor: '#1E293B' }]}>
+                  <Text style={[styles.metadataText, { color: '#38BDF8' }]}>⚡ {mechanics}</Text>
+                </View>
+              )}
               <View style={[styles.metadataBadge, { backgroundColor: isDefault ? '#1A2E26' : '#332414' }]}>
                 <Text style={[styles.metadataText, { color: isDefault ? '#00D09E' : '#FFA726' }]}>
                   {isDefault ? 'Default' : 'Custom'}
@@ -719,6 +778,18 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
             </View>
           </View>
         </View>
+
+        {instructions && (
+          <View style={{ backgroundColor: '#171720', borderRadius: 8, padding: 10, marginTop: 10, borderLeftWidth: 3, borderLeftColor: '#00D09E' }}>
+            <Text style={{ color: '#00D09E', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 4, letterSpacing: 0.5 }}>
+              Instructions & Form Cues
+            </Text>
+            <Text style={{ color: '#D1D5DB', fontSize: 13, lineHeight: 18 }}>
+              {instructions}
+            </Text>
+          </View>
+        )}
+
         <View style={styles.cardActions}>
           {isAdmin && !isDefault && (
             <TouchableOpacity 
@@ -738,31 +809,71 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
         </View>
       </View>
     );
-  };  const renderWorksessionCard = (ws) => {
+  };
+
+  const renderWorksessionCard = (ws) => {
+    const wsDesc = getWorksessionDescription(ws);
+    const isTemplate = !ws.user_id || ws.id?.startsWith('b0000001');
+
     return (
       <View key={ws.id} style={styles.planCard}>
         <View style={styles.planHeader}>
-          <Text style={styles.planName}>{ws.name} <Text style={{fontSize: 12, color: '#888'}}>({ws.modality})</Text></Text>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <Text style={styles.planName}>{ws.name}</Text>
+              {isTemplate && (
+                <View style={{ backgroundColor: '#00D09E20', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
+                  <Text style={{ color: '#00D09E', fontSize: 10, fontWeight: '700' }}>RECOVERY PROTOCOL</Text>
+                </View>
+              )}
+            </View>
+            <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Modality: {ws.modality}</Text>
+          </View>
         </View>
 
+        {wsDesc && (
+          <Text style={{ color: '#9CA3AF', fontSize: 13, lineHeight: 18, marginTop: 8, marginBottom: 4 }}>
+            {wsDesc}
+          </Text>
+        )}
+
         <View style={styles.exerciseSummaryList}>
-          {ws.worksession_exercises?.map(te => (
-            <Text key={te.id} style={styles.exerciseSummaryText}>
-              • {te.exercises?.name} {te.tracking_type === 'time' ? `(${te.target_time} sec)` : `(${te.target_sets}x${te.target_reps})`}
-            </Text>
-          ))}
+          {ws.worksession_exercises?.map(te => {
+            const cue = te.notes || getWorksessionExerciseCue(ws, te.exercises?.id || te.exercise_id);
+            return (
+              <View key={te.id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 3 }}>
+                <Text style={styles.exerciseSummaryText}>
+                  • {te.exercises?.name} {te.tracking_type === 'time' ? `(${te.target_time}s hold)` : `(${te.target_sets}x${te.target_reps})`}
+                </Text>
+                {cue && (
+                  <View style={{ backgroundColor: '#252530', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                    <Text style={{ color: '#00D09E', fontSize: 10, fontWeight: '600' }}>{cue}</Text>
+                  </View>
+                )}
+              </View>
+            );
+          })}
           {(!ws.worksession_exercises || ws.worksession_exercises.length === 0) && (
             <Text style={styles.exerciseSummaryText}>No exercises added.</Text>
           )}
         </View>
 
         <View style={styles.cardActions}>
+          <TouchableOpacity 
+            onPress={() => handleStartSession(null, ws)} 
+            style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00D09E20', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 }]}
+          >
+            <Ionicons name="play" size={14} color="#00D09E" style={{ marginRight: 4 }} />
+            <Text style={{ color: '#00D09E', fontWeight: 'bold', fontSize: 12 }}>Start</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => openFocusMode(ws)} style={styles.actionIcon}>
             <Ionicons name="pencil" size={18} color="#888" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => handleDeleteWorksession(ws.id)} style={styles.actionIcon}>
-            <Ionicons name="trash" size={18} color="#FF4C4C" />
-          </TouchableOpacity>
+          {(!isTemplate || isAdmin) && (
+            <TouchableOpacity onPress={() => handleDeleteWorksession(ws.id)} style={styles.actionIcon}>
+              <Ionicons name="trash" size={18} color="#FF4C4C" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -812,12 +923,38 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
         {!isEditing && (
           <View>
             {plan.plan_worksessions?.map((pw) => (
-              <View key={pw.id} style={{ marginBottom: 15, backgroundColor: '#1E1E24', padding: 12, borderRadius: 8 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text style={{ color: '#FFF', fontWeight: 'bold' }}>
-                    {pw.worksessions?.name}
-                    {plan.schedule_type === 'anchored' ? ` (${pw.day_name})` : ''}
-                  </Text>
+              <View key={pw.id} style={{ marginBottom: 10, backgroundColor: '#1E1E24', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#2E2E38' }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 15 }}>
+                      {pw.worksessions?.name}
+                      {plan.schedule_type === 'anchored' ? ` (${pw.day_name})` : ''}
+                    </Text>
+                    {pw.worksessions?.modality && (
+                      <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
+                        {pw.worksessions.modality}
+                      </Text>
+                    )}
+                    {getWorksessionDescription(pw.worksessions) && (
+                      <Text style={{ color: '#AAA', fontSize: 12, marginTop: 4, lineHeight: 16 }}>
+                        {getWorksessionDescription(pw.worksessions)}
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: '#00D09E',
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                      borderRadius: 14
+                    }}
+                    onPress={() => handleStartSession(plan, pw.worksessions)}
+                  >
+                    <Ionicons name="play" size={13} color="#111" style={{ marginRight: 3 }} />
+                    <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 12 }}>Start</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ))}
@@ -1076,7 +1213,10 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                   const catMatch = (ex.category || '').toLowerCase().includes(search);
                   const eqMatch = getExerciseEquipment(ex).toLowerCase().includes(search);
                   const mgMatch = getExerciseMuscleGroup(ex).toLowerCase().includes(search);
-                  const matchesSearch = nameMatch || catMatch || eqMatch || mgMatch;
+                  const instMatch = (getExerciseInstructions(ex) || '').toLowerCase().includes(search);
+                  const diffMatch = (getExerciseDifficulty(ex) || '').toLowerCase().includes(search);
+                  const mechMatch = (getExerciseMechanics(ex) || '').toLowerCase().includes(search);
+                  const matchesSearch = nameMatch || catMatch || eqMatch || mgMatch || instMatch || diffMatch || mechMatch;
 
                   if (!matchesSearch) return false;
                   if (exerciseFilterTag === 'All') return true;

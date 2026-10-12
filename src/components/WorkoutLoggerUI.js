@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, TextInput, StyleSheet, Alert, Keyboard, Modal } from 'react-native';
-import { useRouter } from 'expo-router';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, StyleSheet, Alert, Keyboard, Modal, ActivityIndicator } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase, TrainingContext, getDateString } from '../context/TrainingContext';
+import { getWorksessionDescription } from '../data/recoveryMetadata';
 
 export default function WorkoutLoggerUI() {
   const router = useRouter();
-  const { history, logWorkout, workspaces, activeSessionMetadata } = useContext(TrainingContext);
+  const { history, logWorkout, workspaces, activeSessionMetadata, session } = useContext(TrainingContext);
   const todayStr = getDateString ? getDateString() : new Date().toISOString().split('T')[0];
   const todayProfile = history[todayStr] || { foods: [], fastingCompletedHours: 0 };
   const moveProfile = todayProfile.move || { workouts: [], stepCount: 0 };
@@ -14,19 +15,15 @@ export default function WorkoutLoggerUI() {
   const [workoutDuration, setWorkoutDuration] = useState('');
   const [workoutIntensity, setWorkoutIntensity] = useState('Medium');
   
-  const [activeWorkoutSession, setActiveWorkoutSession] = useState(null);
   const [showWorksessionModal, setShowWorksessionModal] = useState(false);
+  const [selectedModalPlanId, setSelectedModalPlanId] = useState(null);
 
   const [availablePlans, setAvailablePlans] = useState([]);
-  const [selectedPlanId, setSelectedPlanId] = useState(null);
-  const [selectedWorksessionToStart, setSelectedWorksessionToStart] = useState(null);
-
-  useEffect(() => {
-    fetchPlans();
-  }, []);
+  const [loadingPlans, setLoadingPlans] = useState(true);
 
   const fetchPlans = async () => {
     try {
+      setLoadingPlans(true);
       const { data, error } = await supabase
         .from('training_plans')
         .select(`
@@ -53,12 +50,20 @@ export default function WorkoutLoggerUI() {
       }
     } catch (e) {
       console.log('Error fetching plans in WorkoutLoggerUI', e);
+    } finally {
+      setLoadingPlans(false);
     }
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchPlans();
+    }, [session?.user?.id, workspaces?.defaultPlanId])
+  );
+
   const handleLogWorkout = () => {
     const dur = parseInt(workoutDuration);
-    const plan = availablePlans.find(p => p.id === workspaces.defaultPlanId);
+    const plan = availablePlans.find(p => p.id === workspaces?.defaultPlanId);
     
     if (!dur || dur <= 0) {
       Alert.alert("Error", "Please enter a valid duration.");
@@ -92,9 +97,18 @@ export default function WorkoutLoggerUI() {
       return;
     }
     try {
-      const { data: userData } = await supabase.auth.getUser();
+      let uid = session?.user?.id;
+      if (!uid) {
+        const { data: userData } = await supabase.auth.getUser();
+        uid = userData?.user?.id;
+      }
+      if (!uid) {
+        Alert.alert('Error', 'User session not found. Please log in again.');
+        return;
+      }
+
       const { data, error } = await supabase.from('active_sessions').insert([{
-        user_id: userData.user.id,
+        user_id: uid,
         start_time: new Date().toISOString()
       }]).select().single();
 
@@ -108,11 +122,12 @@ export default function WorkoutLoggerUI() {
         }
       });
     } catch (e) {
+      console.error('Failed to start session', e);
       Alert.alert('Error', 'Failed to start session.');
     }
   };
 
-  const defaultPlan = availablePlans.find(p => p.id === workspaces.defaultPlanId);
+  const defaultPlan = availablePlans.find(p => p.id === workspaces?.defaultPlanId) || (availablePlans.length === 1 ? availablePlans[0] : null);
   const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
   const anchoredWsListForToday = defaultPlan?.schedule_type === 'anchored' 
     ? defaultPlan.plan_worksessions?.filter(pw => pw.day_name.startsWith(todayDayName))
@@ -193,103 +208,256 @@ export default function WorkoutLoggerUI() {
           </View>
         )}
 
-        {defaultPlan && (
-          <Text style={{ color: moveProfile.workouts.length > 0 ? '#FFB800' : '#00D09E', fontSize: 20, marginBottom: 5, fontWeight: 'bold', textAlign: 'center' }}>
-            {defaultPlan.name}
-          </Text>
-        )}
-        
-        <Text style={[styles.sectionLabel, { color: moveProfile.workouts.length > 0 ? '#FFB800' : '#00D09E', fontSize: 20, marginBottom: 15, fontWeight: 'bold', textAlign: 'center' }]}>
-          {defaultPlan ? nextWorksessionStr : 'Ready to train?'}
-        </Text>
-        
-        {!defaultPlan ? (
-          <Text style={{color: '#AAA', marginBottom: 15}}>Set a default plan in the Settings to quick-start sessions here.</Text>
+        {loadingPlans && !defaultPlan ? (
+          <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color="#00D09E" />
+            <Text style={{ color: '#888', marginTop: 10, fontSize: 14 }}>Loading workout plans...</Text>
+          </View>
         ) : (
           <>
-            {activeSessionMetadata ? (
-              <TouchableOpacity 
-                style={[styles.primaryButton, { 
-                  paddingVertical: 18, 
-                  borderRadius: 16, 
-                  backgroundColor: '#FFB800' 
-                }]} 
-                onPress={() => {
-                  router.push({
-                    pathname: '/active-workout',
-                    params: {
-                      sessionId: activeSessionMetadata.sessionId,
-                      plan: JSON.stringify(activeSessionMetadata.plan),
-                      worksession: JSON.stringify(activeSessionMetadata.worksession)
-                    }
-                  });
-                }}
-              >
-                <Text style={[styles.buttonText, { fontSize: 18 }]}>RESUME ACTIVE WORKOUT</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity 
-                style={[styles.primaryButton, { 
-                  paddingVertical: 18, 
-                  borderRadius: 16, 
-                  backgroundColor: moveProfile.workouts.length > 0 ? '#FFB800' : '#00D09E' 
-                }]} 
-                onPress={() => {
-                  if (defaultPlan.schedule_type === 'floating' || defaultPlan.schedule_type === 'flexible') {
-                    setShowWorksessionModal(true);
-                  } else {
-                    if (anchoredWsListForToday.length === 1) {
-                      startActiveSession(defaultPlan, anchoredWsListForToday[0].worksessions);
-                    } else {
+            {defaultPlan && (
+              <Text style={{ color: moveProfile.workouts.length > 0 ? '#FFB800' : '#00D09E', fontSize: 22, marginBottom: 6, fontWeight: 'bold', textAlign: 'center' }}>
+                {defaultPlan.name}
+              </Text>
+            )}
+            
+            <Text style={[styles.sectionLabel, { color: moveProfile.workouts.length > 0 ? '#FFB800' : '#FFF', fontSize: 16, marginBottom: 16, fontWeight: '600', textAlign: 'center' }]}>
+              {defaultPlan ? nextWorksessionStr : 'Ready to train?'}
+            </Text>
+            
+            {!defaultPlan ? (
+              <View style={{ alignItems: 'stretch' }}>
+                <Text style={{ color: '#AAA', marginBottom: 15, textAlign: 'center', fontSize: 14, lineHeight: 20 }}>
+                  {availablePlans.length > 0 
+                    ? "Choose a session from your plans below or set your default in Workout Plans."
+                    : "No default plan selected yet. You can set one in Workout Plans to quick-start sessions here."}
+                </Text>
+
+                {availablePlans.length > 0 && (
+                  <TouchableOpacity 
+                    style={[styles.primaryButton, { 
+                      paddingVertical: 16, 
+                      borderRadius: 14, 
+                      backgroundColor: '#00D09E',
+                      marginBottom: 10
+                    }]} 
+                    onPress={() => {
+                      setSelectedModalPlanId(availablePlans[0]?.id || null);
                       setShowWorksessionModal(true);
-                    }
-                  }
-                }}
-              >
-                <Text style={[styles.buttonText, { fontSize: 18 }]}>START WORKOUT</Text>
-              </TouchableOpacity>
+                    }}
+                  >
+                    <Text style={[styles.buttonText, { fontSize: 16 }]}>START A WORKOUT</Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity 
+                  style={{
+                    paddingVertical: 13,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: '#00D09E60',
+                    backgroundColor: '#00D09E15',
+                    alignItems: 'center'
+                  }}
+                  onPress={() => router.push('/plans')}
+                >
+                  <Text style={{ color: '#00D09E', fontWeight: 'bold', fontSize: 14 }}>
+                    OPEN WORKOUT PLANS
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                {activeSessionMetadata ? (
+                  <TouchableOpacity 
+                    style={[styles.primaryButton, { 
+                      paddingVertical: 18, 
+                      borderRadius: 16, 
+                      backgroundColor: '#FFB800' 
+                    }]} 
+                    onPress={() => {
+                      router.push({
+                        pathname: '/active-workout',
+                        params: {
+                          sessionId: activeSessionMetadata.sessionId,
+                          plan: JSON.stringify(activeSessionMetadata.plan),
+                          worksession: JSON.stringify(activeSessionMetadata.worksession)
+                        }
+                      });
+                    }}
+                  >
+                    <Text style={[styles.buttonText, { fontSize: 18 }]}>RESUME ACTIVE WORKOUT</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity 
+                      style={[styles.primaryButton, { 
+                        paddingVertical: 18, 
+                        borderRadius: 16, 
+                        backgroundColor: moveProfile.workouts.length > 0 ? '#FFB800' : '#00D09E',
+                        marginBottom: 10
+                      }]} 
+                      onPress={() => {
+                        if (defaultPlan.schedule_type === 'floating' || defaultPlan.schedule_type === 'flexible') {
+                          setSelectedModalPlanId(defaultPlan.id);
+                          setShowWorksessionModal(true);
+                        } else {
+                          if (anchoredWsListForToday.length === 1) {
+                            startActiveSession(defaultPlan, anchoredWsListForToday[0].worksessions);
+                          } else {
+                            setSelectedModalPlanId(defaultPlan.id);
+                            setShowWorksessionModal(true);
+                          }
+                        }
+                      }}
+                    >
+                      <Text style={[styles.buttonText, { fontSize: 18 }]}>START WORKOUT</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity 
+                      style={{
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: '#444',
+                        backgroundColor: '#1E1E24',
+                        alignItems: 'center'
+                      }}
+                      onPress={() => {
+                        setSelectedModalPlanId(defaultPlan.id);
+                        setShowWorksessionModal(true);
+                      }}
+                    >
+                      <Text style={{ color: '#AAA', fontSize: 14, fontWeight: '600' }}>
+                        Choose Another Session / Plan
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </>
             )}
           </>
         )}
       </View>
       
+      {/* SELECT WORKSESSION MODAL */}
       <Modal visible={showWorksessionModal} transparent={true} animationType="fade">
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' }}>
-          <View style={{ backgroundColor: '#1A1A1F', padding: 25, borderRadius: 20, width: '80%', alignItems: 'center', borderWidth: 1, borderColor: '#333' }}>
-            <Text style={{ color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 20 }}>Select Worksession</Text>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#1A1A1F', padding: 22, borderRadius: 20, width: '100%', maxWidth: 420, borderWidth: 1, borderColor: '#333' }}>
+            <Text style={{ color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>
+              Select Worksession
+            </Text>
             
-            <ScrollView style={{ width: '100%', maxHeight: 300 }}>
+            <ScrollView style={{ width: '100%', maxHeight: 360 }}>
               {(() => {
-                let listToRender = defaultPlan?.plan_worksessions || [];
-                // If anchored and there are multiple for today, show today's only. Or just show all if none for today
-                if (defaultPlan?.schedule_type === 'anchored' && anchoredWsListForToday.length > 1) {
-                  listToRender = anchoredWsListForToday;
-                }
-                return listToRender.map(pw => (
-                  <TouchableOpacity 
-                    key={pw.id} 
-                    style={{
-                      padding: 15, borderRadius: 12, marginBottom: 10,
-                      backgroundColor: '#2A2A31'
-                    }}
-                    onPress={() => {
-                      setShowWorksessionModal(false);
-                      startActiveSession(defaultPlan, pw.worksessions);
-                    }}
-                  >
-                    <Text style={{ color: '#FFF', fontWeight: 'bold', textAlign: 'center' }}>
-                      {pw.worksessions?.name} {defaultPlan.schedule_type === 'anchored' ? `(${pw.day_name})` : ''}
+                const planToUse = (selectedModalPlanId && availablePlans.find(p => p.id === selectedModalPlanId)) 
+                  || defaultPlan 
+                  || availablePlans[0];
+
+                if (!planToUse) {
+                  return (
+                    <Text style={{ color: '#888', textAlign: 'center', marginVertical: 25 }}>
+                      No workout plans found. Go to Workout Plans to create one.
                     </Text>
-                  </TouchableOpacity>
-                ));
+                  );
+                }
+
+                const worksessions = planToUse.plan_worksessions || [];
+
+                return (
+                  <View>
+                    {availablePlans.length > 1 && (
+                      <View style={{ marginBottom: 15 }}>
+                        <Text style={{ color: '#888', fontSize: 12, marginBottom: 8, textTransform: 'uppercase', fontWeight: 'bold' }}>
+                          Select Plan:
+                        </Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                          {availablePlans.map(p => {
+                            const isSelected = planToUse.id === p.id;
+                            return (
+                              <TouchableOpacity
+                                key={p.id}
+                                onPress={() => setSelectedModalPlanId(p.id)}
+                                style={{
+                                  paddingHorizontal: 14,
+                                  paddingVertical: 8,
+                                  borderRadius: 16,
+                                  backgroundColor: isSelected ? '#00D09E' : '#2A2A31',
+                                  marginRight: 8,
+                                  borderWidth: 1,
+                                  borderColor: isSelected ? '#00D09E' : '#444'
+                                }}
+                              >
+                                <Text style={{ color: isSelected ? '#111' : '#FFF', fontSize: 13, fontWeight: 'bold' }}>
+                                  {p.name}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {worksessions.length === 0 ? (
+                      <Text style={{ color: '#888', textAlign: 'center', marginVertical: 20 }}>
+                        No worksessions attached to {planToUse.name}.
+                      </Text>
+                    ) : (
+                      worksessions.map(pw => (
+                        <TouchableOpacity 
+                          key={pw.id} 
+                          style={{
+                            padding: 16, 
+                            borderRadius: 14, 
+                            marginBottom: 10,
+                            backgroundColor: '#2A2A31',
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            borderWidth: 1,
+                            borderColor: '#3A3A45'
+                          }}
+                          onPress={() => {
+                            setShowWorksessionModal(false);
+                            startActiveSession(planToUse, pw.worksessions);
+                          }}
+                        >
+                          <View style={{ flex: 1, marginRight: 10 }}>
+                            <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 16 }}>
+                              {pw.worksessions?.name || 'Workout Session'}
+                            </Text>
+                            {planToUse.schedule_type === 'anchored' && pw.day_name && (
+                              <Text style={{ color: '#00D09E', fontSize: 13, marginTop: 4, fontWeight: '600' }}>
+                                📅 {pw.day_name}
+                              </Text>
+                            )}
+                            {pw.worksessions?.modality && (
+                              <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
+                                Modality: {pw.worksessions.modality}
+                              </Text>
+                            )}
+                            {getWorksessionDescription(pw.worksessions) && (
+                              <Text style={{ color: '#AAA', fontSize: 12, marginTop: 4, lineHeight: 16 }}>
+                                {getWorksessionDescription(pw.worksessions)}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={{ backgroundColor: '#00D09E', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12 }}>
+                            <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 13 }}>START</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                );
               })()}
             </ScrollView>
             
             <TouchableOpacity 
-              style={[styles.primaryButton, { backgroundColor: '#444', marginTop: 20, width: '100%' }]} 
+              style={[styles.primaryButton, { backgroundColor: '#333', marginTop: 15, width: '100%', borderRadius: 12 }]} 
               onPress={() => setShowWorksessionModal(false)}
             >
-              <Text style={styles.buttonText}>Cancel</Text>
+              <Text style={[styles.buttonText, { color: '#FFF' }]}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>

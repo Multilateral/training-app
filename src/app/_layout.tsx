@@ -5,7 +5,7 @@ import { supabase } from '../context/TrainingContext';
 import { View, ActivityIndicator } from 'react-native';
 
 export default function Layout() {
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState<any>(null);
   const [isReady, setIsReady] = useState(false);
   const segments = useSegments();
 

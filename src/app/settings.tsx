@@ -44,6 +44,18 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferences</Text>
           <View style={styles.card}>
+            <TouchableOpacity style={[styles.row, styles.borderBottom]} onPress={() => router.push('/plans')}>
+              <View style={styles.rowTextWithIcon}>
+                <Ionicons name="barbell-outline" size={24} color="#00D09E" style={styles.icon} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Default Workout Plan</Text>
+                  <Text style={{ color: '#888', fontSize: 13, marginTop: 2 }}>
+                    Manage and set default training plan
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#666" />
+            </TouchableOpacity>
             <View style={[styles.row, styles.borderBottom]}>
               <View style={styles.rowTextWithIcon}>
                 <Ionicons name="notifications-outline" size={24} color="#00D09E" style={styles.icon} />
