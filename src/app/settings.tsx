@@ -1,20 +1,54 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Switch } from 'react-native';
 import { TrainingContext, supabase } from '../context/TrainingContext';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import WorkoutRemindersConfig from '../components/WorkoutRemindersConfig';
 
 export default function SettingsScreen() {
-  const { session } = useContext(TrainingContext);
-  const [notificationsEnabled, setNotificationsEnabled] = React.useState(false);
+  const { session, workspaces, updateWorkspaces } = useContext(TrainingContext);
+  const [defaultPlan, setDefaultPlan] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchDefaultPlan = async () => {
+      if (!workspaces?.defaultPlanId) return;
+      try {
+        const { data, error } = await supabase
+          .from('training_plans')
+          .select(`
+            id, name, schedule_type,
+            plan_worksessions (
+              id, day_name, order_index,
+              worksessions (id, name, modality)
+            )
+          `)
+          .eq('id', workspaces.defaultPlanId)
+          .single();
+        if (data && !error) {
+          setDefaultPlan(data);
+        }
+      } catch (err) {
+        console.log('Failed to fetch default plan in settings', err);
+      }
+    };
+
+    fetchDefaultPlan();
+  }, [workspaces?.defaultPlanId]);
 
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
-      // Normally Supabase auth state change listener in _layout.tsx will handle
-      // resetting the app state or we can explicitly redirect.
     } catch (error) {
       console.error("Error logging out:", error);
+    }
+  };
+
+  const handleUpdateReminders = (updatedReminders: any) => {
+    if (updateWorkspaces) {
+      updateWorkspaces({
+        ...workspaces,
+        reminders: updatedReminders
+      });
     }
   };
 
@@ -22,6 +56,7 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         
+        {/* Account Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.card}>
@@ -41,6 +76,17 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Training Reminders & Notifications Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Training Reminders</Text>
+          <WorkoutRemindersConfig
+            remindersData={workspaces?.reminders}
+            onUpdateReminders={handleUpdateReminders}
+            defaultPlan={defaultPlan}
+          />
+        </View>
+
+        {/* Preferences Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferences</Text>
           <View style={styles.card}>
@@ -50,24 +96,13 @@ export default function SettingsScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.label}>Default Workout Plan</Text>
                   <Text style={{ color: '#888', fontSize: 13, marginTop: 2 }}>
-                    Manage and set default training plan
+                    {defaultPlan?.name ? `Active: ${defaultPlan.name}` : 'Manage and set default training plan'}
                   </Text>
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#666" />
             </TouchableOpacity>
-            <View style={[styles.row, styles.borderBottom]}>
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="notifications-outline" size={24} color="#00D09E" style={styles.icon} />
-                <Text style={styles.label}>Push Notifications</Text>
-              </View>
-              <Switch
-                value={notificationsEnabled}
-                onValueChange={setNotificationsEnabled}
-                trackColor={{ false: '#333', true: '#00D09E' }}
-                thumbColor={notificationsEnabled ? '#fff' : '#888'}
-              />
-            </View>
+
             <View style={styles.row}>
               <View style={styles.rowTextWithIcon}>
                 <Ionicons name="moon-outline" size={24} color="#00D09E" style={styles.icon} />
@@ -83,6 +118,7 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* About Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>About</Text>
           <View style={styles.card}>
@@ -103,6 +139,7 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Logout */}
         {session && (
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={20} color="#FF453A" style={styles.logoutIcon} />

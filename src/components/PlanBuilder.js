@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ScrollView, 
-  TextInput, Alert, ActivityIndicator, Platform, UIManager, Modal, KeyboardAvoidingView
+  TextInput, Alert, ActivityIndicator, Platform, UIManager, Modal, KeyboardAvoidingView,
+  LayoutAnimation
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -18,15 +19,33 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const MODALITIES = ['Yoga', 'Plyometrics', 'Calisthenics', 'Cardio', 'Weightlifting'];
+const MODALITIES = ['Yoga', 'Plyometrics', 'Calisthenics', 'Cardio', 'Weightlifting', 'Kettlebell', 'Core'];
+
+export const CATEGORY_OPTIONS = [
+  'Kettlebell',
+  'Core',
+  'Recovery',
+  'Weightlifting',
+  'Calisthenics',
+  'Yoga',
+  'Cardio',
+  'Plyometrics',
+  'Back',
+  'Chest',
+  'Legs',
+  'Arms',
+  'Collective Sports'
+];
 
 export const EQUIPMENT_OPTIONS = [
+  'Kettlebell',
   'TRX',
   'Floor Mat',
   'Resistance Band',
   'Pull-up Bar',
   'Dumbbell / Barbell',
   'Bodyweight',
+  'Ab Wheel',
   'Cardio Equipment',
   'Dip Station',
   'Plyo Box',
@@ -35,11 +54,11 @@ export const EQUIPMENT_OPTIONS = [
 ];
 
 export const MUSCLE_OPTIONS = [
+  'Core',
   'Chest',
   'Back',
   'Legs',
   'Arms',
-  'Core',
   'Shoulders',
   'Full Body',
   'Cardio',
@@ -57,7 +76,9 @@ export const getExerciseEquipment = (exercise) => {
   const name = (exercise?.name || '').toLowerCase();
   const cat = (exercise?.category || '').toLowerCase();
   
+  if (name.includes('kettlebell') || cat.includes('kettlebell')) return 'Kettlebell';
   if (name.includes('trx')) return 'TRX';
+  if (name.includes('ab wheel')) return 'Ab Wheel';
   if (name.includes('pull-up') || name.includes('muscle-up')) return 'Pull-up Bar';
   if (name.includes('dip')) return 'Dip Station';
   if (name.includes('barbell') || name.includes('dumbbell') || name.includes('bench press') || name.includes('deadlift') || name.includes('overhead press') || name.includes('curl')) return 'Dumbbell / Barbell';
@@ -70,9 +91,14 @@ export const getExerciseEquipment = (exercise) => {
 };
 
 export const getExerciseMuscleGroup = (exercise) => {
-  if (exercise?.muscle_group) return exercise.muscle_group;
   const cat = exercise?.category || '';
   const name = (exercise?.name || '').toLowerCase();
+
+  if (cat === 'Core' || name.includes('plank') || name.includes('pike') || name.includes('climber') || name.includes('deadbug') || name.includes('crunch') || name.includes('twist') || name.includes('rollout') || name.includes('v-up') || name.includes('hollow body') || name.includes('body saw')) {
+    return 'Core';
+  }
+
+  if (exercise?.muscle_group) return exercise.muscle_group;
   
   if (['Chest', 'Back', 'Legs', 'Arms', 'Core', 'Shoulders', 'Full Body'].includes(cat)) {
     return cat;
@@ -80,10 +106,9 @@ export const getExerciseMuscleGroup = (exercise) => {
   
   if (name.includes('chest') || name.includes('bench press') || name.includes('push-up')) return 'Chest';
   if (name.includes('row') || name.includes('pull-up') || name.includes('deadlift') || name.includes('y-fly') || name.includes('t-fly') || name.includes('alligator')) return 'Back';
-  if (name.includes('squat') || name.includes('lunge') || name.includes('hamstring') || name.includes('box jump')) return 'Legs';
+  if (name.includes('squat') || name.includes('lunge') || name.includes('hamstring') || name.includes('box jump') || name.includes('swing') || name.includes('clean') || name.includes('snatch') || name.includes('rdl')) return 'Legs';
   if (name.includes('curl') || name.includes('tricep') || name.includes('dip') || name.includes('muscle-up')) return 'Arms';
-  if (name.includes('overhead press')) return 'Shoulders';
-  if (name.includes('plank') || name.includes('pike') || name.includes('climber') || name.includes('core')) return 'Core';
+  if (name.includes('overhead press') || name.includes('halo') || name.includes('push press')) return 'Shoulders';
   if (cat === 'Cardio' || name.includes('running') || name.includes('cycling') || name.includes('treadmill') || name.includes('rowing') || name.includes('jump rope')) return 'Cardio';
   if (cat === 'Yoga' || name.includes('dog') || name.includes('pose')) return 'Yoga';
   if (cat === 'Collective Sports') return 'Sports';
@@ -167,6 +192,16 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   const [editPlanSessions, setEditPlanSessions] = useState('3');
   const [editPlanDescription, setEditPlanDescription] = useState('');
 
+  // Plan card fold / unfold state (all folded by default, only one unfolded at a time)
+  const [expandedPlanId, setExpandedPlanId] = useState(null);
+
+  const togglePlanFold = (planId) => {
+    if (Platform.OS !== 'web' && UIManager.setLayoutAnimationEnabledExperimental) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
+    setExpandedPlanId(prev => (prev === planId ? null : planId));
+  };
+
   const [isAddWsModalVisible, setIsAddWsModalVisible] = useState(false);
   const [activePlanForWs, setActivePlanForWs] = useState(null);
   const [selectedDayForAnchored, setSelectedDayForAnchored] = useState('Monday');
@@ -189,9 +224,9 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   const [newExerciseEquipment, setNewExerciseEquipment] = useState('Bodyweight');
   const [isDefaultExercise, setIsDefaultExercise] = useState(false);
   const [globalExerciseSearchQuery, setGlobalExerciseSearchQuery] = useState('');
-  const [exerciseSortMode, setExerciseSortMode] = useState('muscle'); // 'muscle' | 'equipment' | 'alpha'
+  const [exerciseSortMode, setExerciseSortMode] = useState('category'); // 'category' | 'muscle' | 'equipment' | 'alpha'
   const [exerciseFilterTag, setExerciseFilterTag] = useState('All');
-  const [pickerSortMode, setPickerSortMode] = useState('muscle'); // for worksession modal
+  const [pickerSortMode, setPickerSortMode] = useState('category'); // for worksession modal
 
   useEffect(() => {
     fetchData();
@@ -222,10 +257,10 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
             plan_worksessions (
               id, day_name, order_index, worksession_id,
               worksessions (
-                id, name, modality,
+                id, name, modality, description,
                 worksession_exercises (
-                  id, target_sets, target_reps, tracking_type, target_time,
-                  exercises (id, name, category)
+                  id, target_sets, target_reps, tracking_type, target_time, notes,
+                  exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics)
                 )
               )
             )
@@ -233,13 +268,13 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
         supabase
           .from('worksessions')
           .select(`
-            id, name, modality, user_id,
+            id, name, modality, description, user_id,
             worksession_exercises (
-              id, target_sets, target_reps, tracking_type, target_time,
-              exercises (id, name, category)
+              id, target_sets, target_reps, tracking_type, target_time, notes,
+              exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics)
             )
           `)
-          .or(`user_id.eq.${userId},user_id.is.null,id.in.(b0000001-0000-4000-a000-000000000001,b0000001-0000-4000-a000-000000000002,b0000001-0000-4000-a000-000000000003,b0000001-0000-4000-a000-000000000004)`)
+          .or(`user_id.eq.${userId},user_id.is.null,id.in.(b0000001-0000-4000-a000-000000000001,b0000001-0000-4000-a000-000000000002,b0000001-0000-4000-a000-000000000003,b0000001-0000-4000-a000-000000000004,b0000001-0000-4000-a000-000000000005,b0000001-0000-4000-a000-000000000006)`)
           .order('created_at', { ascending: false })
       ]);
 
@@ -754,8 +789,13 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
           <View style={{ flex: 1, marginRight: 8 }}>
             <Text style={styles.planName}>{exercise.name}</Text>
             <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              {exercise.category && (
+                <View style={[styles.metadataBadge, { backgroundColor: '#1E2522' }]}>
+                  <Text style={[styles.metadataText, { color: '#34D399' }]}>🏷️ {exercise.category}</Text>
+                </View>
+              )}
               <View style={[styles.metadataBadge, { backgroundColor: '#252530' }]}>
-                <Text style={styles.metadataText}>💪 {mg}</Text>
+                <Text style={styles.metadataText}>💪 {exercise.muscle_group || mg}</Text>
               </View>
               <View style={[styles.metadataBadge, { backgroundColor: '#1C2833' }]}>
                 <Text style={[styles.metadataText, { color: '#60A5FA' }]}>⚙️ {eq}</Text>
@@ -881,10 +921,13 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
 
   const renderPlanCard = (plan) => {
     const isEditing = editingPlanId === plan.id;
+    const isExpanded = expandedPlanId === plan.id || isEditing;
+
     return (
       <View key={plan.id} style={styles.planCard}>
-        <View style={styles.planHeader}>
-          {isEditing ? (
+        {/* Plan Header (Click to fold / unfold when not editing) */}
+        {isEditing ? (
+          <View style={styles.planHeader}>
             <View style={{ flex: 1, gap: 10 }}>
               <View style={styles.editRow}>
                 <Text style={styles.editLabel}>Name</Text>
@@ -907,60 +950,174 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                 <TextInput style={[styles.input, styles.editInput, { height: 60 }]} value={editPlanDescription} onChangeText={setEditPlanDescription} multiline placeholderTextColor="#666" />
               </View>
             </View>
-          ) : (
-            <View style={{ flex: 1 }}>
-              <Text style={styles.planName}>{plan.name} <Text style={{fontSize: 12, color: '#888'}}>({plan.schedule_type})</Text></Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 4 }}>
-                {plan.goal_category && <View style={styles.metadataBadge}><Text style={styles.metadataText}>{plan.goal_category}</Text></View>}
-                {plan.intensity && <View style={styles.metadataBadge}><Text style={styles.metadataText}>{plan.intensity}</Text></View>}
-                {plan.sessions_per_week && <View style={styles.metadataBadge}><Text style={styles.metadataText}>{plan.sessions_per_week} days/week</Text></View>}
-              </View>
-              {plan.description ? <Text style={{ color: '#AAA', fontSize: 13, marginTop: 4 }}>{plan.description}</Text> : null}
-            </View>
-          )}
-        </View>
-
-        {!isEditing && (
-          <View>
-            {plan.plan_worksessions?.map((pw) => (
-              <View key={pw.id} style={{ marginBottom: 10, backgroundColor: '#1E1E24', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#2E2E38' }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 15 }}>
-                      {pw.worksessions?.name}
-                      {plan.schedule_type === 'anchored' ? ` (${pw.day_name})` : ''}
+          </View>
+        ) : (
+          <TouchableOpacity 
+            activeOpacity={0.7} 
+            onPress={() => togglePlanFold(plan.id)}
+            style={{ width: '100%' }}
+          >
+            <View style={[styles.planHeader, { marginBottom: 0, alignItems: 'flex-start' }]}>
+              <View style={{ flex: 1, marginRight: 10 }}>
+                {/* 1. Name of the plan */}
+                <Text style={styles.planName}>{plan.name}</Text>
+                
+                {/* 2. Type & How many days a week */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, marginBottom: 4, alignItems: 'center' }}>
+                  <View style={[styles.metadataBadge, { backgroundColor: '#1C2833' }]}>
+                    <Text style={[styles.metadataText, { color: '#60A5FA' }]}>
+                      📅 {plan.schedule_type ? plan.schedule_type.charAt(0).toUpperCase() + plan.schedule_type.slice(1) : 'Schedule'}
                     </Text>
-                    {pw.worksessions?.modality && (
-                      <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
-                        {pw.worksessions.modality}
-                      </Text>
-                    )}
-                    {getWorksessionDescription(pw.worksessions) && (
-                      <Text style={{ color: '#AAA', fontSize: 12, marginTop: 4, lineHeight: 16 }}>
-                        {getWorksessionDescription(pw.worksessions)}
-                      </Text>
-                    )}
                   </View>
-                  <TouchableOpacity
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      backgroundColor: '#00D09E',
-                      paddingHorizontal: 12,
-                      paddingVertical: 6,
-                      borderRadius: 14
-                    }}
-                    onPress={() => handleStartSession(plan, pw.worksessions)}
-                  >
-                    <Ionicons name="play" size={13} color="#111" style={{ marginRight: 3 }} />
-                    <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 12 }}>Start</Text>
-                  </TouchableOpacity>
+                  {plan.sessions_per_week ? (
+                    <View style={styles.metadataBadge}>
+                      <Text style={styles.metadataText}>⏱️ {plan.sessions_per_week} days/week</Text>
+                    </View>
+                  ) : null}
+                  {isExpanded && plan.goal_category ? (
+                    <View style={[styles.metadataBadge, { backgroundColor: '#252530' }]}>
+                      <Text style={styles.metadataText}>{plan.goal_category}</Text>
+                    </View>
+                  ) : null}
+                  {isExpanded && plan.intensity ? (
+                    <View style={[styles.metadataBadge, { backgroundColor: '#2A1F3D' }]}>
+                      <Text style={[styles.metadataText, { color: '#C084FC' }]}>{plan.intensity}</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* 3. Description */}
+                {plan.description ? (
+                  <Text style={{ color: '#AAA', fontSize: 13, marginTop: 6, lineHeight: 18 }}>
+                    {plan.description}
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* Fold / Unfold Chevron & Status Indicator */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                {defaultPlanId === plan.id && (
+                  <View style={[styles.metadataBadge, { backgroundColor: '#00D09E20', paddingHorizontal: 7, paddingVertical: 3 }]}>
+                    <Text style={[styles.metadataText, { color: '#00D09E', fontSize: 10 }]}>★ Default</Text>
+                  </View>
+                )}
+                <View style={{
+                  backgroundColor: '#1E1E24',
+                  borderRadius: 16,
+                  width: 30,
+                  height: 30,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 1,
+                  borderColor: '#3A3A45'
+                }}>
+                  <Ionicons 
+                    name={isExpanded ? "chevron-up" : "chevron-down"} 
+                    size={16} 
+                    color="#00D09E" 
+                  />
                 </View>
               </View>
-            ))}
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* UNFOLDED VIEW: WORKSESSIONS & ACTIONS */}
+        {!isEditing && isExpanded && (
+          <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: '#3A3A45', paddingTop: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <Text style={{ color: '#888', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Attached Worksessions ({plan.plan_worksessions?.length || 0})
+              </Text>
+            </View>
+
+            {plan.plan_worksessions && plan.plan_worksessions.length > 0 ? (
+              plan.plan_worksessions.map((pw) => (
+                <View key={pw.id} style={{ marginBottom: 10, backgroundColor: '#1E1E24', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#2E2E38' }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 15 }}>
+                        {pw.worksessions?.name}
+                        {plan.schedule_type === 'anchored' ? ` (${pw.day_name})` : ''}
+                      </Text>
+                      {pw.worksessions?.modality && (
+                        <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
+                          {pw.worksessions.modality}
+                        </Text>
+                      )}
+                      {getWorksessionDescription(pw.worksessions) && (
+                        <Text style={{ color: '#AAA', fontSize: 12, marginTop: 4, lineHeight: 16 }}>
+                          {getWorksessionDescription(pw.worksessions)}
+                        </Text>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: '#00D09E',
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 14
+                      }}
+                      onPress={() => handleStartSession(plan, pw.worksessions)}
+                    >
+                      <Ionicons name="play" size={13} color="#111" style={{ marginRight: 3 }} />
+                      <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 12 }}>Start</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={{ paddingVertical: 10, alignItems: 'center' }}>
+                <Text style={{ color: '#666', fontSize: 13 }}>No worksessions attached to this plan yet.</Text>
+              </View>
+            )}
+
+            {/* Plan Card Actions */}
+            <View style={styles.cardActions}>
+              {defaultPlanId === plan.id ? (
+                <View style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00D09E20', paddingHorizontal: 10, borderRadius: 20 }]}>
+                  <Ionicons name="checkmark-circle" size={16} color="#00D09E" style={{ marginRight: 4 }} />
+                  <Text style={{ color: '#00D09E', fontWeight: 'bold', fontSize: 12 }}>Default Plan</Text>
+                </View>
+              ) : (
+                <TouchableOpacity onPress={() => onSetDefaultPlan && onSetDefaultPlan(plan.id)} style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center' }]}>
+                  <Ionicons name="star-outline" size={16} color="#888" style={{ marginRight: 4 }} />
+                  <Text style={{ color: '#888', fontSize: 12 }}>Set Default</Text>
+                </TouchableOpacity>
+              )}
+              
+              {plan.is_standard_template && (
+                <TouchableOpacity onPress={() => handleCopyPlan(plan)} style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center' }]}>
+                  <Ionicons name="copy-outline" size={16} color="#00D09E" style={{ marginRight: 4 }} />
+                  <Text style={{ color: '#00D09E', fontSize: 12 }}>Copy to Custom</Text>
+                </TouchableOpacity>
+              )}
+              
+              {!plan.is_standard_template && (
+                <>
+                  <TouchableOpacity onPress={() => { 
+                    setEditingPlanId(plan.id); 
+                    setExpandedPlanId(plan.id);
+                    setEditPlanName(plan.name); 
+                    setEditPlanGoal(plan.goal_category || '');
+                    setEditPlanIntensity(plan.intensity || '');
+                    setEditPlanSessions(plan.sessions_per_week?.toString() || '');
+                    setEditPlanDescription(plan.description || '');
+                  }} style={styles.actionIcon}>
+                    <Ionicons name="pencil" size={18} color="#888" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleDeletePlan(plan.id)} style={styles.actionIcon}>
+                    <Ionicons name="trash" size={18} color="#FF4C4C" />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
           </View>
         )}
 
+        {/* EDITING STATE */}
         {isEditing && (
           <View style={styles.editExercisesContainer}>
             {plan.plan_worksessions?.map((pw, index) => (
@@ -1002,55 +1159,21 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               <Ionicons name="add-circle-outline" size={18} color="#FFF" />
               <Text style={styles.addExerciseBtnText}>Attach Worksession</Text>
             </TouchableOpacity>
-          </View>
-        )}
 
-        {!isEditing && (
-          <View style={styles.cardActions}>
-            {defaultPlanId === plan.id ? (
-              <View style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00D09E20', paddingHorizontal: 10, borderRadius: 20 }]}>
-                <Ionicons name="checkmark-circle" size={16} color="#00D09E" style={{ marginRight: 4 }} />
-                <Text style={{ color: '#00D09E', fontWeight: 'bold', fontSize: 12 }}>Default Plan</Text>
-              </View>
-            ) : (
-              <TouchableOpacity onPress={() => onSetDefaultPlan && onSetDefaultPlan(plan.id)} style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center' }]}>
-                <Ionicons name="star-outline" size={16} color="#888" style={{ marginRight: 4 }} />
-                <Text style={{ color: '#888', fontSize: 12 }}>Set Default</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 15, gap: 12 }}>
+              <TouchableOpacity 
+                style={[styles.startButton, { width: 120, backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]} 
+                onPress={() => setEditingPlanId(null)}
+              >
+                <Text style={[styles.startButtonText, { color: '#AAA' }]}>Cancel</Text>
               </TouchableOpacity>
-            )}
-            
-            {plan.is_standard_template && (
-              <TouchableOpacity onPress={() => handleCopyPlan(plan)} style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center' }]}>
-                <Ionicons name="copy-outline" size={16} color="#00D09E" style={{ marginRight: 4 }} />
-                <Text style={{ color: '#00D09E', fontSize: 12 }}>Copy to Custom</Text>
+              <TouchableOpacity 
+                style={[styles.startButton, { width: 120, justifyContent: 'center', alignItems: 'center' }]} 
+                onPress={() => saveEditPlan(plan.id)}
+              >
+                <Text style={styles.startButtonText}>Save Plan</Text>
               </TouchableOpacity>
-            )}
-            
-            {!plan.is_standard_template && (
-              <>
-                <TouchableOpacity onPress={() => { 
-                  setEditingPlanId(plan.id); 
-                  setEditPlanName(plan.name); 
-                  setEditPlanGoal(plan.goal_category || '');
-                  setEditPlanIntensity(plan.intensity || '');
-                  setEditPlanSessions(plan.sessions_per_week?.toString() || '');
-                  setEditPlanDescription(plan.description || '');
-                }} style={styles.actionIcon}>
-                  <Ionicons name="pencil" size={18} color="#888" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDeletePlan(plan.id)} style={styles.actionIcon}>
-                  <Ionicons name="trash" size={18} color="#FF4C4C" />
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        )}
-
-        {isEditing && (
-          <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 15 }}>
-            <TouchableOpacity style={[styles.startButton, { width: 150, justifyContent: 'center', alignItems: 'center' }]} onPress={() => saveEditPlan(plan.id)}>
-              <Text style={styles.startButtonText}>Save Plan</Text>
-            </TouchableOpacity>
+            </View>
           </View>
         )}
       </View>
@@ -1101,6 +1224,14 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                     <Text style={styles.sortBarLabel}>GROUP BY:</Text>
                     <View style={styles.sortSegmentGroup}>
                       <TouchableOpacity 
+                        style={[styles.sortSegment, exerciseSortMode === 'category' && styles.sortSegmentActive]} 
+                        onPress={() => { setExerciseSortMode('category'); setExerciseFilterTag('All'); }}
+                      >
+                        <Text style={[styles.sortSegmentText, exerciseSortMode === 'category' && styles.sortSegmentTextActive]}>
+                          Category
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
                         style={[styles.sortSegment, exerciseSortMode === 'muscle' && styles.sortSegmentActive]} 
                         onPress={() => { setExerciseSortMode('muscle'); setExerciseFilterTag('All'); }}
                       >
@@ -1130,7 +1261,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                   {/* HORIZONTAL FILTER PILLS */}
                   {exerciseSortMode !== 'alpha' && (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                      {['All', ...(exerciseSortMode === 'equipment' ? EQUIPMENT_OPTIONS : MUSCLE_OPTIONS)].map(tag => (
+                      {['All', ...(exerciseSortMode === 'category' ? CATEGORY_OPTIONS : exerciseSortMode === 'equipment' ? EQUIPMENT_OPTIONS : MUSCLE_OPTIONS)].map(tag => (
                         <TouchableOpacity
                           key={tag}
                           style={[styles.filterPill, exerciseFilterTag === tag && styles.filterPillActive]}
@@ -1221,6 +1352,9 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                   if (!matchesSearch) return false;
                   if (exerciseFilterTag === 'All') return true;
 
+                  if (exerciseSortMode === 'category') {
+                    return (ex.category || 'Other') === exerciseFilterTag;
+                  }
                   if (exerciseSortMode === 'equipment') {
                     return getExerciseEquipment(ex) === exerciseFilterTag;
                   }
@@ -1250,9 +1384,11 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                   );
                 }
 
-                // Group by equipment or muscle
+                // Group by category, equipment, or muscle
                 const grouped = filtered.reduce((acc, ex) => {
-                  const groupKey = exerciseSortMode === 'equipment' 
+                  const groupKey = exerciseSortMode === 'category'
+                    ? (ex.category || 'Other')
+                    : exerciseSortMode === 'equipment' 
                     ? getExerciseEquipment(ex) 
                     : getExerciseMuscleGroup(ex);
                   if (!acc[groupKey]) acc[groupKey] = [];
@@ -1475,10 +1611,16 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               onChangeText={setExerciseSearchQuery}
             />
 
-            {/* Toggle Sort: Muscle vs Equipment in Worksession Modal */}
+            {/* Toggle Sort: Category vs Muscle vs Equipment in Worksession Modal */}
             <View style={{ flexDirection: 'row', paddingHorizontal: 20, alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <Text style={{ color: '#888', fontSize: 12, fontWeight: 'bold' }}>FILTER BY:</Text>
               <View style={{ flexDirection: 'row', backgroundColor: '#1E1E24', borderRadius: 8, padding: 2, borderWidth: 1, borderColor: '#3A3A45' }}>
+                <TouchableOpacity 
+                  style={[styles.smallToggle, pickerSortMode === 'category' && styles.smallToggleActive]}
+                  onPress={() => { setPickerSortMode('category'); setSelectedExerciseFilter('All'); }}
+                >
+                  <Text style={[styles.smallToggleText, pickerSortMode === 'category' && styles.smallToggleTextActive]}>Category</Text>
+                </TouchableOpacity>
                 <TouchableOpacity 
                   style={[styles.smallToggle, pickerSortMode === 'muscle' && styles.smallToggleActive]}
                   onPress={() => { setPickerSortMode('muscle'); setSelectedExerciseFilter('All'); }}
@@ -1496,7 +1638,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
             
             <View style={styles.filterScrollContainer}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {['All', ...(pickerSortMode === 'equipment' ? EQUIPMENT_OPTIONS : MUSCLE_OPTIONS)].map(cat => (
+                {['All', ...(pickerSortMode === 'category' ? CATEGORY_OPTIONS : pickerSortMode === 'equipment' ? EQUIPMENT_OPTIONS : MUSCLE_OPTIONS)].map(cat => (
                   <TouchableOpacity key={cat} style={[styles.filterPill, selectedExerciseFilter === cat && styles.filterPillActive]} onPress={() => setSelectedExerciseFilter(cat)}>
                     <Text style={[styles.filterText, selectedExerciseFilter === cat && styles.filterTextActive]}>{cat}</Text>
                   </TouchableOpacity>
@@ -1512,6 +1654,9 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               {exercisesList
                 .filter(e => {
                   if (selectedExerciseFilter === 'All') return true;
+                  if (pickerSortMode === 'category') {
+                    return (e.category || 'Other') === selectedExerciseFilter;
+                  }
                   if (pickerSortMode === 'equipment') {
                     return getExerciseEquipment(e) === selectedExerciseFilter;
                   }

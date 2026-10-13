@@ -1,45 +1,117 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, TextInput, StyleSheet, Alert, Keyboard, Modal, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useContext, useCallback, useMemo } from 'react';
+import { 
+  View, Text, ScrollView, StyleSheet, ActivityIndicator, Alert, SafeAreaView, Platform 
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase, TrainingContext, getDateString } from '../context/TrainingContext';
-import { getWorksessionDescription } from '../data/recoveryMetadata';
+import { getWorksessionDescription, RECOVERY_WORKSESSIONS_METADATA } from '../data/recoveryMetadata';
+import { 
+  getCurrentWeekDays, 
+  computeWeeklyMetrics, 
+  DEFAULT_GOALS, 
+  triggerHaptic 
+} from '../utils/dashboardUtils';
+
+// Dashboard Interactive Components
+import WeeklyMomentumStrip from './dashboard/WeeklyMomentumStrip';
+import ActiveGoalsTracker from './dashboard/ActiveGoalsTracker';
+import RecoveryBodyMap from './dashboard/RecoveryBodyMap';
+import ReadyStateHeroCard from './dashboard/ReadyStateHeroCard';
+import DockedQuickLogBar from './dashboard/DockedQuickLogBar';
+import DaySummaryModal from './dashboard/DaySummaryModal';
+import GoalEditorModal from './dashboard/GoalEditorModal';
+import SessionSwitcherModal from './dashboard/SessionSwitcherModal';
+import MicroLogModal from './dashboard/MicroLogModal';
 
 export default function WorkoutLoggerUI() {
   const router = useRouter();
-  const { history, logWorkout, workspaces, activeSessionMetadata, session } = useContext(TrainingContext);
+  const { 
+    history, 
+    logWorkout, 
+    workspaces, 
+    updateWorkspaces, 
+    activeSessionMetadata, 
+    session 
+  } = useContext(TrainingContext);
+
   const todayStr = getDateString ? getDateString() : new Date().toISOString().split('T')[0];
   const todayProfile = history[todayStr] || { foods: [], fastingCompletedHours: 0 };
   const moveProfile = todayProfile.move || { workouts: [], stepCount: 0 };
 
-  const [manualWorkoutName, setManualWorkoutName] = useState('');
-  const [workoutDuration, setWorkoutDuration] = useState('');
-  const [workoutIntensity, setWorkoutIntensity] = useState('Medium');
-  
-  const [showWorksessionModal, setShowWorksessionModal] = useState(false);
-  const [selectedModalPlanId, setSelectedModalPlanId] = useState(null);
-
+  // Data fetching state
   const [availablePlans, setAvailablePlans] = useState([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
 
+  // Swapped Hero session if user chooses another session for today
+  const [swappedSession, setSwappedSession] = useState(null);
+
+  // Body map readiness state (persisted in workspaces if available)
+  const [readinessState, setReadinessState] = useState(workspaces?.readiness || {});
+
+  // Modals state
+  const [daySummaryModal, setDaySummaryModal] = useState({
+    visible: false,
+    day: null,
+    workouts: [],
+    hasPlannedSession: false
+  });
+  const [isGoalEditorVisible, setIsGoalEditorVisible] = useState(false);
+  const [isSessionSwitcherVisible, setIsSessionSwitcherVisible] = useState(false);
+  const [microLogModal, setMicroLogModal] = useState({
+    visible: false,
+    mode: 'quick_set' // 'quick_set', 'mobility', 'custom'
+  });
+
+  // Calculate current week days (Monday - Sunday)
+  const weekDays = useMemo(() => getCurrentWeekDays(), []);
+
+  // Compute metrics: weekly sessions completed, active minutes, recovery sessions, streaks
+  const weeklyMetrics = useMemo(() => {
+    return computeWeeklyMetrics(history, weekDays);
+  }, [history, weekDays]);
+
+  // Compute Active Goals with real-time weekly progress
+  const activeGoals = useMemo(() => {
+    const storedGoals = workspaces?.goals || DEFAULT_GOALS;
+    return storedGoals.map(goal => {
+      let current = 0;
+      if (goal.type === 'weekly_frequency') {
+        current = weeklyMetrics.completedThisWeekCount;
+      } else if (goal.type === 'recovery_target') {
+        current = weeklyMetrics.recoverySessionsThisWeek;
+      } else if (goal.type === 'volume') {
+        current = weeklyMetrics.totalMinutesThisWeek;
+      } else {
+        current = goal.current_value || 0;
+      }
+      return {
+        ...goal,
+        current_value: current
+      };
+    });
+  }, [workspaces?.goals, weeklyMetrics]);
+
+  // Fetch plans from database
   const fetchPlans = async () => {
     try {
       setLoadingPlans(true);
       const { data, error } = await supabase
         .from('training_plans')
         .select(`
-          id, name, schedule_type,
+          id, name, schedule_type, is_standard_template,
           plan_worksessions (
             id, day_name, order_index, worksession_id,
             worksessions (
-              id, name, modality,
+              id, name, modality, description,
               worksession_exercises (
-                id, target_sets, target_reps,
-                exercises (id, name, category)
+                id, target_sets, target_reps, tracking_type, target_time, notes,
+                exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics)
               )
             )
           )
         `)
         .order('is_standard_template', { ascending: false });
+
       if (data) {
         data.forEach(p => {
           if (p.plan_worksessions) {
@@ -61,41 +133,80 @@ export default function WorkoutLoggerUI() {
     }, [session?.user?.id, workspaces?.defaultPlanId])
   );
 
-  const handleLogWorkout = () => {
-    const dur = parseInt(workoutDuration);
-    const plan = availablePlans.find(p => p.id === workspaces?.defaultPlanId);
-    
-    if (!dur || dur <= 0) {
-      Alert.alert("Error", "Please enter a valid duration.");
-      return;
-    }
-    
-    let logName = manualWorkoutName.trim();
-    
-    if (!logName) {
-      if (!plan) {
-        Alert.alert("Error", "Please enter a workout name or set a default plan.");
-        return;
-      }
-      logName = plan?.name || 'Workout';
-      if (plan?.schedule_type === 'anchored') {
-        const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-        const ws = plan.plan_worksessions?.find(pw => pw.day_name === todayDayName)?.worksessions;
-        if (ws) logName = ws.name;
-      }
-    }
-    
-    logWorkout(logName, dur, workoutIntensity, plan?.id);
-    setWorkoutDuration('');
-    setManualWorkoutName('');
-    Keyboard.dismiss();
-  };
+  // Determine Default Plan
+  const defaultPlan = useMemo(() => {
+    return availablePlans.find(p => p.id === workspaces?.defaultPlanId) ||
+      (availablePlans.length > 0 ? availablePlans[0] : null);
+  }, [availablePlans, workspaces?.defaultPlanId]);
 
+  // Determine Scheduled Routine for Today's Hero Card
+  const scheduledRoutine = useMemo(() => {
+    if (swappedSession) return swappedSession;
+
+    const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+
+    if (defaultPlan) {
+      if (defaultPlan.schedule_type === 'anchored') {
+        const anchoredMatch = defaultPlan.plan_worksessions?.find(
+          pw => pw.day_name && pw.day_name.startsWith(todayDayName)
+        );
+        if (anchoredMatch && anchoredMatch.worksessions) {
+          const ws = anchoredMatch.worksessions;
+          return {
+            plan: defaultPlan,
+            worksession: ws,
+            name: ws.name,
+            description: getWorksessionDescription(ws) || ws.description,
+            durationEstimate: '30 min',
+            targetAreas: [ws.modality || 'Strength', 'Anchored']
+          };
+        }
+      }
+
+      // Floating or fallback to first worksession in plan
+      const firstPw = defaultPlan.plan_worksessions?.[0];
+      if (firstPw && firstPw.worksessions) {
+        const ws = firstPw.worksessions;
+        return {
+          plan: defaultPlan,
+          worksession: ws,
+          name: ws.name,
+          description: getWorksessionDescription(ws) || ws.description,
+          durationEstimate: '25-30 min',
+          targetAreas: [ws.modality || 'Full Body', 'Floating']
+        };
+      }
+    }
+
+    // Default pre-seeded Fallback Routine: Worksession F (360° Core & Anti-Rotation)
+    return {
+      plan: defaultPlan,
+      worksession: null,
+      name: 'Worksession F: 360° Core & Anti-Rotation',
+      description: 'Delivers comprehensive midsection conditioning across sagittal, frontal, and transverse planes.',
+      durationEstimate: '25 min',
+      targetAreas: ['Core', 'TRX', 'Anti-Rotation']
+    };
+  }, [swappedSession, defaultPlan]);
+
+  // Start Active Workout flow
   const startActiveSession = async (plan, worksession) => {
-    if (!worksession) {
-      Alert.alert('Error', 'No worksession selected.');
+    let wsToStart = worksession;
+    let planToStart = plan || defaultPlan;
+
+    // If worksession is null, attempt to find a default worksession from available plans
+    if (!wsToStart) {
+      if (availablePlans.length > 0 && availablePlans[0].plan_worksessions?.length > 0) {
+        planToStart = availablePlans[0];
+        wsToStart = availablePlans[0].plan_worksessions[0].worksessions;
+      }
+    }
+
+    if (!wsToStart) {
+      Alert.alert('Notice', 'No worksession attached. You can create or choose one in Workout Plans.');
       return;
     }
+
     try {
       let uid = session?.user?.id;
       if (!uid) {
@@ -113,407 +224,317 @@ export default function WorkoutLoggerUI() {
       }]).select().single();
 
       if (error) throw error;
+
       router.push({
         pathname: '/active-workout',
         params: {
           sessionId: data.id,
-          plan: JSON.stringify(plan),
-          worksession: JSON.stringify(worksession)
+          plan: JSON.stringify(planToStart || { name: 'Quick Workout' }),
+          worksession: JSON.stringify(wsToStart)
         }
       });
     } catch (e) {
       console.error('Failed to start session', e);
-      Alert.alert('Error', 'Failed to start session.');
+      Alert.alert('Error', 'Failed to start workout session.');
     }
   };
 
-  const defaultPlan = availablePlans.find(p => p.id === workspaces?.defaultPlanId) || (availablePlans.length === 1 ? availablePlans[0] : null);
-  const todayDayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-  const anchoredWsListForToday = defaultPlan?.schedule_type === 'anchored' 
-    ? defaultPlan.plan_worksessions?.filter(pw => pw.day_name.startsWith(todayDayName))
-    : [];
-
-  let nextWorksessionStr = defaultPlan?.name || "Workout";
-  if (defaultPlan) {
-    if (defaultPlan.schedule_type === 'floating' || defaultPlan.schedule_type === 'flexible') {
-      if (moveProfile.workouts.length > 0) {
-        nextWorksessionStr = "Awesome work today! 🎉";
-      } else {
-        const sortedDates = Object.keys(history).sort((a,b) => b.localeCompare(a));
-        let lastWorkoutDate = null;
-        for (const d of sortedDates) {
-          if (history[d]?.move?.workouts?.length > 0) {
-            lastWorkoutDate = d;
-            break;
-          }
-        }
-        
-        if (lastWorkoutDate && lastWorkoutDate !== todayStr) {
-          const todayDate = new Date(todayStr);
-          const lastDate = new Date(lastWorkoutDate);
-          const diffTime = Math.abs(todayDate - lastDate);
-          const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-          
-          if (diffDays === 1) {
-            nextWorksessionStr = "You trained yesterday. Keep the momentum going!";
-          } else {
-            nextWorksessionStr = `It's been ${diffDays} days since your last training. Let's get moving!`;
-          }
-        } else {
-          nextWorksessionStr = "Ready to start your fitness journey? Let's go!";
-        }
+  // Resume ongoing session
+  const resumeActiveSession = () => {
+    if (!activeSessionMetadata) return;
+    router.push({
+      pathname: '/active-workout',
+      params: {
+        sessionId: activeSessionMetadata.sessionId,
+        plan: JSON.stringify(activeSessionMetadata.plan),
+        worksession: JSON.stringify(activeSessionMetadata.worksession)
       }
-    } else {
-      const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const today = new Date();
-      let nextWsList = [];
-      let nextWsDayName = null;
-      for (let i = 0; i < 7; i++) {
-        const checkDate = new Date(today);
-        checkDate.setDate(today.getDate() + i);
-        const dayName = daysOfWeek[checkDate.getDay()];
-        const wsList = defaultPlan.plan_worksessions?.filter(pw => pw.day_name.startsWith(dayName));
-        if (wsList && wsList.length > 0) {
-          nextWsList = wsList.map(pw => pw.worksessions);
-          nextWsDayName = i === 0 ? 'Today' : dayName;
+    });
+  };
+
+  // Body Map Readiness Toggle
+  const handleToggleReadinessArea = (areaId, nextState) => {
+    const updated = { ...readinessState, [areaId]: nextState };
+    setReadinessState(updated);
+    if (updateWorkspaces) {
+      updateWorkspaces({
+        ...workspaces,
+        readiness: updated
+      });
+    }
+  };
+
+  // Start Recovery / Prehab Protocol from Body Map Prompt
+  const handleStartRecoveryPrep = async (area) => {
+    triggerHaptic('medium');
+    const targetWsId = area.recoveryWorksessionId;
+
+    // Try finding the pre-built worksession in availablePlans
+    let foundWs = null;
+    let foundPlan = null;
+
+    for (const p of availablePlans) {
+      for (const pw of p.plan_worksessions || []) {
+        if (pw.worksession_id === targetWsId || pw.worksessions?.id === targetWsId) {
+          foundWs = pw.worksessions;
+          foundPlan = p;
           break;
         }
       }
-      if (nextWsList.length > 0) {
-        const sessionNames = nextWsList.map(ws => ws.name).join(' & ');
-        nextWorksessionStr = moveProfile.workouts.length > 0 ? `Next up: ${nextWsDayName} - ${sessionNames}` : `Next Session: ${nextWsDayName} - ${sessionNames}`;
-      } else {
-        nextWorksessionStr = "No upcoming sessions";
+      if (foundWs) break;
+    }
+
+    if (foundWs) {
+      startActiveSession(foundPlan, foundWs);
+    } else {
+      // Query worksession from Supabase directly
+      try {
+        const { data: wsData, error } = await supabase
+          .from('worksessions')
+          .select(`
+            id, name, modality, description,
+            worksession_exercises (
+              id, target_sets, target_reps, tracking_type, target_time, notes,
+              exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics)
+            )
+          `)
+          .eq('id', targetWsId)
+          .single();
+
+        if (wsData) {
+          startActiveSession({ name: 'Recovery & Prehab' }, wsData);
+        } else {
+          // Fallback: log a quick 5-min prep
+          logWorkout(`Prehab Prep: ${area.recoverySessionName}`, 5, 'Low');
+          Alert.alert('Prehab Logged', `5-minute ${area.label} prep was recorded to today's log.`);
+        }
+      } catch (err) {
+        logWorkout(`Prehab Prep: ${area.recoverySessionName}`, 5, 'Low');
+        Alert.alert('Prehab Logged', `5-minute ${area.label} prep was recorded to today's log.`);
       }
     }
-  }
+  };
+
+  // Save Goals update
+  const handleSaveGoals = (updatedGoals) => {
+    if (updateWorkspaces) {
+      updateWorkspaces({
+        ...workspaces,
+        goals: updatedGoals
+      });
+    }
+
+    // Also attempt background sync to user_goals table if it exists
+    if (session?.user?.id) {
+      updatedGoals.forEach(async (g) => {
+        try {
+          await supabase.from('user_goals').upsert({
+            id: g.id.startsWith('goal-custom') ? undefined : g.id,
+            user_id: session.user.id,
+            title: g.title,
+            type: g.type,
+            target_value: g.target_value,
+            unit: g.unit,
+            timeframe: g.timeframe,
+            updated_at: new Date().toISOString()
+          });
+        } catch (e) {
+          // Gracefully fallback to workspaces_data
+        }
+      });
+    }
+  };
+
+  // Micro-action log handler
+  const handleSaveMicroLog = (title, duration, intensity) => {
+    logWorkout(title, duration, intensity, defaultPlan?.id);
+    triggerHaptic('heavy');
+  };
 
   return (
-    <View style={{ flex: 1 }}>
-      {/* START WORKOUT CARD */}
-      <View style={[styles.card, { 
-        backgroundColor: moveProfile.workouts.length > 0 ? '#FFB80010' : '#00D09E10', 
-        borderColor: moveProfile.workouts.length > 0 ? '#FFB800' : '#00D09E', 
-        borderWidth: 1, 
-        padding: 20, 
-        alignItems: 'stretch',
-        marginBottom: 15
-      }]}>
-        
-        {moveProfile.workouts.length > 0 && (
-          <View style={{ alignItems: 'center', marginBottom: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#FFB80040' }}>
-            <Text style={{ fontSize: 36, marginBottom: 8 }}>🔥</Text>
-            <Text style={{ color: '#FFB800', fontSize: 20, fontWeight: 'bold', textAlign: 'center' }}>Great job today!</Text>
-            <Text style={{ color: '#AAA', fontSize: 14, textAlign: 'center', marginTop: 5 }}>Workout logged successfully. Want to go for another round?</Text>
-          </View>
-        )}
+    <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* 1. Header & Weekly Momentum Strip */}
+        <WeeklyMomentumStrip
+          weekDays={weekDays}
+          history={history}
+          defaultPlan={defaultPlan}
+          activeStreakDays={weeklyMetrics.activeStreakDays}
+          onSelectDay={(day, workouts, hasPlannedSession) => {
+            setDaySummaryModal({
+              visible: true,
+              day,
+              workouts,
+              hasPlannedSession
+            });
+          }}
+        />
 
+        {/* 2. Active Goals Tracker */}
+        <ActiveGoalsTracker
+          goals={activeGoals}
+          onOpenGoalEditor={() => setIsGoalEditorVisible(true)}
+        />
+
+        {/* 3. Interactive Recovery Check-in / Body Map */}
+        <RecoveryBodyMap
+          readinessState={readinessState}
+          onToggleArea={handleToggleReadinessArea}
+          onStartRecoveryPrep={handleStartRecoveryPrep}
+        />
+
+        {/* 4. Dynamic "Ready-State" Hero Card (Today's Workout) */}
         {loadingPlans && !defaultPlan ? (
-          <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+          <View style={styles.loadingCard}>
             <ActivityIndicator size="small" color="#00D09E" />
-            <Text style={{ color: '#888', marginTop: 10, fontSize: 14 }}>Loading workout plans...</Text>
+            <Text style={styles.loadingText}>Loading training routines...</Text>
           </View>
         ) : (
-          <>
-            {defaultPlan && (
-              <Text style={{ color: moveProfile.workouts.length > 0 ? '#FFB800' : '#00D09E', fontSize: 22, marginBottom: 6, fontWeight: 'bold', textAlign: 'center' }}>
-                {defaultPlan.name}
-              </Text>
-            )}
-            
-            <Text style={[styles.sectionLabel, { color: moveProfile.workouts.length > 0 ? '#FFB800' : '#FFF', fontSize: 16, marginBottom: 16, fontWeight: '600', textAlign: 'center' }]}>
-              {defaultPlan ? nextWorksessionStr : 'Ready to train?'}
-            </Text>
-            
-            {!defaultPlan ? (
-              <View style={{ alignItems: 'stretch' }}>
-                <Text style={{ color: '#AAA', marginBottom: 15, textAlign: 'center', fontSize: 14, lineHeight: 20 }}>
-                  {availablePlans.length > 0 
-                    ? "Choose a session from your plans below or set your default in Workout Plans."
-                    : "No default plan selected yet. You can set one in Workout Plans to quick-start sessions here."}
-                </Text>
-
-                {availablePlans.length > 0 && (
-                  <TouchableOpacity 
-                    style={[styles.primaryButton, { 
-                      paddingVertical: 16, 
-                      borderRadius: 14, 
-                      backgroundColor: '#00D09E',
-                      marginBottom: 10
-                    }]} 
-                    onPress={() => {
-                      setSelectedModalPlanId(availablePlans[0]?.id || null);
-                      setShowWorksessionModal(true);
-                    }}
-                  >
-                    <Text style={[styles.buttonText, { fontSize: 16 }]}>START A WORKOUT</Text>
-                  </TouchableOpacity>
-                )}
-
-                <TouchableOpacity 
-                  style={{
-                    paddingVertical: 13,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: '#00D09E60',
-                    backgroundColor: '#00D09E15',
-                    alignItems: 'center'
-                  }}
-                  onPress={() => router.push('/plans')}
-                >
-                  <Text style={{ color: '#00D09E', fontWeight: 'bold', fontSize: 14 }}>
-                    OPEN WORKOUT PLANS
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <>
-                {activeSessionMetadata ? (
-                  <TouchableOpacity 
-                    style={[styles.primaryButton, { 
-                      paddingVertical: 18, 
-                      borderRadius: 16, 
-                      backgroundColor: '#FFB800' 
-                    }]} 
-                    onPress={() => {
-                      router.push({
-                        pathname: '/active-workout',
-                        params: {
-                          sessionId: activeSessionMetadata.sessionId,
-                          plan: JSON.stringify(activeSessionMetadata.plan),
-                          worksession: JSON.stringify(activeSessionMetadata.worksession)
-                        }
-                      });
-                    }}
-                  >
-                    <Text style={[styles.buttonText, { fontSize: 18 }]}>RESUME ACTIVE WORKOUT</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <>
-                    <TouchableOpacity 
-                      style={[styles.primaryButton, { 
-                        paddingVertical: 18, 
-                        borderRadius: 16, 
-                        backgroundColor: moveProfile.workouts.length > 0 ? '#FFB800' : '#00D09E',
-                        marginBottom: 10
-                      }]} 
-                      onPress={() => {
-                        if (defaultPlan.schedule_type === 'floating' || defaultPlan.schedule_type === 'flexible') {
-                          setSelectedModalPlanId(defaultPlan.id);
-                          setShowWorksessionModal(true);
-                        } else {
-                          if (anchoredWsListForToday.length === 1) {
-                            startActiveSession(defaultPlan, anchoredWsListForToday[0].worksessions);
-                          } else {
-                            setSelectedModalPlanId(defaultPlan.id);
-                            setShowWorksessionModal(true);
-                          }
-                        }
-                      }}
-                    >
-                      <Text style={[styles.buttonText, { fontSize: 18 }]}>START WORKOUT</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity 
-                      style={{
-                        paddingVertical: 12,
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: '#444',
-                        backgroundColor: '#1E1E24',
-                        alignItems: 'center'
-                      }}
-                      onPress={() => {
-                        setSelectedModalPlanId(defaultPlan.id);
-                        setShowWorksessionModal(true);
-                      }}
-                    >
-                      <Text style={{ color: '#AAA', fontSize: 14, fontWeight: '600' }}>
-                        Choose Another Session / Plan
-                      </Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </>
-            )}
-          </>
+          <ReadyStateHeroCard
+            scheduledSession={scheduledRoutine}
+            activeSessionMetadata={activeSessionMetadata}
+            todayWorkouts={moveProfile.workouts}
+            onStartSession={() => startActiveSession(scheduledRoutine?.plan, scheduledRoutine?.worksession)}
+            onResumeSession={resumeActiveSession}
+            onOpenSessionSwitcher={() => setIsSessionSwitcherVisible(true)}
+          />
         )}
-      </View>
-      
-      {/* SELECT WORKSESSION MODAL */}
-      <Modal visible={showWorksessionModal} transparent={true} animationType="fade">
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <View style={{ backgroundColor: '#1A1A1F', padding: 22, borderRadius: 20, width: '100%', maxWidth: 420, borderWidth: 1, borderColor: '#333' }}>
-            <Text style={{ color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' }}>
-              Select Worksession
-            </Text>
-            
-            <ScrollView style={{ width: '100%', maxHeight: 360 }}>
-              {(() => {
-                const planToUse = (selectedModalPlanId && availablePlans.find(p => p.id === selectedModalPlanId)) 
-                  || defaultPlan 
-                  || availablePlans[0];
 
-                if (!planToUse) {
-                  return (
-                    <Text style={{ color: '#888', textAlign: 'center', marginVertical: 25 }}>
-                      No workout plans found. Go to Workout Plans to create one.
-                    </Text>
-                  );
-                }
-
-                const worksessions = planToUse.plan_worksessions || [];
-
-                return (
-                  <View>
-                    {availablePlans.length > 1 && (
-                      <View style={{ marginBottom: 15 }}>
-                        <Text style={{ color: '#888', fontSize: 12, marginBottom: 8, textTransform: 'uppercase', fontWeight: 'bold' }}>
-                          Select Plan:
-                        </Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
-                          {availablePlans.map(p => {
-                            const isSelected = planToUse.id === p.id;
-                            return (
-                              <TouchableOpacity
-                                key={p.id}
-                                onPress={() => setSelectedModalPlanId(p.id)}
-                                style={{
-                                  paddingHorizontal: 14,
-                                  paddingVertical: 8,
-                                  borderRadius: 16,
-                                  backgroundColor: isSelected ? '#00D09E' : '#2A2A31',
-                                  marginRight: 8,
-                                  borderWidth: 1,
-                                  borderColor: isSelected ? '#00D09E' : '#444'
-                                }}
-                              >
-                                <Text style={{ color: isSelected ? '#111' : '#FFF', fontSize: 13, fontWeight: 'bold' }}>
-                                  {p.name}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </ScrollView>
-                      </View>
-                    )}
-
-                    {worksessions.length === 0 ? (
-                      <Text style={{ color: '#888', textAlign: 'center', marginVertical: 20 }}>
-                        No worksessions attached to {planToUse.name}.
-                      </Text>
-                    ) : (
-                      worksessions.map(pw => (
-                        <TouchableOpacity 
-                          key={pw.id} 
-                          style={{
-                            padding: 16, 
-                            borderRadius: 14, 
-                            marginBottom: 10,
-                            backgroundColor: '#2A2A31',
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            borderWidth: 1,
-                            borderColor: '#3A3A45'
-                          }}
-                          onPress={() => {
-                            setShowWorksessionModal(false);
-                            startActiveSession(planToUse, pw.worksessions);
-                          }}
-                        >
-                          <View style={{ flex: 1, marginRight: 10 }}>
-                            <Text style={{ color: '#FFF', fontWeight: 'bold', fontSize: 16 }}>
-                              {pw.worksessions?.name || 'Workout Session'}
-                            </Text>
-                            {planToUse.schedule_type === 'anchored' && pw.day_name && (
-                              <Text style={{ color: '#00D09E', fontSize: 13, marginTop: 4, fontWeight: '600' }}>
-                                📅 {pw.day_name}
-                              </Text>
-                            )}
-                            {pw.worksessions?.modality && (
-                              <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
-                                Modality: {pw.worksessions.modality}
-                              </Text>
-                            )}
-                            {getWorksessionDescription(pw.worksessions) && (
-                              <Text style={{ color: '#AAA', fontSize: 12, marginTop: 4, lineHeight: 16 }}>
-                                {getWorksessionDescription(pw.worksessions)}
-                              </Text>
-                            )}
-                          </View>
-                          <View style={{ backgroundColor: '#00D09E', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12 }}>
-                            <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 13 }}>START</Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))
-                    )}
-                  </View>
-                );
-              })()}
-            </ScrollView>
-            
-            <TouchableOpacity 
-              style={[styles.primaryButton, { backgroundColor: '#333', marginTop: 15, width: '100%', borderRadius: 12 }]} 
-              onPress={() => setShowWorksessionModal(false)}
-            >
-              <Text style={[styles.buttonText, { color: '#FFF' }]}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* MANUAL LOG BOX */}
-      <View style={[styles.card, { marginBottom: 15 }]}>
-        <Text style={styles.sectionLabel}>Manual Log</Text>
-
-        <TextInput style={styles.input} placeholder="Workout Name (Optional)" placeholderTextColor="#888" value={manualWorkoutName} onChangeText={setManualWorkoutName} />
-        <TextInput style={styles.input} placeholder="Duration (minutes)" placeholderTextColor="#888" keyboardType="numeric" value={workoutDuration} onChangeText={setWorkoutDuration} />
-        
-        <View style={styles.intensityRow}>
-          {['Low', 'Medium', 'High'].map(level => (
-            <TouchableOpacity key={level} style={[styles.intensityBtn, workoutIntensity === level && styles.intensityBtnActive]} onPress={() => setWorkoutIntensity(level)}>
-              <Text style={[styles.intensityText, workoutIntensity === level && styles.intensityTextActive]}>{level}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <TouchableOpacity style={styles.primaryButton} onPress={handleLogWorkout}>
-          <Text style={styles.buttonText}>Save Workout</Text>
-        </TouchableOpacity>
-      </View>
-
-      {moveProfile.workouts.length > 0 && (
-        <View style={[styles.card, { alignItems: 'stretch' }]}>
-          <Text style={styles.sectionLabel}>Today's Workouts</Text>
-          {moveProfile.workouts.map(w => (
-            <View key={w.id} style={styles.listItem}>
-              <View style={styles.listItemInfo}>
-                <Text style={styles.listItemText}>{w.type}</Text>
-                <Text style={styles.macroBadge}>{w.intensity} Intensity</Text>
+        {/* Recent Workouts Logged Today List (if any) */}
+        {moveProfile.workouts.length > 0 && (
+          <View style={styles.todayWorkoutsSection}>
+            <Text style={styles.sectionHeader}>Today's Completed Activities</Text>
+            {moveProfile.workouts.map(w => (
+              <View key={w.id} style={styles.workoutItemRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.workoutItemTitle}>{w.type}</Text>
+                  <Text style={styles.workoutItemMeta}>
+                    {w.intensity ? `${w.intensity} Intensity • ` : ''}{w.duration} min
+                  </Text>
+                </View>
+                <View style={styles.completedCheck}>
+                  <Text style={{ color: '#00D09E', fontWeight: 'bold', fontSize: 12 }}>DONE</Text>
+                </View>
               </View>
-              <Text style={[styles.listItemText, { color: '#00D09E' }]}>{w.duration} min</Text>
-            </View>
-          ))}
-        </View>
-      )}
+            ))}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* 5. Docked Micro-Action Quick Log Bar (Bottom) */}
+      <DockedQuickLogBar
+        onOpenQuickSet={() => setMicroLogModal({ visible: true, mode: 'quick_set' })}
+        onOpenMobility={() => setMicroLogModal({ visible: true, mode: 'mobility' })}
+        onOpenCustomActivity={() => setMicroLogModal({ visible: true, mode: 'custom' })}
+      />
+
+      {/* MODALS */}
+      <DaySummaryModal
+        visible={daySummaryModal.visible}
+        day={daySummaryModal.day}
+        workouts={daySummaryModal.workouts}
+        hasPlannedSession={daySummaryModal.hasPlannedSession}
+        onClose={() => setDaySummaryModal({ visible: false, day: null, workouts: [], hasPlannedSession: false })}
+        onLogForDay={() => setMicroLogModal({ visible: true, mode: 'custom' })}
+      />
+
+      <GoalEditorModal
+        visible={isGoalEditorVisible}
+        goals={activeGoals}
+        onClose={() => setIsGoalEditorVisible(false)}
+        onSaveGoals={handleSaveGoals}
+      />
+
+      <SessionSwitcherModal
+        visible={isSessionSwitcherVisible}
+        availablePlans={availablePlans}
+        onClose={() => setIsSessionSwitcherVisible(false)}
+        onSelectSession={(plan, worksession) => {
+          setSwappedSession({
+            plan,
+            worksession,
+            name: worksession.name,
+            description: getWorksessionDescription(worksession) || worksession.description,
+            durationEstimate: '25-30 min',
+            targetAreas: [worksession.modality || 'Custom', 'Selected']
+          });
+        }}
+      />
+
+      <MicroLogModal
+        visible={microLogModal.visible}
+        mode={microLogModal.mode}
+        onClose={() => setMicroLogModal({ visible: false, mode: 'quick_set' })}
+        onSaveLog={handleSaveMicroLog}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: '#1E1E24', borderRadius: 15, padding: 15 },
-  sectionLabel: { fontSize: 16, fontWeight: 'bold', color: '#FFF', marginBottom: 10 },
-  input: { backgroundColor: '#2A2A31', color: '#FFF', borderRadius: 8, padding: 12, marginBottom: 15 },
-  primaryButton: { backgroundColor: '#00D09E', padding: 15, borderRadius: 8, alignItems: 'center' },
-  buttonText: { color: '#111', fontWeight: 'bold' },
-  intensityRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
-  intensityBtn: { flex: 1, padding: 10, borderRadius: 8, backgroundColor: '#2A2A31', marginHorizontal: 5, alignItems: 'center' },
-  intensityBtnActive: { backgroundColor: '#00D09E' },
-  intensityText: { color: '#AAA' },
-  intensityTextActive: { color: '#111', fontWeight: 'bold' },
-  listItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#333' },
-  listItemInfo: { flex: 1 },
-  listItemText: { color: '#FFF', fontSize: 16 },
-  macroBadge: { color: '#AAA', fontSize: 12, marginTop: 4 }
+  container: {
+    flex: 1,
+    backgroundColor: '#111'
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 110 // Ensures docked bar does not overlap cards
+  },
+  loadingCard: {
+    backgroundColor: '#1E1E28',
+    borderRadius: 20,
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#323242'
+  },
+  loadingText: {
+    color: '#8E8E9F',
+    fontSize: 13,
+    marginTop: 10
+  },
+  todayWorkoutsSection: {
+    backgroundColor: '#1A1A22',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#2D2D38'
+  },
+  sectionHeader: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12
+  },
+  workoutItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#282836'
+  },
+  workoutItemTitle: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600'
+  },
+  workoutItemMeta: {
+    color: '#8E8E9F',
+    fontSize: 12,
+    marginTop: 2
+  },
+  completedCheck: {
+    backgroundColor: '#00D09E18',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6
+  }
 });
