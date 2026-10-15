@@ -1,14 +1,32 @@
 import React, { useState, useEffect, createContext } from 'react';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+
+const isServer = Platform.OS === 'web' && typeof window === 'undefined';
+
+const ssrSafeStorage = {
+  getItem: async (key) => {
+    if (isServer) return null;
+    return AsyncStorage.getItem(key);
+  },
+  setItem: async (key, value) => {
+    if (isServer) return;
+    return AsyncStorage.setItem(key, value);
+  },
+  removeItem: async (key) => {
+    if (isServer) return;
+    return AsyncStorage.removeItem(key);
+  },
+};
 
 export const supabaseUrl = 'https://nfzuvugwamzjsxngptta.supabase.co';
 export const supabaseKey = 'sb_publishable_o11J7ZGIF1O0m9L0s5ouxw_xW0PY7IC';
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
-    storage: AsyncStorage,
-    autoRefreshToken: true,
-    persistSession: true,
+    storage: ssrSafeStorage,
+    autoRefreshToken: !isServer,
+    persistSession: !isServer,
     detectSessionInUrl: false,
   },
 });

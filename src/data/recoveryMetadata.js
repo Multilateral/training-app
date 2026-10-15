@@ -539,3 +539,30 @@ export const getWorksessionExerciseCue = (worksession, exerciseId) => {
   const wsMeta = RECOVERY_WORKSESSIONS_METADATA[worksession.id] || WORKSESSION_BY_NAME[worksession.name?.toLowerCase().trim()];
   return wsMeta?.cues?.[exerciseId] || null;
 };
+
+export const getExerciseVideoUrl = (exercise) => {
+  if (!exercise) return null;
+  if (exercise.video_url) return exercise.video_url;
+  if (exercise.id && ALL_EXERCISES_METADATA[exercise.id]?.video_url) {
+    return ALL_EXERCISES_METADATA[exercise.id].video_url;
+  }
+  const nameKey = exercise.name?.toLowerCase().trim();
+  if (nameKey && EXERCISE_BY_NAME[nameKey]?.video_url) {
+    return EXERCISE_BY_NAME[nameKey].video_url;
+  }
+  return null;
+};
+
+export const getExerciseVideoThumbnail = (exercise) => {
+  if (!exercise) return null;
+  if (exercise.video_thumbnail_url) return exercise.video_thumbnail_url;
+  if (exercise.id && ALL_EXERCISES_METADATA[exercise.id]?.video_thumbnail_url) {
+    return ALL_EXERCISES_METADATA[exercise.id].video_thumbnail_url;
+  }
+  const nameKey = exercise.name?.toLowerCase().trim();
+  if (nameKey && EXERCISE_BY_NAME[nameKey]?.video_thumbnail_url) {
+    return EXERCISE_BY_NAME[nameKey].video_thumbnail_url;
+  }
+  return null;
+};
+

@@ -109,7 +109,57 @@ async function main() {
     return;
   }
 
-  console.log('Unknown command. Run with --list, --promote "Name", or --promote-all-custom');
+  if (command === '--set-video') {
+    const targetName = args[1];
+    const videoUrl = args[2];
+    const thumbUrl = args[3] || null;
+    if (!targetName || !videoUrl) {
+      console.log('Usage: node manage_exercises.js --set-video "Exercise Name" "https://vz-xxxx.b-cdn.net/VIDEO_ID/playlist.m3u8" [thumbnailUrl]');
+      return;
+    }
+    const { data, error } = await supabase
+      .from('exercises')
+      .update({ video_url: videoUrl, video_thumbnail_url: thumbUrl })
+      .ilike('name', targetName)
+      .select();
+
+    if (error) {
+      console.error('Failed to set video:', error.message);
+    } else if (!data || data.length === 0) {
+      console.log(`No exercise found matching "${targetName}".`);
+    } else {
+      console.log(`Successfully linked video to ${data.length} exercise(s):`);
+      data.forEach(e => console.log(` -> ${e.name} => ${videoUrl}`));
+    }
+    return;
+  }
+
+  if (command === '--videos') {
+    const { data, error } = await supabase.from('exercises').select('id, name, category, equipment, video_url').order('name');
+    if (error) {
+      console.error('Error fetching exercises:', error.message);
+      return;
+    }
+    const withVideo = data.filter(e => !!e.video_url);
+    const withoutVideo = data.filter(e => !e.video_url);
+    console.log(`\n=== EXERCISE DEMO VIDEOS STATUS ===`);
+    console.log(`Total Exercises: ${data.length}`);
+    console.log(`With Demo Video: ${withVideo.length}`);
+    console.log(`Pending Video:   ${withoutVideo.length}\n`);
+
+    if (withVideo.length > 0) {
+      console.log('--- Exercises With Videos ---');
+      withVideo.forEach(e => console.log(`[VIDEO] ${e.name} (${e.equipment}): ${e.video_url}`));
+    }
+    return;
+  }
+
+  console.log('Unknown command. Available commands:');
+  console.log('  node manage_exercises.js --list');
+  console.log('  node manage_exercises.js --videos');
+  console.log('  node manage_exercises.js --set-video "Exercise Name" "https://...url"');
+  console.log('  node manage_exercises.js --promote "Exercise Name"');
+  console.log('  node manage_exercises.js --promote-all-custom');
 }
 
 main();

@@ -1,9 +1,11 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { TrainingContext, supabase } from '../context/TrainingContext';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import WorkoutRemindersConfig from '../components/WorkoutRemindersConfig';
+import ActiveWorkoutStatusBar from '../components/ActiveWorkoutStatusBar';
 
 export default function SettingsScreen() {
   const { session, workspaces, updateWorkspaces } = useContext(TrainingContext);
@@ -148,6 +150,9 @@ export default function SettingsScreen() {
         )}
 
       </ScrollView>
+
+      {/* Floating In-Progress Status Bar */}
+      <ActiveWorkoutStatusBar />
     </SafeAreaView>
   );
 }

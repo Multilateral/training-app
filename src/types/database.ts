@@ -11,6 +11,8 @@ export interface Exercise {
   difficulty?: DifficultyLevel | string | null;
   mechanics?: string | null;
   instructions?: string | null;
+  video_url?: string | null;
+  video_thumbnail_url?: string | null;
   is_default?: boolean;
   user_id?: string | null;
   created_at?: string;

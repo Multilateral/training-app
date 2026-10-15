@@ -3,6 +3,7 @@ import { TrainingProvider } from '../context/TrainingContext';
 import { useEffect, useState } from 'react';
 import { supabase } from '../context/TrainingContext';
 import { View, ActivityIndicator } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 export default function Layout() {
   const [session, setSession] = useState<any>(null);
@@ -41,15 +42,17 @@ export default function Layout() {
   }
 
   return (
-    <TrainingProvider session={session}>
-      <Stack screenOptions={{ headerShown: true }}>
-        <Stack.Screen name="index" options={{ title: 'Training Dashboard' }} />
-        <Stack.Screen name="plans" options={{ title: 'Workout Plans' }} />
-        <Stack.Screen name="history" options={{ title: 'Workout History' }} />
-        <Stack.Screen name="active-workout" options={{ title: 'Active Workout', headerShown: false }} />
-        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-        <Stack.Screen name="auth" options={{ headerShown: false, animation: 'none' }} />
-      </Stack>
-    </TrainingProvider>
+    <SafeAreaProvider>
+      <TrainingProvider session={session}>
+        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+          <Stack.Screen name="index" options={{ title: 'Today' }} />
+          <Stack.Screen name="plans" options={{ title: 'Workouts' }} />
+          <Stack.Screen name="history" options={{ title: 'Progress' }} />
+          <Stack.Screen name="active-workout" options={{ title: 'Active Workout' }} />
+          <Stack.Screen name="settings" options={{ title: 'Settings', headerShown: true }} />
+          <Stack.Screen name="auth" options={{ headerShown: false, animation: 'none' }} />
+        </Stack>
+      </TrainingProvider>
+    </SafeAreaProvider>
   );
 }

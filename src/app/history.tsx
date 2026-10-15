@@ -1,11 +1,13 @@
 import React from 'react';
-import { StyleSheet, SafeAreaView } from 'react-native';
-import WorkoutHistory from '../components/WorkoutHistory';
+import { StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import KinetixProgressHub from '../components/KinetixProgressHub';
+import { KinetixTheme } from '../constants/theme';
 
 export default function HistoryScreen() {
   return (
-    <SafeAreaView style={styles.container}>
-      <WorkoutHistory />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <KinetixProgressHub />
     </SafeAreaView>
   );
 }
@@ -13,6 +15,6 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111',
-  }
+    backgroundColor: KinetixTheme.colors.background,
+  },
 });

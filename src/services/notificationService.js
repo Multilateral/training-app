@@ -1,5 +1,11 @@
 import { Platform, Alert } from 'react-native';
-import * as Notifications from 'expo-notifications';
+
+let Notifications = null;
+try {
+  Notifications = require('expo-notifications');
+} catch (e) {
+  console.log('expo-notifications native module not available in this build:', e?.message);
+}
 
 // Configure notification behavior when app is in the foreground
 try {

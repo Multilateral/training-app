@@ -1,4 +1,4 @@
-import React, { useEffect, useContext } from 'react';
+import React, { useEffect, useContext, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,12 +8,16 @@ import {
   getExerciseInstructions, 
   getExerciseDifficulty, 
   getExerciseMechanics, 
-  getWorksessionExerciseCue 
+  getWorksessionExerciseCue,
+  getExerciseVideoUrl,
+  getExerciseVideoThumbnail
 } from '../data/recoveryMetadata';
+import ExerciseVideoModal from './ExerciseVideoModal';
 
 export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFinish }) {
   useKeepAwake();
   const router = useRouter();
+  const [selectedVideoExercise, setSelectedVideoExercise] = useState(null);
 
   const { activeSessionState, setActiveSessionState, activeSessionTimer, setActiveSessionTimer, setActiveSessionMetadata } = useContext(HealthContext);
 
@@ -46,6 +50,8 @@ export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFi
           const inst = getExerciseInstructions(te.exercises) || getExerciseInstructions({ id: te.exercise_id, name: te.exercises?.name });
           const diff = getExerciseDifficulty(te.exercises) || getExerciseDifficulty({ id: te.exercise_id, name: te.exercises?.name });
           const mech = getExerciseMechanics(te.exercises) || getExerciseMechanics({ id: te.exercise_id, name: te.exercises?.name });
+          const videoUrl = getExerciseVideoUrl(te.exercises) || getExerciseVideoUrl({ id: te.exercise_id, name: te.exercises?.name });
+          const videoThumb = getExerciseVideoThumbnail(te.exercises) || getExerciseVideoThumbnail({ id: te.exercise_id, name: te.exercises?.name });
 
           return {
             id: te.id,
@@ -55,6 +61,8 @@ export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFi
             instructions: inst,
             difficulty: diff,
             mechanics: mech,
+            video_url: videoUrl,
+            video_thumbnail_url: videoThumb,
             tracking_type: te.tracking_type,
             target_time: te.target_time,
             sets: initialSets
@@ -174,11 +182,23 @@ export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFi
               <View style={{ marginBottom: 10 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
                   <Text style={styles.exerciseName}>{ex.name}</Text>
-                  {ex.cue && (
-                    <View style={{ backgroundColor: '#00D09E20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
-                      <Text style={{ color: '#00D09E', fontSize: 11, fontWeight: '700' }}>{ex.cue}</Text>
-                    </View>
-                  )}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {ex.video_url ? (
+                      <TouchableOpacity
+                        style={styles.watchDemoBtn}
+                        onPress={() => setSelectedVideoExercise(ex)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="play-circle" size={15} color="#00D09E" style={{ marginRight: 4 }} />
+                        <Text style={styles.watchDemoText}>Demo</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {ex.cue && (
+                      <View style={{ backgroundColor: '#00D09E20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                        <Text style={{ color: '#00D09E', fontSize: 11, fontWeight: '700' }}>{ex.cue}</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
                 
                 {(ex.difficulty || ex.mechanics) && (
@@ -268,6 +288,13 @@ export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFi
           <Text style={styles.finishBtnText}>Finish Workout</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Video Demonstration Modal */}
+      <ExerciseVideoModal
+        visible={!!selectedVideoExercise}
+        exercise={selectedVideoExercise}
+        onClose={() => setSelectedVideoExercise(null)}
+      />
     </View>
   );
 }
@@ -425,5 +452,21 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  watchDemoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#00D09E18',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00D09E40',
+  },
+  watchDemoText: {
+    color: '#00D09E',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   }
 });

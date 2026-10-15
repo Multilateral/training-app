@@ -12,8 +12,11 @@ import {
   getExerciseDifficulty, 
   getExerciseMechanics, 
   getWorksessionDescription, 
-  getWorksessionExerciseCue 
+  getWorksessionExerciseCue,
+  getExerciseVideoUrl,
+  getExerciseVideoThumbnail
 } from '../data/recoveryMetadata';
+import ExerciseVideoModal from './ExerciseVideoModal';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -222,7 +225,9 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   const [newExerciseName, setNewExerciseName] = useState('');
   const [newExerciseCategory, setNewExerciseCategory] = useState('Chest');
   const [newExerciseEquipment, setNewExerciseEquipment] = useState('Bodyweight');
+  const [newExerciseVideoUrl, setNewExerciseVideoUrl] = useState('');
   const [isDefaultExercise, setIsDefaultExercise] = useState(false);
+  const [selectedVideoExercise, setSelectedVideoExercise] = useState(null);
   const [globalExerciseSearchQuery, setGlobalExerciseSearchQuery] = useState('');
   const [exerciseSortMode, setExerciseSortMode] = useState('category'); // 'category' | 'muscle' | 'equipment' | 'alpha'
   const [exerciseFilterTag, setExerciseFilterTag] = useState('All');
@@ -692,12 +697,14 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       const makeDefault = isAdmin && isDefaultExercise;
       const cat = newExerciseCategory.trim() || 'Chest';
       const eq = newExerciseEquipment.trim() || 'Bodyweight';
+      const vid = newExerciseVideoUrl.trim() || null;
       const { error } = await supabase.from('exercises').insert([{
         user_id: makeDefault ? null : userId,
         name: newExerciseName.trim(),
         category: cat,
         muscle_group: cat,
         equipment: eq,
+        video_url: vid,
         is_default: makeDefault
       }]);
       if (error) throw error;
@@ -705,6 +712,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       setNewExerciseName('');
       setNewExerciseCategory('Chest');
       setNewExerciseEquipment('Bodyweight');
+      setNewExerciseVideoUrl('');
       setIsDefaultExercise(false);
       await fetchExercises();
       Alert.alert('Success', makeDefault ? 'Default exercise created for all users!' : 'Custom exercise created successfully!');
@@ -831,6 +839,16 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
         )}
 
         <View style={styles.cardActions}>
+          {getExerciseVideoUrl(exercise) ? (
+            <TouchableOpacity 
+              onPress={() => setSelectedVideoExercise({ ...exercise, video_url: getExerciseVideoUrl(exercise), instructions })} 
+              style={[styles.actionIcon, { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00D09E20', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, gap: 5 }]}
+            >
+              <Ionicons name="play-circle" size={16} color="#00D09E" />
+              <Text style={{ color: '#00D09E', fontSize: 12, fontWeight: 'bold' }}>Watch Demo</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {isAdmin && !isDefault && (
             <TouchableOpacity 
               onPress={() => handlePromoteToDefault(exercise)} 
@@ -1316,6 +1334,17 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                     ))}
                   </ScrollView>
                   <TextInput style={[styles.input, { marginBottom: 12 }]} placeholder="Or custom equipment..." placeholderTextColor="#666" value={newExerciseEquipment} onChangeText={setNewExerciseEquipment} />
+
+                  <Text style={[styles.label, { marginBottom: 4, marginTop: 4 }]}>Bunny.net Video Demo URL (Optional):</Text>
+                  <TextInput 
+                    style={[styles.input, { marginBottom: 12 }]} 
+                    placeholder="e.g., https://vz-xxxx.b-cdn.net/VIDEO_ID/playlist.m3u8" 
+                    placeholderTextColor="#666" 
+                    value={newExerciseVideoUrl} 
+                    onChangeText={setNewExerciseVideoUrl}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
 
                   {isAdmin && (
                     <TouchableOpacity 
@@ -1824,6 +1853,13 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
           </View>
         </View>
       </Modal>
+
+      {/* Video Demonstration Modal */}
+      <ExerciseVideoModal
+        visible={!!selectedVideoExercise}
+        exercise={selectedVideoExercise}
+        onClose={() => setSelectedVideoExercise(null)}
+      />
 
     </View>
   );

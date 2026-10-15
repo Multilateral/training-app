@@ -1,22 +1,24 @@
 import React, { useContext } from 'react';
-import { StyleSheet, SafeAreaView } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import ActiveWorkoutEngine from '../components/ActiveWorkoutEngine';
+import KinetixActiveWorkout from '../components/KinetixActiveWorkout';
 import { TrainingContext } from '../context/TrainingContext';
+import { KinetixTheme } from '../constants/theme';
 
 export default function ActiveWorkoutScreen() {
   const router = useRouter();
-  const { logWorkout } = useContext(TrainingContext);
+  const { logWorkout } = useContext(TrainingContext) || {};
   const { sessionId, plan, worksession } = useLocalSearchParams();
 
   let parsedPlan: any = null;
   let parsedWorksession: any = null;
-  
+
   try {
     if (typeof plan === 'string') parsedPlan = JSON.parse(plan);
     if (typeof worksession === 'string') parsedWorksession = JSON.parse(worksession);
-  } catch(e) {
-    console.error("Failed to parse params", e);
+  } catch (e) {
+    console.error('Failed to parse params', e);
   }
 
   const handleFinish = async (durationMins?: number) => {
@@ -29,18 +31,17 @@ export default function ActiveWorkoutScreen() {
           parsedPlan?.id || null
         );
       }
-    } catch(err) {
-      console.error("Failed to auto-log completed active workout", err);
+    } catch (err) {
+      console.error('Failed to auto-log completed active workout', err);
     }
-    router.replace('/');
+    router.replace('/history');
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ActiveWorkoutEngine 
-        sessionId={sessionId}
-        plan={parsedPlan}
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <KinetixActiveWorkout
         worksession={parsedWorksession}
+        plan={parsedPlan}
         onFinish={handleFinish}
       />
     </SafeAreaView>
@@ -50,6 +51,6 @@ export default function ActiveWorkoutScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111',
-  }
+    backgroundColor: KinetixTheme.colors.background,
+  },
 });

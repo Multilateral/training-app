@@ -1,21 +1,13 @@
-import React, { useContext } from 'react';
-import { View, StyleSheet, SafeAreaView } from 'react-native';
-import PlanBuilder from '../components/PlanBuilder';
-import { TrainingContext } from '../context/TrainingContext';
+import React from 'react';
+import { StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import KinetixLibrary from '../components/KinetixLibrary';
+import { KinetixTheme } from '../constants/theme';
 
 export default function PlansScreen() {
-  const { workspaces, updateWorkspaces } = useContext(TrainingContext);
-  
-  const handleSetDefaultPlan = (planId: string) => {
-    updateWorkspaces({ ...workspaces, defaultPlanId: planId });
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
-      <PlanBuilder 
-        onSetDefaultPlan={handleSetDefaultPlan} 
-        defaultPlanId={workspaces?.defaultPlanId} 
-      />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <KinetixLibrary />
     </SafeAreaView>
   );
 }
@@ -23,6 +15,6 @@ export default function PlansScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111',
-  }
+    backgroundColor: KinetixTheme.colors.background,
+  },
 });

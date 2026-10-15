@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useContext, useCallback, useMemo } from 'react';
 import { 
-  View, Text, ScrollView, StyleSheet, ActivityIndicator, Alert, SafeAreaView, Platform 
+  View, Text, ScrollView, StyleSheet, ActivityIndicator, Alert, Platform 
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase, TrainingContext, getDateString } from '../context/TrainingContext';
 import { getWorksessionDescription, RECOVERY_WORKSESSIONS_METADATA } from '../data/recoveryMetadata';
