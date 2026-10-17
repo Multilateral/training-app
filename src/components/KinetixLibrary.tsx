@@ -21,10 +21,12 @@ import ExerciseVideoModal from './ExerciseVideoModal';
 import { TrainingContext, supabase } from '../context/TrainingContext';
 import {
   getExerciseInstructions,
+  getExerciseDescription,
   getExerciseDifficulty,
   getExerciseMechanics,
   getExerciseVideoUrl,
   getExerciseVideoThumbnail,
+  getExerciseTrackingType,
 } from '../data/recoveryMetadata';
 import {
   DATABASE_WORKSESSIONS,
@@ -40,14 +42,16 @@ export interface DatabaseExercise {
   equipment?: string;
   muscle_group?: string;
   instructions?: string;
+  description?: string;
   difficulty?: string;
   mechanics?: string;
   video_url?: string;
   video_thumbnail_url?: string;
   is_default?: boolean;
+  tracking_type?: string;
 }
 
-type TrackMode = 'workout' | 'rehab' | 'exercises';
+type TrackMode = 'workout' | 'rehab' | 'exercises' | 'edit';
 
 export default function KinetixLibrary() {
   const router = useRouter();
@@ -170,6 +174,50 @@ export default function KinetixLibrary() {
         } catch (e) {
           console.error('[KinetixLibrary] Error fetching user worksessions:', e);
         }
+
+        // 3. Fetch live training plans if authenticated
+        try {
+          const { data: userPlans, error: planErr } = await supabase
+            .from('training_plans')
+            .select(`
+              id, name, schedule_type, goal_category, description, is_standard_template,
+              plan_worksessions (
+                day_name, worksession_id,
+                worksessions (id, name, modality, description)
+              )
+            `)
+            .order('created_at', { ascending: false });
+
+          if (!planErr && userPlans && isMounted) {
+            const mappedUserPlans: DatabasePlan[] = userPlans.map((p: any) => {
+              const existing = DATABASE_PLANS.find((dp) => dp.id === p.id);
+              if (existing) return existing;
+
+              return {
+                id: p.id,
+                name: p.name,
+                schedule_type: p.schedule_type || 'floating',
+                goal_category: p.goal_category || 'General',
+                description: p.description || '',
+                is_standard_template: p.is_standard_template || false,
+                worksessions: (p.plan_worksessions || []).map((pw: any) => ({
+                  dayName: pw.day_name || 'Day',
+                  worksessionId: pw.worksession_id,
+                  worksessionName: pw.worksessions?.name || 'Session',
+                  modality: pw.worksessions?.modality || 'General',
+                  exerciseCount: 3,
+                  worksession: null,
+                })),
+              };
+            });
+
+            const existingPlanIds = new Set(mappedUserPlans.map((p) => p.id));
+            const mergedPlans = [...mappedUserPlans, ...DATABASE_PLANS.filter((p) => !existingPlanIds.has(p.id))];
+            setPlans(mergedPlans);
+          }
+        } catch (pe) {
+          console.error('[KinetixLibrary] Error fetching user training plans:', pe);
+        }
       }
     };
 
@@ -178,29 +226,29 @@ export default function KinetixLibrary() {
     return () => {
       isMounted = false;
     };
-  }, [session]);
+  }, [session, selectedTrack]);
 
   // Filter chips for Workouts track
   const workoutFilterChips: { id: string; label: string }[] = [
     { id: 'all', label: 'All Workouts' },
+    { id: 'plans', label: 'Workout Plans' },
     { id: 'core', label: 'Core & Power' },
     { id: 'upper', label: 'Chest, Arms & Back' },
     { id: 'knee', label: 'Legs & Plyo' },
-    { id: 'plans', label: 'Workout Plans' },
   ];
 
   // Filter chips for Rehab track
   const rehabFilterChips: { id: string; label: string }[] = [
     { id: 'all', label: 'All Protocols' },
+    { id: 'plans', label: 'Rehab Plans' },
     { id: 'knee', label: 'Knee & Tendon' },
     { id: 'shoulder', label: 'Shoulder & Cuff' },
     { id: 'core', label: 'Lower Back McGill' },
-    { id: 'plans', label: 'Rehab Plans' },
   ];
 
   // Filter chips for Exercises track
   const exerciseChips: { id: string; label: string }[] = [
-    { id: 'all', label: `All (${dbExercises.length || 103})` },
+    { id: 'all', label: `All (${dbExercises.length || 111})` },
     { id: 'core', label: 'Core' },
     { id: 'legs', label: 'Knee & Legs' },
     { id: 'shoulder', label: 'Shoulder' },
@@ -350,25 +398,39 @@ export default function KinetixLibrary() {
   });
 
   const startWorksession = (ws: DatabaseWorksessionCard, planName?: string) => {
+    const isRehab = ws.type === 'rehab';
     const worksessionData = {
       name: ws.title,
       focus: ws.category,
       estimatedDuration: parseInt(ws.metrics.duration) || 30,
-      exercises: ws.exercises.map((e) => ({
-        name: e.name,
-        cue: e.cue || 'Controlled form.',
-        sets: e.sets || 3,
-        reps: e.reps || 10,
-        weight: e.weight || 'Standard',
-        restSeconds: e.restSeconds || 60,
-        tracking_type: e.tracking_type || 'reps_weight',
-      })),
+      type: ws.type,
+      isRehab,
+      category: ws.category,
+      exercises: ws.exercises.map((e) => {
+        const rawType = e.tracking_type || getExerciseTrackingType(e);
+        const trackingMode =
+          (e as any).trackingType ||
+          (rawType === 'time' ? 'duration' : rawType === 'weight_reps' ? 'weight_reps' : 'bodyweight');
+
+        return {
+          name: e.name,
+          cue: e.cue || 'Controlled form.',
+          sets: e.sets || 3,
+          reps: e.reps || (rawType === 'time' ? 45 : 10),
+          weight: e.weight || (rawType === 'time' ? '0 kg' : 'Standard'),
+          restSeconds: e.restSeconds || 60,
+          trackingType: trackingMode,
+          tracking_type: rawType,
+        };
+      }),
     };
 
     if (setActiveSessionMetadata) {
       setActiveSessionMetadata({
         isActive: true,
         worksessionName: ws.title,
+        worksessionType: ws.type,
+        isRehab,
         currentExerciseName: ws.exercises[0]?.name || 'Exercise 1',
         currentExerciseIndex: 0,
         totalExercises: ws.exercises.length,
@@ -382,7 +444,7 @@ export default function KinetixLibrary() {
       pathname: '/active-workout',
       params: {
         worksession: JSON.stringify(worksessionData),
-        plan: JSON.stringify({ id: ws.id, name: planName || ws.title }),
+        plan: JSON.stringify({ id: ws.id, name: planName || ws.title, type: ws.type, isRehab }),
       },
     });
   };
@@ -390,20 +452,26 @@ export default function KinetixLibrary() {
   const startSingleExercise = (exercise: DatabaseExercise) => {
     const instructions = exercise.instructions || getExerciseInstructions(exercise) || 'Focus on controlled tempo and full range of motion.';
     const isRehab = exercise.category === 'Recovery' || exercise.muscle_group?.toLowerCase().includes('rehab');
+    const rawType = exercise.tracking_type || getExerciseTrackingType(exercise);
+    const trackingMode = rawType === 'time' ? 'duration' : rawType === 'weight_reps' ? 'weight_reps' : 'bodyweight';
 
     const worksessionData = {
       name: exercise.name,
       focus: exercise.muscle_group || exercise.category || 'Targeted Movement',
       estimatedDuration: 15,
+      type: isRehab ? 'rehab' : 'workout',
+      isRehab,
+      category: isRehab ? 'Clinical Rehab' : 'Strength & Power',
       exercises: [
         {
           name: exercise.name,
           cue: instructions,
           sets: 3,
-          reps: isRehab ? '12-15' : 10,
-          weight: exercise.equipment === 'Bodyweight' ? 'Bodyweight' : 'Standard',
+          reps: rawType === 'time' ? 45 : (isRehab ? '12-15' : 10),
+          weight: rawType === 'time' ? '0 kg' : (exercise.equipment === 'Bodyweight' || rawType === 'reps' ? 'Bodyweight' : 'Standard'),
           restSeconds: 60,
-          tracking_type: 'reps_weight',
+          trackingType: trackingMode,
+          tracking_type: rawType,
         },
       ],
     };
@@ -412,6 +480,8 @@ export default function KinetixLibrary() {
       setActiveSessionMetadata({
         isActive: true,
         worksessionName: exercise.name,
+        worksessionType: isRehab ? 'rehab' : 'workout',
+        isRehab,
         currentExerciseName: exercise.name,
         currentExerciseIndex: 0,
         totalExercises: 1,
@@ -425,7 +495,7 @@ export default function KinetixLibrary() {
       pathname: '/active-workout',
       params: {
         worksession: JSON.stringify(worksessionData),
-        plan: JSON.stringify({ id: exercise.id, name: exercise.name }),
+        plan: JSON.stringify({ id: exercise.id, name: exercise.name, type: isRehab ? 'rehab' : 'workout', isRehab }),
       },
     });
   };
@@ -514,7 +584,7 @@ export default function KinetixLibrary() {
           >
             <Ionicons
               name="barbell"
-              size={16}
+              size={15}
               color={selectedTrack === 'exercises' ? KinetixTheme.colors.primary : KinetixTheme.colors.textMuted}
             />
             <View style={styles.tabBadgeRow}>
@@ -547,218 +617,136 @@ export default function KinetixLibrary() {
               </View>
             </View>
           </TouchableOpacity>
+
+          {/* Tab 4: Edit Studio (Plans, Worksessions, Exercises) */}
+          <TouchableOpacity
+            style={[
+              styles.segmentBtn,
+              selectedTrack === 'edit' && styles.segmentBtnActive,
+            ]}
+            onPress={() => {
+              setSelectedTrack('edit');
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="create-outline"
+              size={15}
+              color={selectedTrack === 'edit' ? KinetixTheme.colors.primary : KinetixTheme.colors.textMuted}
+            />
+            <Text
+              style={[
+                styles.segmentText,
+                selectedTrack === 'edit' && styles.segmentTextActive,
+              ]}
+            >
+              Add/Edit
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Search Input Bar */}
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={18} color={KinetixTheme.colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder={
-              selectedTrack === 'exercises'
-                ? `Search ${dbExercises.length || 103} exercises by name, muscle, equipment...`
+        {/* Search Input Bar & Filter Chips (Only for Workouts, Rehab, and Exercises) */}
+        {selectedTrack !== 'edit' && (
+          <>
+            <View style={styles.searchBar}>
+              <Ionicons name="search" size={18} color={KinetixTheme.colors.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder={
+                  selectedTrack === 'exercises'
+                    ? `Search ${dbExercises.length || 103} exercises by name, muscle, equipment...`
+                    : selectedTrack === 'rehab'
+                    ? 'Search rehab protocols, knee, spine, cuff...'
+                    : 'Search workouts, power, chest, kettlebell...'
+                }
+                placeholderTextColor={KinetixTheme.colors.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery ? (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Ionicons name="close-circle" size={18} color={KinetixTheme.colors.textMuted} />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={() => setSelectedTrack('edit')}>
+                  <Ionicons name="options-outline" size={19} color={KinetixTheme.colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Filter Chips Carousel */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsRow}
+            >
+              {selectedTrack === 'workout'
+                ? workoutFilterChips.map((chip) => {
+                    const isActive = activeFilter === chip.id;
+                    return (
+                      <TouchableOpacity
+                        key={chip.id}
+                        style={[styles.chip, isActive && styles.chipActive]}
+                        onPress={() => setActiveFilter(chip.id)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+                          {chip.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
                 : selectedTrack === 'rehab'
-                ? 'Search rehab protocols, knee, spine, cuff...'
-                : 'Search workouts, power, chest, kettlebell...'
-            }
-            placeholderTextColor={KinetixTheme.colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery ? (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={18} color={KinetixTheme.colors.textMuted} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity onPress={() => setShowCustomBuilder(true)}>
-              <Ionicons name="options-outline" size={19} color={KinetixTheme.colors.textMuted} />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Filter Chips Carousel */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipsRow}
-        >
-          {selectedTrack === 'workout'
-            ? workoutFilterChips.map((chip) => {
-                const isActive = activeFilter === chip.id;
-                return (
-                  <TouchableOpacity
-                    key={chip.id}
-                    style={[styles.chip, isActive && styles.chipActive]}
-                    onPress={() => setActiveFilter(chip.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
-                      {chip.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })
-            : selectedTrack === 'rehab'
-            ? rehabFilterChips.map((chip) => {
-                const isActive = activeFilter === chip.id;
-                return (
-                  <TouchableOpacity
-                    key={chip.id}
-                    style={[styles.chip, isActive && styles.chipActive]}
-                    onPress={() => setActiveFilter(chip.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
-                      {chip.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })
-            : exerciseChips.map((chip) => {
-                const isActive = activeFilter === chip.id;
-                return (
-                  <TouchableOpacity
-                    key={chip.id}
-                    style={[styles.chip, isActive && styles.chipActive]}
-                    onPress={() => setActiveFilter(chip.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
-                      {chip.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-        </ScrollView>
+                ? rehabFilterChips.map((chip) => {
+                    const isActive = activeFilter === chip.id;
+                    return (
+                      <TouchableOpacity
+                        key={chip.id}
+                        style={[styles.chip, isActive && styles.chipActive]}
+                        onPress={() => setActiveFilter(chip.id)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+                          {chip.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                : exerciseChips.map((chip) => {
+                    const isActive = activeFilter === chip.id;
+                    return (
+                      <TouchableOpacity
+                        key={chip.id}
+                        style={[styles.chip, isActive && styles.chipActive]}
+                        onPress={() => setActiveFilter(chip.id)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+                          {chip.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+            </ScrollView>
+          </>
+        )}
 
         {/* ========================================================= */}
         {/* VIEW 1 & 2: DATABASE WORKSESSIONS & PLANS (Workouts & Rehab) */}
         {/* ========================================================= */}
-        {selectedTrack !== 'exercises' && (
+        {(selectedTrack === 'workout' || selectedTrack === 'rehab') && (
           <View style={styles.cardsList}>
-            {/* 1. Database Worksessions */}
-            {activeFilter !== 'plans' &&
-              filteredWorksessions.map((ws) => {
-                const isRehab = ws.type === 'rehab';
-                const themeColor = isRehab ? KinetixTheme.colors.secondary : KinetixTheme.colors.primary;
-                const themeLight = isRehab ? KinetixTheme.colors.secondaryLight : KinetixTheme.colors.primaryLight;
-                const isExpanded = expandedCardId === ws.id;
-
-                return (
-                  <View key={ws.id} style={styles.card}>
-                    <TouchableOpacity
-                      onPress={() => toggleCardExpand(ws.id)}
-                      activeOpacity={0.8}
-                      style={styles.cardHeaderTouchable}
-                    >
-                      <View style={styles.cardTitleCol}>
-                        <View style={styles.cardBadgeRow}>
-                          <View style={[styles.typeBadge, { backgroundColor: themeLight }]}>
-                            <Text style={[styles.typeBadgeText, { color: themeColor }]}>
-                              {ws.type}
-                            </Text>
-                          </View>
-                          <Text style={styles.cardCategory}>{ws.category}</Text>
-                        </View>
-                        <Text style={styles.cardTitle}>{ws.title}</Text>
-                        {ws.description ? (
-                          <Text style={styles.cardDescription} numberOfLines={isExpanded ? 4 : 2}>
-                            {ws.description}
-                          </Text>
-                        ) : null}
-                      </View>
-
-                      <TouchableOpacity
-                        style={[styles.cardActionBtn, { backgroundColor: themeColor }]}
-                        onPress={() => startWorksession(ws)}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons
-                          name={isRehab ? 'medkit' : 'play'}
-                          size={18}
-                          color="#FFFFFF"
-                        />
-                      </TouchableOpacity>
-                    </TouchableOpacity>
-
-                    {/* 4-Metric Grid Row */}
-                    <View style={styles.metricsRow}>
-                      <View style={styles.metricCol}>
-                        <Text style={styles.metricLabel}>Duration</Text>
-                        <Text style={styles.metricVal}>{ws.metrics.duration}</Text>
-                      </View>
-                      <View style={styles.metricCol}>
-                        <Text style={styles.metricLabel}>Sets</Text>
-                        <Text style={styles.metricVal}>{ws.metrics.sets}</Text>
-                      </View>
-                      <View style={styles.metricCol}>
-                        <Text style={styles.metricLabel}>Reps</Text>
-                        <Text style={styles.metricVal}>{ws.metrics.reps}</Text>
-                      </View>
-                      <View style={styles.metricCol}>
-                        <Text style={styles.metricLabel}>Load</Text>
-                        <Text style={[styles.metricVal, { color: themeColor }]}>
-                          {ws.metrics.load}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Exercises Drawer (Tap card to expand) */}
-                    {isExpanded && ws.exercises && ws.exercises.length > 0 && (
-                      <View style={styles.expandedDrawer}>
-                        <View style={styles.drawerHeaderRow}>
-                          <Ionicons name="list" size={14} color={KinetixTheme.colors.textMuted} />
-                          <Text style={styles.drawerHeaderTitle}>
-                            EXERCISE SEQUENCE ({ws.exercises.length} MOVES)
-                          </Text>
-                        </View>
-
-                        {ws.exercises.map((ex, idx) => (
-                          <View key={idx} style={styles.sequenceItemRow}>
-                            <View style={[styles.sequenceIndexBadge, { backgroundColor: themeLight }]}>
-                              <Text style={[styles.sequenceIndexText, { color: themeColor }]}>
-                                {idx + 1}
-                              </Text>
-                            </View>
-                            <View style={{ flex: 1, paddingRight: 8 }}>
-                              <Text style={styles.sequenceNameText}>{ex.name}</Text>
-                              {ex.cue ? (
-                                <Text style={styles.sequenceCueText} numberOfLines={2}>
-                                  {ex.cue}
-                                </Text>
-                              ) : null}
-                            </View>
-                            <View style={styles.sequenceSetsBadge}>
-                              <Text style={styles.sequenceSetsText}>
-                                {ex.sets}x{ex.reps}
-                              </Text>
-                            </View>
-                          </View>
-                        ))}
-
-                        <TouchableOpacity
-                          style={[styles.launchDrawerBtn, { backgroundColor: themeColor }]}
-                          onPress={() => startWorksession(ws)}
-                          activeOpacity={0.8}
-                        >
-                          <Ionicons name={isRehab ? 'medkit' : 'play'} size={17} color="#FFFFFF" />
-                          <Text style={styles.launchDrawerBtnText}>
-                            Start {ws.title}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
-
-            {/* 2. Database Multi-Day Training Plans */}
+            {/* 1. Database Multi-Day Training & Rehab Plans (SHOW FIRST) */}
             {(activeFilter === 'all' || activeFilter === 'plans') && filteredPlans.length > 0 && (
               <View style={styles.plansSectionContainer}>
                 <View style={styles.sectionHeaderRow}>
-                  <Ionicons name="layers-outline" size={16} color={KinetixTheme.colors.primary} />
+                  <Ionicons
+                    name="layers-outline"
+                    size={16}
+                    color={selectedTrack === 'rehab' ? KinetixTheme.colors.secondary : '#7C3AED'}
+                  />
                   <Text style={styles.sectionHeaderTitle}>
-                    CURATED DATABASE PLANS ({filteredPlans.length})
+                    {selectedTrack === 'rehab' ? 'REHABILITATION & RECOVERY PROGRAMS' : 'TRAINING & WORKOUT PROGRAMS'} ({filteredPlans.length})
                   </Text>
                 </View>
 
@@ -830,7 +818,10 @@ export default function KinetixLibrary() {
                           </View>
 
                           {plan.worksessions.map((sessionItem, sIdx) => {
-                            const wsCard = sessionItem.worksession;
+                            const wsCard =
+                              sessionItem.worksession ||
+                              worksessions.find((w) => w.id === sessionItem.worksessionId) ||
+                              null;
                             return (
                               <View key={sIdx} style={styles.planSessionRow}>
                                 <View style={{ flex: 1, paddingRight: 8 }}>
@@ -862,7 +853,140 @@ export default function KinetixLibrary() {
               </View>
             )}
 
-            {filteredWorksessions.length === 0 && (activeFilter === 'plans' ? filteredPlans.length === 0 : true) && (
+            {/* 2. Standalone Worksessions (SHOW SECOND) */}
+            {activeFilter !== 'plans' && filteredWorksessions.length > 0 && (
+              <View style={[styles.plansSectionContainer, { marginTop: (activeFilter === 'all' && filteredPlans.length > 0) ? 14 : 4 }]}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons
+                    name={selectedTrack === 'rehab' ? 'medkit-outline' : 'barbell-outline'}
+                    size={16}
+                    color={selectedTrack === 'rehab' ? KinetixTheme.colors.secondary : KinetixTheme.colors.primary}
+                  />
+                  <Text style={styles.sectionHeaderTitle}>
+                    {selectedTrack === 'rehab' ? 'INDIVIDUAL REHAB PROTOCOLS' : 'INDIVIDUAL WORKSESSIONS'} ({filteredWorksessions.length})
+                  </Text>
+                </View>
+
+                {filteredWorksessions.map((ws) => {
+                  const isRehab = ws.type === 'rehab';
+                  const themeColor = isRehab ? KinetixTheme.colors.secondary : KinetixTheme.colors.primary;
+                  const themeLight = isRehab ? KinetixTheme.colors.secondaryLight : KinetixTheme.colors.primaryLight;
+                  const isExpanded = expandedCardId === ws.id;
+
+                  return (
+                    <View key={ws.id} style={styles.card}>
+                      <TouchableOpacity
+                        onPress={() => toggleCardExpand(ws.id)}
+                        activeOpacity={0.8}
+                        style={styles.cardHeaderTouchable}
+                      >
+                        <View style={styles.cardTitleCol}>
+                          <View style={styles.cardBadgeRow}>
+                            <View style={[styles.typeBadge, { backgroundColor: themeLight }]}>
+                              <Text style={[styles.typeBadgeText, { color: themeColor }]}>
+                                {ws.type}
+                              </Text>
+                            </View>
+                            <Text style={styles.cardCategory}>{ws.category}</Text>
+                          </View>
+                          <Text style={styles.cardTitle}>{ws.title}</Text>
+                          {ws.description ? (
+                            <Text style={styles.cardDescription} numberOfLines={isExpanded ? 4 : 2}>
+                              {ws.description}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        <TouchableOpacity
+                          style={[styles.cardActionBtn, { backgroundColor: themeColor }]}
+                          onPress={() => startWorksession(ws)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons
+                            name={isRehab ? 'medkit' : 'play'}
+                            size={18}
+                            color="#FFFFFF"
+                          />
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+
+                      {/* 4-Metric Grid Row */}
+                      <View style={styles.metricsRow}>
+                        <View style={styles.metricCol}>
+                          <Text style={styles.metricLabel}>Duration</Text>
+                          <Text style={styles.metricVal}>{ws.metrics.duration}</Text>
+                        </View>
+                        <View style={styles.metricCol}>
+                          <Text style={styles.metricLabel}>Sets</Text>
+                          <Text style={styles.metricVal}>{ws.metrics.sets}</Text>
+                        </View>
+                        <View style={styles.metricCol}>
+                          <Text style={styles.metricLabel}>Reps</Text>
+                          <Text style={styles.metricVal}>{ws.metrics.reps}</Text>
+                        </View>
+                        <View style={styles.metricCol}>
+                          <Text style={styles.metricLabel}>Load</Text>
+                          <Text style={[styles.metricVal, { color: themeColor }]}>
+                            {ws.metrics.load}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Exercises Drawer (Tap card to expand) */}
+                      {isExpanded && ws.exercises && ws.exercises.length > 0 && (
+                        <View style={styles.expandedDrawer}>
+                          <View style={styles.drawerHeaderRow}>
+                            <Ionicons name="list" size={14} color={KinetixTheme.colors.textMuted} />
+                            <Text style={styles.drawerHeaderTitle}>
+                              EXERCISE SEQUENCE ({ws.exercises.length} MOVES)
+                            </Text>
+                          </View>
+
+                          {ws.exercises.map((ex, idx) => (
+                            <View key={idx} style={styles.sequenceItemRow}>
+                              <View style={[styles.sequenceIndexBadge, { backgroundColor: themeLight }]}>
+                                <Text style={[styles.sequenceIndexText, { color: themeColor }]}>
+                                  {idx + 1}
+                                </Text>
+                              </View>
+                              <View style={{ flex: 1, paddingRight: 8 }}>
+                                <Text style={styles.sequenceNameText}>{ex.name}</Text>
+                                {ex.cue ? (
+                                  <Text style={styles.sequenceCueText} numberOfLines={2}>
+                                    {ex.cue}
+                                  </Text>
+                                ) : null}
+                              </View>
+                              <View style={styles.sequenceSetsBadge}>
+                                <Text style={styles.sequenceSetsText}>
+                                  {ex.sets}x{ex.reps}
+                                </Text>
+                              </View>
+                            </View>
+                          ))}
+
+                          <TouchableOpacity
+                            style={[styles.launchDrawerBtn, { backgroundColor: themeColor }]}
+                            onPress={() => startWorksession(ws)}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name={isRehab ? 'medkit' : 'play'} size={17} color="#FFFFFF" />
+                            <Text style={styles.launchDrawerBtnText}>
+                              Start {ws.title}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Empty State */}
+            {((activeFilter === 'plans' && filteredPlans.length === 0) ||
+              (activeFilter !== 'plans' && activeFilter !== 'all' && filteredWorksessions.length === 0) ||
+              (activeFilter === 'all' && filteredPlans.length === 0 && filteredWorksessions.length === 0)) && (
               <View style={styles.emptyCard}>
                 <Ionicons name="search-outline" size={36} color={KinetixTheme.colors.textMuted} />
                 <Text style={styles.emptyTitle}>No sessions or plans found</Text>
@@ -889,6 +1013,7 @@ export default function KinetixLibrary() {
             {filteredExercises.map((exercise) => {
               const isExpanded = expandedExerciseId === exercise.id;
               const instructions = exercise.instructions || getExerciseInstructions(exercise);
+              const description = exercise.description || getExerciseDescription(exercise);
               const difficulty = exercise.difficulty || getExerciseDifficulty(exercise);
               const mechanics = exercise.mechanics || getExerciseMechanics(exercise);
               const videoUrl = exercise.video_url || getExerciseVideoUrl(exercise);
@@ -897,6 +1022,14 @@ export default function KinetixLibrary() {
                 exercise.category === 'Recovery' ||
                 exercise.muscle_group?.toLowerCase().includes('rehab') ||
                 exercise.muscle_group?.toLowerCase().includes('pain');
+
+              const trackingType = exercise.tracking_type || getExerciseTrackingType(exercise);
+              const metricBadge =
+                trackingType === 'time'
+                  ? { label: 'TIME', icon: 'timer-outline' as const, color: '#2563EB', bg: '#EFF6FF' }
+                  : trackingType === 'weight_reps'
+                  ? { label: 'WEIGHT + REPS', icon: 'barbell-outline' as const, color: '#7C3AED', bg: '#F5F3FF' }
+                  : { label: 'REPS', icon: 'repeat-outline' as const, color: '#059669', bg: '#ECFDF5' };
 
               const badgeColor = isRehab ? KinetixTheme.colors.secondary : KinetixTheme.colors.primary;
               const badgeBg = isRehab ? KinetixTheme.colors.secondaryLight : KinetixTheme.colors.primaryLight;
@@ -938,6 +1071,13 @@ export default function KinetixLibrary() {
                             </Text>
                           </View>
                         ) : null}
+
+                        <View style={[styles.metricTag, { backgroundColor: metricBadge.bg }]}>
+                          <Ionicons name={metricBadge.icon} size={11} color={metricBadge.color} />
+                          <Text style={[styles.metricTagText, { color: metricBadge.color }]}>
+                            {metricBadge.label}
+                          </Text>
+                        </View>
                       </View>
 
                       <Text style={styles.exerciseNameText}>{exercise.name}</Text>
@@ -969,7 +1109,17 @@ export default function KinetixLibrary() {
 
                   {isExpanded && (
                     <View style={styles.expandedDrawer}>
-                      {instructions ? (
+                      {description ? (
+                        <View style={styles.coachingBox}>
+                          <View style={styles.coachingHeader}>
+                            <Ionicons name="medical-outline" size={15} color={badgeColor} />
+                            <Text style={[styles.coachingTitle, { color: badgeColor }]}>
+                              CLINICAL PROTOCOL & GUIDELINES
+                            </Text>
+                          </View>
+                          <Text style={styles.coachingBody}>{description}</Text>
+                        </View>
+                      ) : instructions ? (
                         <View style={styles.coachingBox}>
                           <View style={styles.coachingHeader}>
                             <Ionicons name="bulb-outline" size={15} color={badgeColor} />
@@ -998,6 +1148,12 @@ export default function KinetixLibrary() {
                           <Text style={styles.specLabel}>Mechanics</Text>
                           <Text style={styles.specValue} numberOfLines={1}>
                             {mechanics || 'Compound'}
+                          </Text>
+                        </View>
+                        <View style={styles.specItem}>
+                          <Text style={styles.specLabel}>Tracking</Text>
+                          <Text style={[styles.specValue, { color: metricBadge.color }]} numberOfLines={1}>
+                            {metricBadge.label}
                           </Text>
                         </View>
                       </View>
@@ -1049,15 +1205,14 @@ export default function KinetixLibrary() {
           </View>
         )}
 
-        {/* Custom Plan Builder Quick Trigger */}
-        <TouchableOpacity
-          style={styles.customBuilderTrigger}
-          onPress={() => setShowCustomBuilder(true)}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="add-circle-outline" size={20} color={KinetixTheme.colors.primary} />
-          <Text style={styles.customBuilderTriggerText}>Open Full Custom Plan Builder</Text>
-        </TouchableOpacity>
+        {/* ========================================================= */}
+        {/* VIEW 4: DEDICATED EDIT STUDIO (Plans, Sessions, Moves)     */}
+        {/* ========================================================= */}
+        {selectedTrack === 'edit' && (
+          <View style={{ flex: 1, marginTop: 4 }}>
+            <PlanBuilder isEmbedded={true} />
+          </View>
+        )}
 
         <View style={{ height: 24 }} />
       </ScrollView>
@@ -1123,8 +1278,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
+    gap: 4,
+    paddingVertical: 9,
     borderRadius: KinetixTheme.borderRadius.md,
   },
   segmentBtnActive: {
@@ -1132,7 +1287,7 @@ const styles = StyleSheet.create({
     ...KinetixTheme.shadows.card,
   },
   segmentText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '600',
     color: KinetixTheme.colors.textMuted,
   },
@@ -1143,15 +1298,15 @@ const styles = StyleSheet.create({
   tabBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   countPill: {
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 10,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 8,
   },
   countPillText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '800',
   },
   searchBar: {
@@ -1494,6 +1649,19 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  metricTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  metricTagText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
   exerciseNameText: {
     fontSize: 15,
     fontWeight: '800',
@@ -1638,23 +1806,106 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: KinetixTheme.colors.primary,
   },
-  customBuilderTrigger: {
+  createTrackContainer: {
+    gap: 14,
+    paddingTop: 4,
+  },
+  createHeroCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: KinetixTheme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...KinetixTheme.shadows.card,
+  },
+  createHeroIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: KinetixTheme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createHeroTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: KinetixTheme.colors.text,
+    letterSpacing: 0.5,
+  },
+  createHeroDesc: {
+    fontSize: 12,
+    color: KinetixTheme.colors.textMuted,
+    marginTop: 2,
+    lineHeight: 17,
+  },
+  createOptionsList: {
+    gap: 12,
+  },
+  createOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    borderRadius: KinetixTheme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 12,
+    ...KinetixTheme.shadows.card,
+  },
+  createOptionIconBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createOptionContent: {
+    flex: 1,
+  },
+  createOptionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 3,
+  },
+  createOptionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: KinetixTheme.colors.text,
+  },
+  createBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  createBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  createOptionDesc: {
+    fontSize: 11.5,
+    color: KinetixTheme.colors.textMuted,
+    lineHeight: 16,
+  },
+  openStudioPrimaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    backgroundColor: KinetixTheme.colors.primary,
     paddingVertical: 14,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: KinetixTheme.colors.border,
     borderRadius: KinetixTheme.borderRadius.lg,
-    marginTop: 14,
+    marginTop: 4,
     ...KinetixTheme.shadows.card,
   },
-  customBuilderTriggerText: {
-    fontSize: 13,
+  openStudioPrimaryBtnText: {
+    fontSize: 14,
     fontWeight: '700',
-    color: KinetixTheme.colors.primary,
+    color: '#FFFFFF',
   },
   modalHeader: {
     flexDirection: 'row',

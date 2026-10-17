@@ -1,6 +1,6 @@
 export type DifficultyLevel = 'Beginner' | 'Intermediate' | 'Advanced';
 
-export type TrackingType = 'reps' | 'time' | 'distance';
+export type TrackingType = 'reps' | 'time' | 'weight_reps' | 'distance';
 
 export interface Exercise {
   id: string;
@@ -8,9 +8,11 @@ export interface Exercise {
   category: string;
   equipment: string;
   muscle_group: string;
+  tracking_type?: TrackingType | string | null;
   difficulty?: DifficultyLevel | string | null;
   mechanics?: string | null;
   instructions?: string | null;
+  description?: string | null;
   video_url?: string | null;
   video_thumbnail_url?: string | null;
   is_default?: boolean;

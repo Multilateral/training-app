@@ -32,10 +32,14 @@ export default function KinetixDashboard() {
 
   const startTodaySession = (track?: 'performance' | 'rehab' | 'full') => {
     const selected = track === 'rehab' ? rehabWs : performanceWs;
+    const isRehab = selected.type === 'rehab';
     const worksessionData = {
       name: selected.title,
       focus: selected.category,
       estimatedDuration: parseInt(selected.metrics.duration) || 30,
+      type: selected.type,
+      isRehab,
+      category: selected.category,
       exercises: selected.exercises.map((e) => ({
         name: e.name,
         cue: e.cue || 'Maintain strict form.',
@@ -51,6 +55,8 @@ export default function KinetixDashboard() {
       setActiveSessionMetadata({
         isActive: true,
         worksessionName: selected.title,
+        worksessionType: selected.type,
+        isRehab,
         currentExerciseName: selected.exercises[0]?.name || 'Exercise 1',
         currentExerciseIndex: 0,
         totalExercises: selected.exercises.length,
@@ -64,7 +70,7 @@ export default function KinetixDashboard() {
       pathname: '/active-workout',
       params: {
         worksession: JSON.stringify(worksessionData),
-        plan: JSON.stringify({ id: selected.id, name: selected.title }),
+        plan: JSON.stringify({ id: selected.id, name: selected.title, type: selected.type, isRehab }),
       },
     });
   };

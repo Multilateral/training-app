@@ -36,6 +36,55 @@ function getInferredMuscleGroup(name, category) {
   return c || 'Full Body';
 }
 
+function getInferredTrackingType(name, category, equipment, mechanics) {
+  const n = (name || '').toLowerCase();
+  const c = (category || '').toLowerCase();
+  const eq = (equipment || '').toLowerCase();
+  const m = (mechanics || '').toLowerCase();
+
+  if (
+    n.includes('hold') ||
+    n.includes('plank') ||
+    n.includes('spanish squat') ||
+    n.includes('balance') ||
+    n.includes('deadbug') ||
+    n.includes('bird-dog') ||
+    n.includes('cat-cow') ||
+    n.includes('alphabet') ||
+    c === 'yoga' ||
+    n.includes('pose') ||
+    n.includes('dog') ||
+    n.includes('chaturanga') ||
+    n.includes('warrior') ||
+    n.includes('thread the needle') ||
+    m.includes('isometric')
+  ) {
+    return 'time';
+  }
+
+  if (
+    eq.includes('dumbbell') ||
+    eq.includes('barbell') ||
+    eq === 'kettlebell' ||
+    n.includes('bench press') ||
+    n.includes('deadlift') ||
+    (n.includes('squat') && !n.includes('pistol') && !n.includes('jump')) ||
+    (n.includes('curl') && !n.includes('nordic') && !n.includes('mcgill')) ||
+    n.includes('overhead press') ||
+    n.includes('clean') ||
+    n.includes('snatch') ||
+    n.includes('kettlebell') ||
+    (n.includes('row') && !n.includes('trx') && !n.includes('inverted')) ||
+    n.includes('farmer') ||
+    n.includes('suitcase') ||
+    n.includes('halo')
+  ) {
+    return 'weight_reps';
+  }
+
+  return 'reps';
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0] || '--list';
@@ -154,9 +203,41 @@ async function main() {
     return;
   }
 
+  if (command === '--backfill-tracking-type') {
+    console.log('Fetching all exercises from Supabase to backfill tracking_type...');
+    const { data, error } = await supabase.from('exercises').select('*');
+    if (error) {
+      console.error('Error fetching exercises:', error.message);
+      return;
+    }
+    console.log(`Processing ${data.length} exercises...`);
+    let updatedCount = 0;
+    for (const ex of data) {
+      const type = getInferredTrackingType(ex.name, ex.category, ex.equipment, ex.mechanics);
+      const { error: upErr } = await supabase
+        .from('exercises')
+        .update({ tracking_type: type })
+        .eq('id', ex.id);
+
+      if (upErr) {
+        console.error(`Failed to update ${ex.name}:`, upErr.message);
+        if (upErr.message.includes('column exercises.tracking_type does not exist')) {
+          console.error('\n⚠️ Please run migration_exercise_tracking_type.sql in your Supabase SQL Editor first!');
+          return;
+        }
+      } else {
+        updatedCount++;
+        console.log(` -> [${type}] ${ex.name}`);
+      }
+    }
+    console.log(`\nSuccessfully backfilled ${updatedCount} exercises with tracking_type!`);
+    return;
+  }
+
   console.log('Unknown command. Available commands:');
   console.log('  node manage_exercises.js --list');
   console.log('  node manage_exercises.js --videos');
+  console.log('  node manage_exercises.js --backfill-tracking-type');
   console.log('  node manage_exercises.js --set-video "Exercise Name" "https://...url"');
   console.log('  node manage_exercises.js --promote "Exercise Name"');
   console.log('  node manage_exercises.js --promote-all-custom');

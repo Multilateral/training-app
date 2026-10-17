@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 const path = require('path');
+const { getExerciseDescription } = require('../src/data/recoveryMetadata.js');
 
 const supabase = createClient(
   'https://nfzuvugwamzjsxngptta.supabase.co',
@@ -67,6 +68,55 @@ function inferTypeAndCategory(ws) {
   };
 }
 
+function getInferredTrackingType(name, category, equipment, mechanics) {
+  const n = (name || '').toLowerCase();
+  const c = (category || '').toLowerCase();
+  const eq = (equipment || '').toLowerCase();
+  const m = (mechanics || '').toLowerCase();
+
+  if (
+    n.includes('hold') ||
+    n.includes('plank') ||
+    n.includes('spanish squat') ||
+    n.includes('balance') ||
+    n.includes('deadbug') ||
+    n.includes('bird-dog') ||
+    n.includes('cat-cow') ||
+    n.includes('alphabet') ||
+    c === 'yoga' ||
+    n.includes('pose') ||
+    n.includes('dog') ||
+    n.includes('chaturanga') ||
+    n.includes('warrior') ||
+    n.includes('thread the needle') ||
+    m.includes('isometric')
+  ) {
+    return 'time';
+  }
+
+  if (
+    eq.includes('dumbbell') ||
+    eq.includes('barbell') ||
+    eq === 'kettlebell' ||
+    n.includes('bench press') ||
+    n.includes('deadlift') ||
+    (n.includes('squat') && !n.includes('pistol') && !n.includes('jump')) ||
+    (n.includes('curl') && !n.includes('nordic') && !n.includes('mcgill')) ||
+    n.includes('overhead press') ||
+    n.includes('clean') ||
+    n.includes('snatch') ||
+    n.includes('kettlebell') ||
+    (n.includes('row') && !n.includes('trx') && !n.includes('inverted')) ||
+    n.includes('farmer') ||
+    n.includes('suitcase') ||
+    n.includes('halo')
+  ) {
+    return 'weight_reps';
+  }
+
+  return 'reps';
+}
+
 async function buildDatabaseLibrary() {
   const { data: wsData } = await supabase
     .from('worksessions')
@@ -87,6 +137,7 @@ async function buildDatabaseLibrary() {
     const exercises = (ws.worksession_exercises || []).map((we) => {
       const ex = we.exercises || {};
       const isHold = we.tracking_type === 'time' || (we.target_time && we.target_time > 0);
+      const trackingType = isHold ? 'time' : getInferredTrackingType(ex.name, ex.category, ex.equipment, ex.mechanics);
       return {
         name: ex.name || 'Exercise',
         cue: we.notes || ex.instructions || 'Maintain controlled form and posture.',
@@ -105,11 +156,12 @@ async function buildDatabaseLibrary() {
             ? '24kg'
             : 'Moderate',
         restSeconds: isHold ? 45 : 60,
-        tracking_type: we.tracking_type || (isHold ? 'time' : 'reps_weight'),
+        tracking_type: trackingType,
         equipment: ex.equipment || 'Bodyweight',
         muscle_group: ex.muscle_group || ex.category || 'General',
         difficulty: ex.difficulty || 'Intermediate',
         mechanics: ex.mechanics || 'Compound',
+        description: ex.description || getExerciseDescription(ex) || null,
       };
     });
 
@@ -192,6 +244,7 @@ export interface DatabaseWorksessionCard {
     muscle_group?: string;
     difficulty?: string;
     mechanics?: string;
+    description?: string | null;
   }[];
 }
 

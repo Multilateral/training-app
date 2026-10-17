@@ -21,14 +21,39 @@ export default function ActiveWorkoutScreen() {
     console.error('Failed to parse params', e);
   }
 
-  const handleFinish = async (durationMins?: number) => {
+  const handleFinish = async (durationMins?: number, summary?: any) => {
     try {
-      if (parsedWorksession?.name && logWorkout) {
+      const workoutTitle = parsedWorksession?.name || summary?.worksessionName || 'Active Workout';
+      const isRehab = Boolean(
+        summary?.isRehab ||
+        summary?.sessionType === 'rehab' ||
+        parsedWorksession?.type === 'rehab' ||
+        parsedWorksession?.isRehab === true ||
+        parsedPlan?.type === 'rehab' ||
+        workoutTitle.toLowerCase().includes('rehab') ||
+        workoutTitle.toLowerCase().includes('protocol') ||
+        workoutTitle.toLowerCase().includes('mcgill') ||
+        workoutTitle.toLowerCase().includes('recovery')
+      );
+
+      if (logWorkout) {
         await logWorkout(
-          parsedWorksession.name,
-          durationMins || 25,
+          workoutTitle,
+          durationMins || summary?.durationMins || 25,
           'High',
-          parsedPlan?.id || null
+          parsedPlan?.id || null,
+          {
+            startTime: summary?.startTime,
+            endTime: summary?.endTime,
+            durationSeconds: summary?.durationSecs,
+            durationFormatted: summary?.durationFormatted,
+            worksessionName: workoutTitle,
+            sessionType: isRehab ? 'rehab' : 'workout',
+            isRehab,
+            category: parsedWorksession?.focus || summary?.category || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
+            exercisesCompleted: summary?.exercisesCompleted,
+            totalSets: summary?.totalSets,
+          }
         );
       }
     } catch (err) {

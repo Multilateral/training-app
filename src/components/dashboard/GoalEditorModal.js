@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, ScrollView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { triggerHaptic } from '../../utils/dashboardUtils';
+import { triggerHaptic, DEFAULT_GOALS } from '../../utils/dashboardUtils';
 
 export default function GoalEditorModal({
   visible,
@@ -61,6 +61,21 @@ export default function GoalEditorModal({
     setEditableGoals(prev => prev.filter(g => g.id !== id));
   };
 
+  const handleRemoveStandardGoals = () => {
+    triggerHaptic('medium');
+    const standardIds = ['goal-weekly-freq', 'goal-recovery-rehab', 'goal-active-time'];
+    setEditableGoals(prev => prev.filter(g => !standardIds.includes(g.id) && g.type === 'custom'));
+  };
+
+  const handleRestoreStandardGoals = () => {
+    triggerHaptic('medium');
+    const existingIds = new Set(editableGoals.map(g => g.id));
+    const missing = DEFAULT_GOALS.filter(g => !existingIds.has(g.id));
+    setEditableGoals(prev => [...missing, ...prev]);
+  };
+
+  const hasStandardGoals = editableGoals.some(g => g.type !== 'custom');
+
   const handleSave = () => {
     triggerHaptic('medium');
     onSaveGoals && onSaveGoals(editableGoals);
@@ -85,6 +100,27 @@ export default function GoalEditorModal({
           <Text style={styles.subtitle}>
             Adjust your targets or add new performance milestones for the week.
           </Text>
+
+          {/* Quick Actions Bar */}
+          <View style={styles.quickActionsRow}>
+            {hasStandardGoals ? (
+              <TouchableOpacity
+                onPress={handleRemoveStandardGoals}
+                style={styles.removeStandardChip}
+              >
+                <Ionicons name="trash-outline" size={12} color="#FF6B6B" />
+                <Text style={styles.removeStandardChipText}>Remove Standard Goals</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                onPress={handleRestoreStandardGoals}
+                style={styles.restoreStandardChip}
+              >
+                <Ionicons name="refresh-outline" size={12} color="#00D09E" />
+                <Text style={styles.restoreStandardChipText}>Restore Standard Goals</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           <ScrollView style={styles.goalsScroll}>
             {editableGoals.map((goal) => (
@@ -114,14 +150,12 @@ export default function GoalEditorModal({
                     <Ionicons name="add" size={16} color="#FFF" />
                   </TouchableOpacity>
 
-                  {goal.type === 'custom' && (
-                    <TouchableOpacity
-                      onPress={() => handleDeleteGoal(goal.id)}
-                      style={[styles.stepBtn, { backgroundColor: '#FF4C4C20', marginLeft: 4 }]}
-                    >
-                      <Ionicons name="trash-outline" size={14} color="#FF4C4C" />
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    onPress={() => handleDeleteGoal(goal.id)}
+                    style={[styles.stepBtn, { backgroundColor: '#FF4C4C20', marginLeft: 4 }]}
+                  >
+                    <Ionicons name="trash-outline" size={14} color="#FF4C4C" />
+                  </TouchableOpacity>
                 </View>
               </View>
             ))}
@@ -362,5 +396,42 @@ const styles = StyleSheet.create({
     color: '#111',
     fontWeight: '800',
     fontSize: 14
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    marginBottom: 10,
+    gap: 8
+  },
+  removeStandardChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FF6B6B20',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FF6B6B55'
+  },
+  removeStandardChipText: {
+    color: '#FF6B6B',
+    fontSize: 11,
+    fontWeight: '700'
+  },
+  restoreStandardChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#00D09E20',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#00D09E55'
+  },
+  restoreStandardChipText: {
+    color: '#00D09E',
+    fontSize: 11,
+    fontWeight: '700'
   }
 });

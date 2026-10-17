@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,10 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -16,6 +20,7 @@ import KinetixBottomNav from './KinetixBottomNav';
 import KinetixHeader from './KinetixHeader';
 import { TrainingContext } from '../context/TrainingContext';
 import { DATABASE_WORKSESSIONS } from '../data/databaseLibraryData';
+import { getExerciseTrackingType } from '../data/recoveryMetadata';
 
 interface ExerciseData {
   id?: string;
@@ -43,10 +48,26 @@ interface WorksessionData {
   exercises: ExerciseData[];
 }
 
+export interface WorkoutFinishSummary {
+  durationMins: number;
+  durationSecs: number;
+  startTime: number;
+  endTime: number;
+  startTimeFormatted: string;
+  endTimeFormatted: string;
+  durationFormatted: string;
+  worksessionName: string;
+  exercisesCompleted: number;
+  totalSets: number;
+  sessionType?: 'rehab' | 'workout';
+  isRehab?: boolean;
+  category?: string;
+}
+
 interface KinetixActiveWorkoutProps {
   worksession?: any;
   plan?: any;
-  onFinish?: (durationMins?: number) => void;
+  onFinish?: (durationMins?: number, summary?: WorkoutFinishSummary) => void;
 }
 
 const STANDBY_SESSIONS: WorksessionData[] = DATABASE_WORKSESSIONS.map((ws) => ({
@@ -56,16 +77,24 @@ const STANDBY_SESSIONS: WorksessionData[] = DATABASE_WORKSESSIONS.map((ws) => ({
   focus: ws.description || ws.category || 'Targeted Protocol',
   duration: parseInt(ws.metrics.duration) || 30,
   rpe: ws.type === 'rehab' ? '5.0' : '8.0',
-  exercises: ws.exercises.map((e) => ({
-    name: e.name,
-    cue: e.cue || 'Controlled form.',
-    totalSets: e.sets || 3,
-    reps: String(e.reps),
-    load: e.weight || 'Standard',
-    restSeconds: e.restSeconds || 60,
-    trackingType: (e.tracking_type === 'time' ? 'duration' : 'weight_reps') as 'duration' | 'weight_reps',
-    video_url: null,
-  })),
+  exercises: ws.exercises.map((e) => {
+    const inferred = getExerciseTrackingType(e);
+    const resolvedTrackingType: 'duration' | 'weight_reps' | 'bodyweight' =
+      inferred === 'time' ? 'duration' : inferred === 'weight_reps' ? 'weight_reps' : 'bodyweight';
+    return {
+      name: e.name,
+      cue: e.cue || 'Controlled form.',
+      totalSets: e.sets || 3,
+      reps: String(e.reps),
+      load: e.weight || 'Standard',
+      restSeconds: e.restSeconds || 60,
+      trackingType: resolvedTrackingType,
+      tracking_type: e.tracking_type || inferred,
+      video_url: null,
+      equipment: e.equipment,
+      muscle_group: e.muscle_group,
+    };
+  }),
 }));
 
 export default function KinetixActiveWorkout({
@@ -87,21 +116,71 @@ export default function KinetixActiveWorkout({
   );
 
   const initialExercises: ExerciseData[] = worksession?.exercises && worksession.exercises.length > 0
-    ? worksession.exercises.map((e: any, idx: number) => ({
-        id: `ex-${idx}`,
-        name: e.name || 'Exercise',
-        cue: e.cue || '',
-        totalSets: e.totalSets || e.sets || 3,
-        reps: typeof e.reps === 'number' ? `${e.reps} reps` : (e.reps || '10 reps'),
-        load: e.load || e.weight || 'Bodyweight',
-        trackingType: e.trackingType || (e.tracking_type === 'time' ? 'duration' : 'weight_reps'),
-        video_url: e.video_url || null,
-      }))
+    ? worksession.exercises.map((e: any, idx: number) => {
+        const inferred = getExerciseTrackingType(e);
+        const resolvedTrackingType: 'duration' | 'weight_reps' | 'bodyweight' =
+          e.trackingType || (inferred === 'time' ? 'duration' : inferred === 'weight_reps' ? 'weight_reps' : 'bodyweight');
+        return {
+          id: `ex-${idx}`,
+          name: e.name || 'Exercise',
+          cue: e.cue || '',
+          totalSets: e.totalSets || e.sets || 3,
+          reps: typeof e.reps === 'number' ? `${e.reps} reps` : (e.reps || '10 reps'),
+          load: e.load || e.weight || 'Bodyweight',
+          trackingType: resolvedTrackingType,
+          tracking_type: e.tracking_type || inferred,
+          video_url: e.video_url || null,
+          equipment: e.equipment,
+          muscle_group: e.muscle_group,
+        };
+      })
+    : worksession?.worksession_exercises && worksession.worksession_exercises.length > 0
+    ? worksession.worksession_exercises.map((we: any, idx: number) => {
+        const ex = we.exercises || {};
+        const isHold = we.tracking_type === 'time' || (we.target_time && we.target_time > 0);
+        const inferred = getExerciseTrackingType(ex);
+        const resolvedTrackingType: 'duration' | 'weight_reps' | 'bodyweight' =
+          isHold ? 'duration' : inferred === 'weight_reps' ? 'weight_reps' : 'bodyweight';
+
+        let parsedLoad = 'Bodyweight';
+        if (we.notes && we.notes.toLowerCase().includes('load:')) {
+          const match = we.notes.match(/load:\s*([0-9.]+\s*kg|[0-9.]+)/i);
+          parsedLoad = match ? (match[1].includes('kg') ? match[1] : `${match[1]}kg`) : 'Standard';
+        } else if (we.load || we.weight) {
+          parsedLoad = we.load || we.weight;
+        } else if (resolvedTrackingType === 'weight_reps') {
+          parsedLoad = '60kg';
+        }
+
+        return {
+          id: `ex-${idx}`,
+          name: ex.name || 'Exercise',
+          cue: we.notes || ex.instructions || 'Maintain controlled posture.',
+          totalSets: we.target_sets || 3,
+          reps: isHold
+            ? (we.target_time ? `${we.target_time}s` : '45s')
+            : (we.target_reps ? `${we.target_reps} reps` : '10 reps'),
+          load: parsedLoad,
+          trackingType: resolvedTrackingType,
+          tracking_type: we.tracking_type || inferred,
+          video_url: ex.video_url || null,
+          equipment: ex.equipment,
+          muscle_group: ex.muscle_group,
+        };
+      })
     : activeSessionMetadata?.exercises && activeSessionMetadata.exercises.length > 0
     ? activeSessionMetadata.exercises
     : STANDBY_SESSIONS[0].exercises;
 
   const [currentExercises, setCurrentExercises] = useState<ExerciseData[]>(initialExercises);
+
+  // Target customization state
+  const [isTargetModalVisible, setIsTargetModalVisible] = useState<boolean>(false);
+  const [editTargetSets, setEditTargetSets] = useState<number>(3);
+  const [editTargetReps, setEditTargetReps] = useState<number>(10);
+  const [editTargetLoad, setEditTargetLoad] = useState<number>(60);
+  const [editTargetTime, setEditTargetTime] = useState<number>(45);
+  const [editTargetBwExtra, setEditTargetBwExtra] = useState<number>(0);
 
   const [currentExIndex, setCurrentExIndex] = useState<number>(
     typeof activeSessionMetadata?.currentExerciseIndex === 'number'
@@ -116,7 +195,18 @@ export default function KinetixActiveWorkout({
       : 1
   );
 
-  const [activeMode, setActiveMode] = useState<'duration' | 'weight_reps' | 'bodyweight'>('duration');
+  const resolveTargetMode = (ex: any): 'duration' | 'weight_reps' | 'bodyweight' => {
+    if (!ex) return 'duration';
+    if (ex.trackingType === 'duration' || ex.trackingType === 'weight_reps' || ex.trackingType === 'bodyweight') {
+      return ex.trackingType;
+    }
+    const raw = ex.tracking_type || getExerciseTrackingType(ex);
+    if (raw === 'time' || raw === 'duration') return 'duration';
+    if (raw === 'weight_reps') return 'weight_reps';
+    return 'bodyweight';
+  };
+
+  const [activeMode, setActiveMode] = useState<'duration' | 'weight_reps' | 'bodyweight'>(() => resolveTargetMode(currentEx));
 
   // Modality States
   const [holdSeconds, setHoldSeconds] = useState(45);
@@ -130,8 +220,149 @@ export default function KinetixActiveWorkout({
   const [bwExtraLoad, setBwExtraLoad] = useState<number>(0);
 
   const [currentDockLoad, setCurrentDockLoad] = useState(40);
-  const [painLevel, setPainLevel] = useState<'0' | '2' | '5'>('0');
   const [selectedVideoModal, setSelectedVideoModal] = useState<any>(null);
+
+  // Live Workout Duration Stopwatch & Start Timestamp states
+  const [workoutStartTime, setWorkoutStartTime] = useState<number>(() => {
+    if (activeSessionMetadata?.startTime && typeof activeSessionMetadata.startTime === 'number') {
+      return activeSessionMetadata.startTime;
+    }
+    return Date.now();
+  });
+
+  const [elapsedWorkoutSeconds, setElapsedWorkoutSeconds] = useState<number>(() => {
+    const start = activeSessionMetadata?.startTime && typeof activeSessionMetadata.startTime === 'number'
+      ? activeSessionMetadata.startTime
+      : Date.now();
+    return Math.max(0, Math.floor((Date.now() - start) / 1000));
+  });
+
+  const [showCompletionModal, setShowCompletionModal] = useState<boolean>(false);
+  const [completionSummary, setCompletionSummary] = useState<WorkoutFinishSummary | null>(null);
+
+  // Non-blocking Toast HUD and Rest Timer States
+  const [toastMessage, setToastMessage] = useState<{
+    type: 'set_completed' | 'exercise_completed';
+    title: string;
+    subtitle: string;
+    badgeText?: string;
+  } | null>(null);
+
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTranslateY = useRef(new Animated.Value(-15)).current;
+  const toastTimeoutRef = useRef<any>(null);
+
+  const [isResting, setIsResting] = useState<boolean>(false);
+  const [restSecondsLeft, setRestSecondsLeft] = useState<number>(0);
+  const [totalRestTarget, setTotalRestTarget] = useState<number>(60);
+
+  const triggerToast = (toast: {
+    type: 'set_completed' | 'exercise_completed';
+    title: string;
+    subtitle: string;
+    badgeText?: string;
+  }) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToastMessage(toast);
+    toastOpacity.setValue(0);
+    toastTranslateY.setValue(-15);
+
+    Animated.parallel([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.spring(toastTranslateY, {
+        toValue: 0,
+        friction: 7,
+        tension: 60,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    toastTimeoutRef.current = setTimeout(() => {
+      dismissToast();
+    }, 3200);
+  };
+
+  const dismissToast = () => {
+    Animated.timing(toastOpacity, {
+      toValue: 0,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      setToastMessage(null);
+    });
+  };
+
+  const handleSkipRest = () => {
+    setIsResting(false);
+    setRestSecondsLeft(0);
+  };
+
+  const handleAddRestTime = (seconds: number) => {
+    setRestSecondsLeft((prev) => Math.max(0, prev + seconds));
+    setTotalRestTarget((prev) => Math.max(prev, restSecondsLeft + seconds));
+  };
+
+  // Active Rest countdown interval
+  useEffect(() => {
+    let interval: any = null;
+    if (isResting && restSecondsLeft > 0 && !isPaused) {
+      interval = setInterval(() => {
+        setRestSecondsLeft((prev) => {
+          if (prev <= 1) {
+            setIsResting(false);
+            triggerToast({
+              type: 'set_completed',
+              title: 'Rest Finished! ⚡',
+              subtitle: `Ready for Set ${currentSet} of ${currentEx?.name || 'Exercise'}`,
+              badgeText: 'TIME TO LIFT',
+            });
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isResting, restSecondsLeft, isPaused, currentSet, currentEx?.name]);
+
+  // Formatting helpers for workout duration and timestamps
+  const formatWorkoutDuration = (totalSeconds: number) => {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const formatTimeOfDay = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  };
+
+  const formatDateStamp = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  // Live stopwatch timer for overall workout session duration
+  useEffect(() => {
+    if (!hasActiveSession || isPaused) return;
+    const interval = setInterval(() => {
+      const start = workoutStartTime || Date.now();
+      setElapsedWorkoutSeconds(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [hasActiveSession, isPaused, workoutStartTime]);
 
   // Sync active session metadata globally whenever an active workout is in progress
   useEffect(() => {
@@ -145,11 +376,11 @@ export default function KinetixActiveWorkout({
         currentSet: currentSet,
         totalSets: currentEx?.totalSets || 4,
         currentLoad: currentDockLoad,
-        startTime: activeSessionMetadata?.startTime || Date.now(),
+        startTime: workoutStartTime,
         exercises: currentExercises,
       });
     }
-  }, [hasActiveSession, currentSessionName, currentExIndex, currentSet, currentDockLoad, currentEx?.name]);
+  }, [hasActiveSession, currentSessionName, currentExIndex, currentSet, currentDockLoad, currentEx?.name, workoutStartTime]);
 
   // Timer effect
   useEffect(() => {
@@ -168,8 +399,37 @@ export default function KinetixActiveWorkout({
     return () => clearInterval(interval);
   }, [timerRunning, isPaused, holdSeconds]);
 
+  // Auto-adapt tracking metrics whenever current exercise changes
+  useEffect(() => {
+    if (currentEx) {
+      const targetMode = resolveTargetMode(currentEx);
+      setActiveMode(targetMode);
+
+      if (targetMode === 'duration') {
+        const parsedSecs = parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 45;
+        setHoldSeconds(parsedSecs);
+        setTimerRunning(false);
+        setIsPaused(false);
+      } else if (targetMode === 'bodyweight') {
+        const parsedReps = parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 12;
+        setBwReps(parsedReps);
+      } else {
+        const parsedReps = parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 8;
+        setWrReps(parsedReps);
+        const parsedWeight = parseInt(String(currentEx.load || currentEx.weight).replace(/[^0-9]/g, '')) || 60;
+        if (parsedWeight > 0) {
+          setWrWeight(parsedWeight);
+          setCurrentDockLoad(parsedWeight);
+        }
+      }
+    }
+  }, [currentExIndex, currentEx?.name, currentEx?.trackingType, currentEx?.tracking_type]);
+
   // Launch a session from Standby Mode
   const handleLaunchSession = (sessionData: WorksessionData) => {
+    const now = Date.now();
+    setWorkoutStartTime(now);
+    setElapsedWorkoutSeconds(0);
     setCurrentSessionName(sessionData.name);
     setCurrentExercises(sessionData.exercises);
     setCurrentExIndex(0);
@@ -188,7 +448,7 @@ export default function KinetixActiveWorkout({
         currentSet: 1,
         totalSets: sessionData.exercises[0].totalSets || 4,
         currentLoad: 40,
-        startTime: Date.now(),
+        startTime: now,
         exercises: sessionData.exercises,
       });
     }
@@ -198,31 +458,167 @@ export default function KinetixActiveWorkout({
     setHoldSeconds((prev) => Math.max(5, prev + delta));
   };
 
+  const handleOpenTargetModal = () => {
+    setEditTargetSets(currentEx?.totalSets || 3);
+    const parsedReps = parseInt(String(currentEx?.reps).replace(/[^0-9]/g, '')) || (activeMode === 'duration' ? 45 : 10);
+    const parsedLoad = parseInt(String(currentEx?.load).replace(/[^0-9]/g, '')) || (activeMode === 'weight_reps' ? 60 : 0);
+
+    if (activeMode === 'duration') {
+      setEditTargetTime(parsedReps || 45);
+    } else if (activeMode === 'weight_reps') {
+      setEditTargetReps(parsedReps || 8);
+      setEditTargetLoad(parsedLoad || 60);
+    } else {
+      setEditTargetReps(parsedReps || 12);
+      setEditTargetBwExtra(bwExtraLoad || (parsedLoad > 0 ? parsedLoad : 0));
+    }
+    setIsTargetModalVisible(true);
+  };
+
+  const handleSaveTarget = () => {
+    const updated = [...currentExercises];
+    const ex = { ...updated[currentExIndex] };
+    ex.totalSets = editTargetSets;
+
+    if (activeMode === 'duration') {
+      ex.reps = `${editTargetTime}s`;
+      setHoldSeconds(editTargetTime);
+    } else if (activeMode === 'weight_reps') {
+      ex.reps = `${editTargetReps} reps`;
+      ex.load = `${editTargetLoad}kg`;
+      setWrReps(editTargetReps);
+      setWrWeight(editTargetLoad);
+      setCurrentDockLoad(editTargetLoad);
+    } else if (activeMode === 'bodyweight') {
+      ex.reps = `${editTargetReps} reps`;
+      ex.load = editTargetBwExtra > 0 ? `BW +${editTargetBwExtra}kg` : 'Bodyweight';
+      setBwReps(editTargetReps);
+      setBwExtraLoad(editTargetBwExtra);
+      if (editTargetBwExtra > 0) {
+        setCurrentDockLoad(editTargetBwExtra);
+      }
+    }
+
+    updated[currentExIndex] = ex;
+    setCurrentExercises(updated);
+
+    if (currentSet > editTargetSets) {
+      setCurrentSet(editTargetSets);
+    }
+
+    if (setActiveSessionMetadata) {
+      setActiveSessionMetadata((prev: any) => ({
+        ...prev,
+        totalSets: editTargetSets,
+        currentLoad: activeMode === 'weight_reps' ? editTargetLoad : editTargetBwExtra,
+        exercises: updated,
+      }));
+    }
+
+    setIsTargetModalVisible(false);
+  };
+
+  const triggerFinish = () => {
+    const now = Date.now();
+    const durationSecs = Math.max(1, Math.floor((now - workoutStartTime) / 1000));
+    const durationMins = Math.max(1, Math.round(durationSecs / 60));
+
+    const isRehab = Boolean(
+      worksession?.type === 'rehab' ||
+      worksession?.isRehab === true ||
+      plan?.type === 'rehab' ||
+      currentSessionName.toLowerCase().includes('rehab') ||
+      currentSessionName.toLowerCase().includes('protocol') ||
+      currentSessionName.toLowerCase().includes('mcgill') ||
+      currentSessionName.toLowerCase().includes('relief') ||
+      currentSessionName.toLowerCase().includes('recovery') ||
+      currentSessionName.toLowerCase().includes('mobility') ||
+      currentSessionName.toLowerCase().includes('tendon') ||
+      currentSessionName.toLowerCase().includes('achilles') ||
+      currentSessionName.toLowerCase().includes('knee') ||
+      currentSessionName.toLowerCase().includes('shoulder') ||
+      currentSessionName.toLowerCase().includes('back')
+    );
+
+    const summary: WorkoutFinishSummary = {
+      durationMins,
+      durationSecs,
+      startTime: workoutStartTime,
+      endTime: now,
+      startTimeFormatted: formatTimeOfDay(workoutStartTime),
+      endTimeFormatted: formatTimeOfDay(now),
+      durationFormatted: formatWorkoutDuration(durationSecs),
+      worksessionName: currentSessionName,
+      sessionType: isRehab ? 'rehab' : 'workout',
+      isRehab,
+      category: worksession?.focus || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
+      exercisesCompleted: Math.min(currentExercises.length, currentExIndex + 1),
+      totalSets: currentExercises.slice(0, currentExIndex + 1).reduce((sum, e) => sum + (e.totalSets || 3), 0),
+    };
+    setCompletionSummary(summary);
+    setShowCompletionModal(true);
+  };
+
+  const handleConfirmFinish = () => {
+    if (setActiveSessionMetadata) setActiveSessionMetadata(null);
+    setShowCompletionModal(false);
+    if (onFinish && completionSummary) {
+      onFinish(completionSummary.durationMins, completionSummary);
+    } else {
+      router.replace('/history');
+    }
+  };
+
   const handleCompleteSet = () => {
     const totalSetsForEx = currentEx?.totalSets || 4;
+    const restDuration = currentEx?.restSeconds || 60;
+
     if (currentSet < totalSetsForEx) {
-      setCurrentSet((prev) => prev + 1);
-      setHoldSeconds(45);
+      const completedSetNum = currentSet;
+      const nextSetNum = currentSet + 1;
+      setCurrentSet(nextSetNum);
+      const parsedHold = parseInt(String(currentEx?.reps).replace(/[^0-9]/g, '')) || 45;
+      setHoldSeconds(parsedHold);
       setTimerRunning(false);
-      Alert.alert('Set Logged! ✓', `Set ${currentSet} of ${currentEx.name} recorded.`);
+
+      // Start automatic rest timer
+      setTotalRestTarget(restDuration);
+      setRestSecondsLeft(restDuration);
+      setIsResting(true);
+
+      // Non-blocking animated HUD toast
+      triggerToast({
+        type: 'set_completed',
+        title: `Set ${completedSetNum} Logged! ✓`,
+        subtitle: `Next: Set ${nextSetNum} of ${totalSetsForEx} · ${restDuration}s Rest`,
+        badgeText: `SET ${completedSetNum}/${totalSetsForEx}`,
+      });
     } else {
       if (currentExIndex < currentExercises.length - 1) {
+        const finishedName = currentEx.name;
+        const nextEx = currentExercises[currentExIndex + 1];
+        const nextRest = nextEx?.restSeconds || 60;
+
         setCurrentExIndex((prev) => prev + 1);
         setCurrentSet(1);
-        setHoldSeconds(45);
+        const parsedHold = parseInt(String(nextEx?.reps).replace(/[^0-9]/g, '')) || 45;
+        setHoldSeconds(parsedHold);
         setTimerRunning(false);
-        Alert.alert('Exercise Completed! 🎉', `Moving to next: ${currentExercises[currentExIndex + 1]?.name}`);
+
+        // Start rest before next exercise
+        setTotalRestTarget(nextRest);
+        setRestSecondsLeft(nextRest);
+        setIsResting(true);
+
+        // Celebratory non-blocking exercise completed toast
+        triggerToast({
+          type: 'exercise_completed',
+          title: `${finishedName} Completed! 🎉`,
+          subtitle: `Next up: ${nextEx.name} · ${nextEx.totalSets || 4} sets target`,
+          badgeText: `EXERCISE ${currentExIndex + 1}/${currentExercises.length} DONE`,
+        });
       } else {
-        Alert.alert('Workout Finished! 🏆', 'Great effort! Your session has been completed.', [
-          {
-            text: 'Finish & Save',
-            onPress: () => {
-              if (setActiveSessionMetadata) setActiveSessionMetadata(null);
-              if (onFinish) onFinish(35);
-              else router.replace('/history');
-            },
-          },
-        ]);
+        triggerFinish();
       }
     }
   };
@@ -235,6 +631,10 @@ export default function KinetixActiveWorkout({
         {
           text: 'Minimize (Keep Active)',
           onPress: () => router.push('/'),
+        },
+        {
+          text: 'Finish Workout Now',
+          onPress: triggerFinish,
         },
         {
           text: 'Discard Session',
@@ -252,10 +652,25 @@ export default function KinetixActiveWorkout({
   const handleSkipSet = () => {
     const totalSetsForEx = currentEx?.totalSets || 4;
     if (currentSet < totalSetsForEx) {
+      const skippedSet = currentSet;
       setCurrentSet((prev) => prev + 1);
+      triggerToast({
+        type: 'set_completed',
+        title: `Set ${skippedSet} Skipped ⏭️`,
+        subtitle: `Now on Set ${skippedSet + 1} of ${totalSetsForEx}`,
+        badgeText: 'SKIPPED',
+      });
     } else if (currentExIndex < currentExercises.length - 1) {
+      const skippedName = currentEx.name;
+      const nextEx = currentExercises[currentExIndex + 1];
       setCurrentExIndex((prev) => prev + 1);
       setCurrentSet(1);
+      triggerToast({
+        type: 'exercise_completed',
+        title: `${skippedName} Skipped ⏭️`,
+        subtitle: `Now starting: ${nextEx.name}`,
+        badgeText: 'SKIPPED',
+      });
     }
   };
 
@@ -436,6 +851,12 @@ export default function KinetixActiveWorkout({
         </View>
 
         <View style={styles.topActiveRight}>
+          {/* Live Workout Duration Stopwatch Pill - The one timer on top */}
+          <View style={styles.workoutDurationBadge}>
+            <Ionicons name="time-outline" size={13} color={KinetixTheme.colors.primary} />
+            <Text style={styles.workoutDurationText}>{formatWorkoutDuration(elapsedWorkoutSeconds)}</Text>
+          </View>
+
           <TouchableOpacity
             style={styles.closeBtn}
             onPress={handleExitPress}
@@ -451,11 +872,117 @@ export default function KinetixActiveWorkout({
         <View style={[styles.progressBarFill, { width: `${Math.min(100, Math.max(10, overallProgress))}%` }]} />
       </View>
 
+      {/* Non-blocking Animated Feedback Toast HUD */}
+      {toastMessage && (
+        <Animated.View
+          style={[
+            styles.toastWrapper,
+            {
+              opacity: toastOpacity,
+              transform: [{ translateY: toastTranslateY }],
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={[
+              styles.toastCard,
+              toastMessage.type === 'exercise_completed' && styles.toastCardCelebration,
+            ]}
+            onPress={dismissToast}
+            activeOpacity={0.9}
+          >
+            <View
+              style={[
+                styles.toastIconBox,
+                toastMessage.type === 'exercise_completed' && styles.toastIconBoxCelebration,
+              ]}
+            >
+              <Ionicons
+                name={toastMessage.type === 'exercise_completed' ? 'trophy' : 'checkmark-circle'}
+                size={20}
+                color={toastMessage.type === 'exercise_completed' ? '#D97706' : '#059669'}
+              />
+            </View>
+
+            <View style={styles.toastTextCol}>
+              <View style={styles.toastHeaderRow}>
+                <Text style={styles.toastTitle}>{toastMessage.title}</Text>
+                {toastMessage.badgeText && (
+                  <View
+                    style={[
+                      styles.toastBadge,
+                      toastMessage.type === 'exercise_completed' && styles.toastBadgeCelebration,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.toastBadgeText,
+                        toastMessage.type === 'exercise_completed' && styles.toastBadgeTextCelebration,
+                      ]}
+                    >
+                      {toastMessage.badgeText}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.toastSubtitle} numberOfLines={1}>
+                {toastMessage.subtitle}
+              </Text>
+            </View>
+
+            <TouchableOpacity onPress={dismissToast} style={styles.toastCloseBtn}>
+              <Ionicons name="close" size={16} color={KinetixTheme.colors.textMuted} />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Live Rest Timer Strip */}
+        {isResting && restSecondsLeft > 0 && (
+          <View style={styles.restTimerBanner}>
+            <View style={styles.restTimerLeft}>
+              <View style={styles.pulseRestDot} />
+              <View style={{ flex: 1 }}>
+                <View style={styles.restTimerTitleRow}>
+                  <Text style={styles.restTimerHeading}>REST TIMER</Text>
+                  <Text style={styles.restTimerClock}>{formatTimer(restSecondsLeft)}</Text>
+                </View>
+                <View style={styles.restProgressBarTrack}>
+                  <View
+                    style={[
+                      styles.restProgressBarFill,
+                      { width: `${Math.min(100, Math.max(0, (restSecondsLeft / (totalRestTarget || 60)) * 100))}%` },
+                    ]}
+                  />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.restTimerActions}>
+              <TouchableOpacity
+                style={styles.restAddBtn}
+                onPress={() => handleAddRestTime(30)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.restAddBtnText}>+30s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.restSkipBtn}
+                onPress={handleSkipRest}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.restSkipBtnText}>Skip</Text>
+                <Ionicons name="play-forward" size={12} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Header & Exercise Title */}
         <View style={styles.exerciseTitleRow}>
           <View style={{ flex: 1, paddingRight: 10 }}>
@@ -467,6 +994,31 @@ export default function KinetixActiveWorkout({
               <View style={styles.activePill}>
                 <Ionicons name="checkmark-circle" size={13} color={KinetixTheme.colors.secondary} />
                 <Text style={styles.activePillText}>Active</Text>
+              </View>
+              <View
+                style={[
+                  styles.metricIndicatorBadge,
+                  activeMode === 'duration' && { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' },
+                  activeMode === 'weight_reps' && { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' },
+                  activeMode === 'bodyweight' && { backgroundColor: '#F8FAFC', borderColor: '#CBD5E1' },
+                ]}
+              >
+                <Ionicons
+                  name={activeMode === 'duration' ? 'timer-outline' : activeMode === 'weight_reps' ? 'barbell-outline' : 'body-outline'}
+                  size={12}
+                  color={activeMode === 'duration' ? '#059669' : activeMode === 'weight_reps' ? '#2563EB' : '#475569'}
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.metricIndicatorText,
+                    activeMode === 'duration' && { color: '#059669' },
+                    activeMode === 'weight_reps' && { color: '#2563EB' },
+                    activeMode === 'bodyweight' && { color: '#475569' },
+                  ]}
+                >
+                  {activeMode === 'duration' ? 'TIME HOLD' : activeMode === 'weight_reps' ? 'WEIGHT & REPS' : 'BODYWEIGHT REPS'}
+                </Text>
               </View>
             </View>
             <Text style={styles.currentExerciseHeading}>{currentEx?.name}</Text>
@@ -481,65 +1033,28 @@ export default function KinetixActiveWorkout({
           </TouchableOpacity>
         </View>
 
-        {/* Adaptive Counter Display Card */}
+        {/* Adaptive Counter Display Card - Switches automatically based on current exercise type */}
         <View style={styles.counterCard}>
-          {/* Mode Switcher Tabs */}
-          <View style={styles.modeTabsRow}>
-            <TouchableOpacity
-              style={[styles.modeTab, activeMode === 'duration' && styles.modeTabActive]}
-              onPress={() => setActiveMode('duration')}
-            >
-              <Ionicons
-                name="timer-outline"
-                size={14}
-                color={activeMode === 'duration' ? KinetixTheme.colors.primary : KinetixTheme.colors.textMuted}
-              />
-              <Text style={[styles.modeTabText, activeMode === 'duration' && styles.modeTabTextActive]}>
-                Hold / Timer
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.modeTab, activeMode === 'weight_reps' && styles.modeTabActive]}
-              onPress={() => setActiveMode('weight_reps')}
-            >
-              <Ionicons
-                name="barbell-outline"
-                size={14}
-                color={activeMode === 'weight_reps' ? KinetixTheme.colors.primary : KinetixTheme.colors.textMuted}
-              />
-              <Text style={[styles.modeTabText, activeMode === 'weight_reps' && styles.modeTabTextActive]}>
-                Weight & Reps
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.modeTab, activeMode === 'bodyweight' && styles.modeTabActive]}
-              onPress={() => setActiveMode('bodyweight')}
-            >
-              <Ionicons
-                name="body-outline"
-                size={14}
-                color={activeMode === 'bodyweight' ? KinetixTheme.colors.primary : KinetixTheme.colors.textMuted}
-              />
-              <Text style={[styles.modeTabText, activeMode === 'bodyweight' && styles.modeTabTextActive]}>
-                Bodyweight
-              </Text>
-            </TouchableOpacity>
-          </View>
-
           {/* View 1: Duration / Isometric View */}
           {activeMode === 'duration' && (
             <View style={styles.durationView}>
-              <View style={styles.targetBanner}>
+              <TouchableOpacity
+                style={styles.targetBanner}
+                onPress={handleOpenTargetModal}
+                activeOpacity={0.7}
+              >
                 <View style={styles.targetLeft}>
                   <View style={styles.pulseGreenDot} />
                   <Text style={styles.targetText}>Target: {currentEx?.reps || '45s'} Hold</Text>
+                  <View style={styles.targetAdjustPill}>
+                    <Ionicons name="pencil" size={10} color={KinetixTheme.colors.secondaryDark} />
+                    <Text style={styles.targetAdjustPillText}>Adjust</Text>
+                  </View>
                 </View>
                 <Text style={styles.targetRight}>
                   Set {currentSet} of {currentEx?.totalSets || 4}
                 </Text>
-              </View>
+              </TouchableOpacity>
 
               {/* Digital Hold Clock */}
               <TouchableOpacity
@@ -576,10 +1091,25 @@ export default function KinetixActiveWorkout({
           {/* View 2: Weight & Reps View */}
           {activeMode === 'weight_reps' && (
             <View style={styles.weightRepsView}>
-              <View style={styles.targetBanner}>
-                <Text style={styles.targetText}>Target: {currentEx?.reps || '8 reps'} · {currentEx?.load || '80kg'}</Text>
-                <Text style={styles.targetRight}>{currentEx?.name}</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.targetBanner}
+                onPress={handleOpenTargetModal}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.targetLeft, { backgroundColor: '#EFF6FF' }]}>
+                  <Ionicons name="barbell-outline" size={13} color="#2563EB" />
+                  <Text style={[styles.targetText, { color: '#1D4ED8' }]}>
+                    Target: {currentEx?.reps || '8 reps'} · {currentEx?.load || '80kg'}
+                  </Text>
+                  <View style={[styles.targetAdjustPill, { backgroundColor: '#DBEAFE' }]}>
+                    <Ionicons name="pencil" size={10} color="#2563EB" />
+                    <Text style={[styles.targetAdjustPillText, { color: '#2563EB' }]}>Adjust</Text>
+                  </View>
+                </View>
+                <Text style={styles.targetRight}>
+                  Set {currentSet} of {currentEx?.totalSets || 4}
+                </Text>
+              </TouchableOpacity>
 
               <View style={styles.stepperColsRow}>
                 {/* Reps Column */}
@@ -632,10 +1162,25 @@ export default function KinetixActiveWorkout({
           {/* View 3: Bodyweight + Extra Load View */}
           {activeMode === 'bodyweight' && (
             <View style={styles.bodyweightView}>
-              <View style={styles.targetBanner}>
-                <Text style={styles.targetText}>Target: {currentEx?.reps || '12 reps'} · Bodyweight</Text>
-                <Text style={styles.targetRight}>{currentEx?.name}</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.targetBanner}
+                onPress={handleOpenTargetModal}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.targetLeft, { backgroundColor: '#F8FAFC' }]}>
+                  <Ionicons name="body-outline" size={13} color="#475569" />
+                  <Text style={[styles.targetText, { color: '#334155' }]}>
+                    Target: {currentEx?.reps || '12 reps'} · {currentEx?.load || 'Bodyweight'}
+                  </Text>
+                  <View style={[styles.targetAdjustPill, { backgroundColor: '#E2E8F0' }]}>
+                    <Ionicons name="pencil" size={10} color="#475569" />
+                    <Text style={[styles.targetAdjustPillText, { color: '#475569' }]}>Adjust</Text>
+                  </View>
+                </View>
+                <Text style={styles.targetRight}>
+                  Set {currentSet} of {currentEx?.totalSets || 4}
+                </Text>
+              </TouchableOpacity>
 
               <View style={styles.bwCounterRow}>
                 <View>
@@ -713,51 +1258,6 @@ export default function KinetixActiveWorkout({
           </View>
         </View>
 
-        {/* Simplified Discomfort / Pain Check */}
-        <View style={styles.painCheckSection}>
-          <Text style={styles.painHeading}>Discomfort / Tendon Sensitivity Check</Text>
-          <View style={styles.painPillsRow}>
-            <TouchableOpacity
-              style={[
-                styles.painPill,
-                painLevel === '0' && styles.painPillGreen,
-              ]}
-              onPress={() => setPainLevel('0')}
-            >
-              <Ionicons name="checkmark-circle-outline" size={14} color={painLevel === '0' ? KinetixTheme.colors.secondary : KinetixTheme.colors.textMuted} />
-              <Text style={[styles.painPillText, painLevel === '0' && { color: KinetixTheme.colors.secondary, fontWeight: '700' }]}>
-                Pain-free (0/10)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.painPill,
-                painLevel === '2' && styles.painPillBlue,
-              ]}
-              onPress={() => setPainLevel('2')}
-            >
-              <Ionicons name="alert-circle-outline" size={14} color={painLevel === '2' ? KinetixTheme.colors.primary : KinetixTheme.colors.textMuted} />
-              <Text style={[styles.painPillText, painLevel === '2' && { color: KinetixTheme.colors.primary, fontWeight: '700' }]}>
-                Mild (2/10)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.painPill,
-                painLevel === '5' && styles.painPillRed,
-              ]}
-              onPress={() => setPainLevel('5')}
-            >
-              <Ionicons name="warning-outline" size={14} color={painLevel === '5' ? KinetixTheme.colors.coral : KinetixTheme.colors.textMuted} />
-              <Text style={[styles.painPillText, painLevel === '5' && { color: KinetixTheme.colors.coral, fontWeight: '700' }]}>
-                Stop Warning (5/10)
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
         {/* Action Control Dock */}
         <View style={styles.actionDock}>
           <TouchableOpacity
@@ -786,6 +1286,15 @@ export default function KinetixActiveWorkout({
             >
               <Ionicons name="play-skip-forward" size={18} color={KinetixTheme.colors.text} />
               <Text style={styles.subActionBtnText}>Skip Set</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.subActionBtn, styles.finishActionBtn]}
+              onPress={triggerFinish}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="flag-outline" size={18} color={KinetixTheme.colors.primary} />
+              <Text style={[styles.subActionBtnText, { color: KinetixTheme.colors.primary, fontWeight: '700' }]}>Finish</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -870,12 +1379,399 @@ export default function KinetixActiveWorkout({
         <View style={{ height: 30 }} />
       </ScrollView>
 
+      {/* Workout Completion & Timestamp Summary Modal */}
+      <Modal
+        visible={showCompletionModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCompletionModal(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.completionCard}>
+            <View style={styles.completionTrophyCircle}>
+              <Ionicons name="trophy" size={32} color="#F59E0B" />
+            </View>
+
+            <Text style={styles.completionTitle}>Workout Completed!</Text>
+            <Text style={styles.completionSubtitle}>Great effort! Here is your recorded session summary:</Text>
+
+            <View style={styles.summaryBox}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Session Name</Text>
+                <Text style={styles.summaryValue} numberOfLines={1}>
+                  {completionSummary?.worksessionName || currentSessionName}
+                </Text>
+              </View>
+
+              <View style={styles.summaryDivider} />
+
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Date</Text>
+                <Text style={styles.summaryValue}>
+                  {completionSummary ? formatDateStamp(completionSummary.startTime) : formatDateStamp(workoutStartTime)}
+                </Text>
+              </View>
+
+              <View style={styles.summaryDivider} />
+
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Started At</Text>
+                <Text style={styles.summaryValue}>
+                  {completionSummary?.startTimeFormatted || formatTimeOfDay(workoutStartTime)}
+                </Text>
+              </View>
+
+              <View style={styles.summaryDivider} />
+
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Completed At</Text>
+                <Text style={styles.summaryValue}>
+                  {completionSummary?.endTimeFormatted || formatTimeOfDay(Date.now())}
+                </Text>
+              </View>
+
+              <View style={styles.summaryDivider} />
+
+              <View style={styles.summaryRowHighlight}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="timer" size={18} color="#059669" />
+                  <Text style={styles.summaryLabelHighlight}>Total Duration</Text>
+                </View>
+                <Text style={styles.summaryValueHighlight}>
+                  {completionSummary?.durationFormatted || formatWorkoutDuration(elapsedWorkoutSeconds)}
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.saveWorkoutBtn}
+              onPress={handleConfirmFinish}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="cloud-upload-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.saveWorkoutBtnText}>Save Workout to History</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.cancelCompletionBtn}
+              onPress={() => setShowCompletionModal(false)}
+            >
+              <Text style={styles.cancelCompletionBtnText}>Return to Workout</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Video Demonstration Modal */}
       <ExerciseVideoModal
         visible={!!selectedVideoModal}
         exercise={selectedVideoModal}
         onClose={() => setSelectedVideoModal(null)}
       />
+
+      {/* Interactive Exercise Target Adjustment Modal */}
+      <Modal
+        visible={isTargetModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsTargetModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalBackdrop}
+        >
+          <View style={styles.targetModalCard}>
+            {/* Modal Header */}
+            <View style={styles.targetModalHeader}>
+              <View style={{ flex: 1 }}>
+                <View style={styles.targetModalPillRow}>
+                  <Ionicons
+                    name={activeMode === 'duration' ? 'timer-outline' : activeMode === 'weight_reps' ? 'barbell-outline' : 'body-outline'}
+                    size={14}
+                    color={activeMode === 'duration' ? KinetixTheme.colors.secondary : activeMode === 'weight_reps' ? '#2563EB' : '#475569'}
+                  />
+                  <Text
+                    style={[
+                      styles.targetModalPillText,
+                      activeMode === 'duration' && { color: KinetixTheme.colors.secondary },
+                      activeMode === 'weight_reps' && { color: '#2563EB' },
+                      activeMode === 'bodyweight' && { color: '#475569' },
+                    ]}
+                  >
+                    {activeMode === 'duration'
+                      ? 'REHAB / ISOMETRIC TARGET'
+                      : activeMode === 'weight_reps'
+                      ? 'PROGRESSIVE OVERLOAD TARGET'
+                      : 'BODYWEIGHT TARGET'}
+                  </Text>
+                </View>
+                <Text style={styles.targetModalTitle}>{currentEx?.name}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsTargetModalVisible(false)}
+                style={styles.targetModalCloseBtn}
+              >
+                <Ionicons name="close" size={20} color={KinetixTheme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {activeMode === 'duration' && (
+              <View style={styles.rehabTargetNotice}>
+                <Ionicons name="information-circle-outline" size={16} color="#059669" />
+                <Text style={styles.rehabTargetNoticeText}>
+                  Rehab exercises have clinically calibrated isometric hold targets. You can adjust duration based on your current tendon tolerance.
+                </Text>
+              </View>
+            )}
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+              {/* Target Sets Row */}
+              <View style={styles.targetControlSection}>
+                <Text style={styles.targetControlLabel}>TARGET TOTAL SETS</Text>
+                <View style={styles.targetStepperRow}>
+                  <TouchableOpacity
+                    style={styles.targetStepCircle}
+                    onPress={() => setEditTargetSets((prev) => Math.max(1, prev - 1))}
+                  >
+                    <Ionicons name="remove" size={18} color={KinetixTheme.colors.text} />
+                  </TouchableOpacity>
+                  <View style={styles.targetValDisplay}>
+                    <Text style={styles.targetValNum}>{editTargetSets}</Text>
+                    <Text style={styles.targetValSub}>Sets</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.targetStepCircle}
+                    onPress={() => setEditTargetSets((prev) => Math.min(10, prev + 1))}
+                  >
+                    <Ionicons name="add" size={18} color={KinetixTheme.colors.text} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.targetChipsRow}>
+                  {[2, 3, 4, 5].map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      style={[styles.targetChip, editTargetSets === s && styles.targetChipActive]}
+                      onPress={() => setEditTargetSets(s)}
+                    >
+                      <Text style={[styles.targetChipText, editTargetSets === s && styles.targetChipTextActive]}>
+                        {s} Sets
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* View 1: Duration (Seconds hold) */}
+              {activeMode === 'duration' && (
+                <View style={styles.targetControlSection}>
+                  <Text style={styles.targetControlLabel}>TARGET HOLD DURATION</Text>
+                  <View style={styles.targetStepperRow}>
+                    <TouchableOpacity
+                      style={styles.targetStepCircle}
+                      onPress={() => setEditTargetTime((prev) => Math.max(5, prev - 5))}
+                    >
+                      <Text style={styles.targetStepBtnText}>-5s</Text>
+                    </TouchableOpacity>
+                    <View style={styles.targetValDisplay}>
+                      <Text style={[styles.targetValNum, { color: KinetixTheme.colors.secondaryDark }]}>
+                        {editTargetTime}
+                      </Text>
+                      <Text style={styles.targetValSub}>Seconds</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.targetStepCircle}
+                      onPress={() => setEditTargetTime((prev) => prev + 5)}
+                    >
+                      <Text style={styles.targetStepBtnText}>+5s</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.targetChipsRow}>
+                    {[30, 45, 60, 90].map((t) => (
+                      <TouchableOpacity
+                        key={t}
+                        style={[styles.targetChip, editTargetTime === t && styles.targetChipActive]}
+                        onPress={() => setEditTargetTime(t)}
+                      >
+                        <Text style={[styles.targetChipText, editTargetTime === t && styles.targetChipTextActive]}>
+                          {t}s Hold
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* View 2: Weight & Reps */}
+              {activeMode === 'weight_reps' && (
+                <>
+                  {/* Reps Target */}
+                  <View style={styles.targetControlSection}>
+                    <Text style={styles.targetControlLabel}>TARGET REPS PER SET</Text>
+                    <View style={styles.targetStepperRow}>
+                      <TouchableOpacity
+                        style={styles.targetStepCircle}
+                        onPress={() => setEditTargetReps((prev) => Math.max(1, prev - 1))}
+                      >
+                        <Ionicons name="remove" size={18} color={KinetixTheme.colors.text} />
+                      </TouchableOpacity>
+                      <View style={styles.targetValDisplay}>
+                        <Text style={[styles.targetValNum, { color: '#2563EB' }]}>{editTargetReps}</Text>
+                        <Text style={styles.targetValSub}>Reps</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.targetStepCircle}
+                        onPress={() => setEditTargetReps((prev) => prev + 1)}
+                      >
+                        <Ionicons name="add" size={18} color={KinetixTheme.colors.text} />
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.targetChipsRow}>
+                      {[
+                        { r: 5, label: '5 (Strength)' },
+                        { r: 8, label: '8 (Hypertrophy)' },
+                        { r: 10, label: '10' },
+                        { r: 12, label: '12 (Endurance)' },
+                      ].map((item) => (
+                        <TouchableOpacity
+                          key={item.r}
+                          style={[styles.targetChip, editTargetReps === item.r && styles.targetChipActiveBlue]}
+                          onPress={() => setEditTargetReps(item.r)}
+                        >
+                          <Text
+                            style={[
+                              styles.targetChipText,
+                              editTargetReps === item.r && styles.targetChipTextActiveBlue,
+                            ]}
+                          >
+                            {item.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  {/* Weight / Load Target */}
+                  <View style={styles.targetControlSection}>
+                    <Text style={styles.targetControlLabel}>TARGET LOAD (KG)</Text>
+                    <View style={styles.targetStepperRow}>
+                      <TouchableOpacity
+                        style={styles.targetStepCircle}
+                        onPress={() => setEditTargetLoad((prev) => Math.max(0, prev - 2.5))}
+                      >
+                        <Text style={styles.targetStepBtnText}>-2.5</Text>
+                      </TouchableOpacity>
+                      <View style={styles.targetValDisplay}>
+                        <Text style={[styles.targetValNum, { color: '#2563EB' }]}>
+                          {editTargetLoad}
+                          <Text style={{ fontSize: 16, color: KinetixTheme.colors.textMuted }}>kg</Text>
+                        </Text>
+                        <Text style={styles.targetValSub}>Target Weight</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.targetStepCircle}
+                        onPress={() => setEditTargetLoad((prev) => prev + 2.5)}
+                      >
+                        <Text style={styles.targetStepBtnText}>+2.5</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.targetChipsRow}>
+                      {[-10, -5, 5, 10].map((delta) => (
+                        <TouchableOpacity
+                          key={delta}
+                          style={styles.targetChip}
+                          onPress={() => setEditTargetLoad((prev) => Math.max(0, prev + delta))}
+                        >
+                          <Text style={styles.targetChipText}>
+                            {delta > 0 ? `+${delta}kg` : `${delta}kg`}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                </>
+              )}
+
+              {/* View 3: Bodyweight Target */}
+              {activeMode === 'bodyweight' && (
+                <>
+                  <View style={styles.targetControlSection}>
+                    <Text style={styles.targetControlLabel}>TARGET BODYWEIGHT REPS</Text>
+                    <View style={styles.targetStepperRow}>
+                      <TouchableOpacity
+                        style={styles.targetStepCircle}
+                        onPress={() => setEditTargetReps((prev) => Math.max(1, prev - 1))}
+                      >
+                        <Ionicons name="remove" size={18} color={KinetixTheme.colors.text} />
+                      </TouchableOpacity>
+                      <View style={styles.targetValDisplay}>
+                        <Text style={[styles.targetValNum, { color: '#334155' }]}>{editTargetReps}</Text>
+                        <Text style={styles.targetValSub}>Reps</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.targetStepCircle}
+                        onPress={() => setEditTargetReps((prev) => prev + 1)}
+                      >
+                        <Ionicons name="add" size={18} color={KinetixTheme.colors.text} />
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.targetChipsRow}>
+                      {[8, 10, 12, 15, 20].map((r) => (
+                        <TouchableOpacity
+                          key={r}
+                          style={[styles.targetChip, editTargetReps === r && styles.targetChipActive]}
+                          onPress={() => setEditTargetReps(r)}
+                        >
+                          <Text style={[styles.targetChipText, editTargetReps === r && styles.targetChipTextActive]}>
+                            {r} reps
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={styles.targetControlSection}>
+                    <Text style={styles.targetControlLabel}>EXTRA LOAD (WEIGHTED VEST / BELT)</Text>
+                    <View style={styles.targetChipsRow}>
+                      {[0, 5, 10, 15, 20].map((kg) => {
+                        const isSel = editTargetBwExtra === kg;
+                        return (
+                          <TouchableOpacity
+                            key={kg}
+                            style={[styles.targetChip, isSel && styles.targetChipActive]}
+                            onPress={() => setEditTargetBwExtra(kg)}
+                          >
+                            <Text style={[styles.targetChipText, isSel && styles.targetChipTextActive]}>
+                              {kg === 0 ? 'Bodyweight (0kg)' : `+${kg}kg`}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </>
+              )}
+            </ScrollView>
+
+            {/* Modal Action Buttons */}
+            <View style={styles.targetModalActionsRow}>
+              <TouchableOpacity
+                style={styles.targetModalCancelBtn}
+                onPress={() => setIsTargetModalVisible(false)}
+              >
+                <Text style={styles.targetModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.targetModalSaveBtn}
+                onPress={handleSaveTarget}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.targetModalSaveText}>Save Target</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Persistent Bottom Navigation - Visible on active screen */}
       <KinetixBottomNav activeTab="active" />
@@ -1214,6 +2110,140 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  workoutDurationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  workoutDurationText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: KinetixTheme.colors.primary,
+    fontVariant: ['tabular-nums'],
+  },
+  finishActionBtn: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#BFDBFE',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  completionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 22,
+    width: '100%',
+    maxWidth: 380,
+    alignItems: 'center',
+    ...KinetixTheme.shadows.card,
+  },
+  completionTrophyCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FEF3C7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  completionTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: KinetixTheme.colors.text,
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  completionSubtitle: {
+    fontSize: 12.5,
+    color: KinetixTheme.colors.textMuted,
+    textAlign: 'center',
+    marginTop: 3,
+    marginBottom: 14,
+  },
+  summaryBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    width: '100%',
+    padding: 12,
+    marginBottom: 16,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  summaryLabel: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: KinetixTheme.colors.textMuted,
+  },
+  summaryValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: KinetixTheme.colors.text,
+    maxWidth: '65%',
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 3,
+  },
+  summaryRowHighlight: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 7,
+    marginTop: 2,
+  },
+  summaryLabelHighlight: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#059669',
+  },
+  summaryValueHighlight: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#059669',
+    fontVariant: ['tabular-nums'],
+  },
+  saveWorkoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: KinetixTheme.colors.primary,
+    borderRadius: KinetixTheme.borderRadius.lg,
+    paddingVertical: 13,
+    width: '100%',
+    marginBottom: 8,
+    ...KinetixTheme.shadows.card,
+  },
+  saveWorkoutBtnText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  cancelCompletionBtn: {
+    paddingVertical: 6,
+  },
+  cancelCompletionBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: KinetixTheme.colors.textMuted,
+  },
   closeBtn: {
     width: 34,
     height: 34,
@@ -1263,6 +2293,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  metricIndicatorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginLeft: 6,
+  },
+  metricIndicatorText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
   activePillText: {
     fontSize: 11,
     fontWeight: '600',
@@ -1293,36 +2337,6 @@ const styles = StyleSheet.create({
     borderColor: KinetixTheme.colors.border,
     marginBottom: 12,
     ...KinetixTheme.shadows.card,
-  },
-  modeTabsRow: {
-    flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    borderRadius: KinetixTheme.borderRadius.md,
-    padding: 3,
-    marginBottom: 14,
-    gap: 4,
-  },
-  modeTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 7,
-    borderRadius: KinetixTheme.borderRadius.sm,
-  },
-  modeTabActive: {
-    backgroundColor: '#FFFFFF',
-    ...KinetixTheme.shadows.card,
-  },
-  modeTabText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: KinetixTheme.colors.textMuted,
-  },
-  modeTabTextActive: {
-    color: KinetixTheme.colors.primary,
-    fontWeight: '700',
   },
   durationView: {
     alignItems: 'center',
@@ -1633,56 +2647,6 @@ const styles = StyleSheet.create({
     color: KinetixTheme.colors.textMuted,
     paddingHorizontal: 2,
   },
-  painCheckSection: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: KinetixTheme.borderRadius.lg,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: KinetixTheme.colors.border,
-    marginBottom: 14,
-    ...KinetixTheme.shadows.card,
-  },
-  painHeading: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: KinetixTheme.colors.textSecondary,
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  painPillsRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  painPill: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 7,
-    borderRadius: KinetixTheme.borderRadius.md,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  painPillGreen: {
-    backgroundColor: KinetixTheme.colors.secondaryLight,
-    borderColor: '#A7F3D0',
-  },
-  painPillBlue: {
-    backgroundColor: KinetixTheme.colors.primaryLight,
-    borderColor: '#BFDBFE',
-  },
-  painPillRed: {
-    backgroundColor: KinetixTheme.colors.coralLight,
-    borderColor: '#FECDD3',
-  },
-  painPillText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: KinetixTheme.colors.textSecondary,
-  },
   actionDock: {
     gap: 8,
     marginBottom: 20,
@@ -1832,5 +2796,349 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: KinetixTheme.colors.textSecondary,
+  },
+  targetAdjustPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: KinetixTheme.colors.secondaryLight,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginLeft: 6,
+  },
+  targetAdjustPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: KinetixTheme.colors.secondaryDark,
+  },
+  targetModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 20,
+    width: '92%',
+    maxWidth: 440,
+    ...KinetixTheme.shadows.card,
+  },
+  targetModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  targetModalPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 4,
+  },
+  targetModalPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  targetModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: KinetixTheme.colors.text,
+  },
+  targetModalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rehabTargetNotice: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: '#ECFDF5',
+    padding: 10,
+    borderRadius: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  rehabTargetNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#065F46',
+    lineHeight: 16,
+  },
+  targetControlSection: {
+    marginBottom: 14,
+    backgroundColor: '#F9FAFB',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  targetControlLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: KinetixTheme.colors.textMuted,
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  targetStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  targetStepCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  targetStepBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: KinetixTheme.colors.text,
+  },
+  targetValDisplay: {
+    alignItems: 'center',
+  },
+  targetValNum: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: KinetixTheme.colors.text,
+  },
+  targetValSub: {
+    fontSize: 11,
+    color: KinetixTheme.colors.textMuted,
+    fontWeight: '600',
+  },
+  targetChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  targetChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  targetChipActive: {
+    backgroundColor: KinetixTheme.colors.secondaryLight,
+    borderColor: KinetixTheme.colors.secondary,
+  },
+  targetChipActiveBlue: {
+    backgroundColor: '#DBEAFE',
+    borderColor: '#2563EB',
+  },
+  targetChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: KinetixTheme.colors.textMuted,
+  },
+  targetChipTextActive: {
+    color: KinetixTheme.colors.secondaryDark,
+    fontWeight: '700',
+  },
+  targetChipTextActiveBlue: {
+    color: '#1D4ED8',
+    fontWeight: '700',
+  },
+  targetModalActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  targetModalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  targetModalCancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: KinetixTheme.colors.textMuted,
+  },
+  targetModalSaveBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: KinetixTheme.colors.primary,
+  },
+  targetModalSaveText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  toastWrapper: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 2,
+    zIndex: 99,
+  },
+  toastCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    gap: 10,
+    ...KinetixTheme.shadows.card,
+  },
+  toastCardCelebration: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  toastIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toastIconBoxCelebration: {
+    backgroundColor: '#FEF3C7',
+  },
+  toastTextCol: {
+    flex: 1,
+  },
+  toastHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  toastTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: KinetixTheme.colors.text,
+  },
+  toastBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  toastBadgeCelebration: {
+    backgroundColor: '#FEF3C7',
+  },
+  toastBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#059669',
+  },
+  toastBadgeTextCelebration: {
+    color: '#D97706',
+  },
+  toastSubtitle: {
+    fontSize: 11,
+    color: KinetixTheme.colors.textMuted,
+    marginTop: 1,
+  },
+  toastCloseBtn: {
+    padding: 4,
+  },
+  restTimerBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EFF6FF',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    marginBottom: 12,
+    gap: 10,
+  },
+  restTimerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  pulseRestDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2563EB',
+  },
+  restTimerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  restTimerHeading: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#1E40AF',
+    letterSpacing: 0.5,
+  },
+  restTimerClock: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#2563EB',
+    fontVariant: ['tabular-nums'],
+  },
+  restProgressBarTrack: {
+    height: 4,
+    backgroundColor: '#DBEAFE',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  restProgressBarFill: {
+    height: '100%',
+    backgroundColor: '#2563EB',
+    borderRadius: 2,
+  },
+  restTimerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  restAddBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#DBEAFE',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  restAddBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  restSkipBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#2563EB',
+  },
+  restSkipBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });

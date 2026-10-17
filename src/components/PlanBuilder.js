@@ -17,6 +17,7 @@ import {
   getExerciseVideoThumbnail
 } from '../data/recoveryMetadata';
 import ExerciseVideoModal from './ExerciseVideoModal';
+import { KinetixTheme } from '../constants/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -121,7 +122,7 @@ export const getExerciseMuscleGroup = (exercise) => {
 
 const ADMIN_EMAILS = ['condrea.vlad@gmail.com', 'condrea.vlad@icloud.com'];
 
-export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
+export default function PlanBuilder({ onSetDefaultPlan = () => {}, defaultPlanId = null, initialTab = 'plans', isEmbedded = false }) {
   const router = useRouter();
   const { session } = useContext(TrainingContext);
   const userId = session?.user?.id;
@@ -145,12 +146,53 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       }]).select().single();
 
       if (error) throw error;
+
+      // Ensure worksession exercises are formatted properly with target sets, reps, load, and tracking type
+      const rawExercises = worksession.worksession_exercises || worksession.exercises || [];
+      const formattedExercises = rawExercises.map((we, idx) => {
+        const ex = we.exercises || we;
+        const isHold = we.tracking_type === 'time' || (we.target_time && we.target_time > 0);
+        
+        let parsedLoad = 'Bodyweight';
+        if (we.notes && we.notes.includes('Load:')) {
+          const match = we.notes.match(/Load:\s*([0-9.]+\s*kg|[0-9.]+)/i);
+          parsedLoad = match ? (match[1].includes('kg') ? match[1] : `${match[1]}kg`) : 'Standard';
+        } else if (we.target_load) {
+          parsedLoad = `${we.target_load}kg`;
+        } else if (we.load || we.weight) {
+          parsedLoad = we.load || we.weight;
+        } else if (ex.equipment && (ex.equipment.includes('Barbell') || ex.equipment.includes('Dumbbell') || ex.equipment === 'Kettlebell')) {
+          parsedLoad = '60kg';
+        }
+
+        return {
+          id: `ex-${idx}`,
+          name: ex.name || 'Exercise',
+          cue: we.notes || ex.instructions || 'Controlled form.',
+          sets: we.target_sets || we.sets || 3,
+          totalSets: we.target_sets || we.sets || 3,
+          reps: isHold ? (we.target_time ? `${we.target_time}s` : '45s') : (we.target_reps ? `${we.target_reps} reps` : '10 reps'),
+          load: parsedLoad,
+          weight: parsedLoad,
+          tracking_type: we.tracking_type || (isHold ? 'time' : 'reps'),
+          trackingType: isHold ? 'duration' : (parsedLoad !== 'Bodyweight' && parsedLoad !== 'Standard' ? 'weight_reps' : 'bodyweight'),
+          restSeconds: isHold ? 45 : 60,
+          equipment: ex.equipment,
+          muscle_group: ex.muscle_group,
+        };
+      });
+
+      const worksessionToLaunch = {
+        ...worksession,
+        exercises: formattedExercises.length > 0 ? formattedExercises : worksession.exercises,
+      };
+
       router.push({
         pathname: '/active-workout',
         params: {
           sessionId: data.id,
           plan: plan ? JSON.stringify(plan) : JSON.stringify({ name: worksession.name || 'Custom Session' }),
-          worksession: JSON.stringify(worksession)
+          worksession: JSON.stringify(worksessionToLaunch)
         }
       });
     } catch (e) {
@@ -159,7 +201,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
     }
   };
   
-  const [activeTab, setActiveTab] = useState('plans');
+  const [activeTab, setActiveTab] = useState(initialTab || 'plans');
   const [standardPlans, setStandardPlans] = useState([]);
   const [customPlans, setCustomPlans] = useState([]);
   const [worksessions, setWorksessions] = useState([]);
@@ -232,6 +274,8 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
   const [exerciseSortMode, setExerciseSortMode] = useState('category'); // 'category' | 'muscle' | 'equipment' | 'alpha'
   const [exerciseFilterTag, setExerciseFilterTag] = useState('All');
   const [pickerSortMode, setPickerSortMode] = useState('category'); // for worksession modal
+  const [editingExerciseId, setEditingExerciseId] = useState(null);
+  const [showAllExercises, setShowAllExercises] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -331,7 +375,17 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       setDraftWsId(ws.id);
       setDraftWsName(ws.name);
       setDraftWsModality(ws.modality);
-      setDraftExercises(ws.worksession_exercises ? [...ws.worksession_exercises] : []);
+      setDraftExercises(ws.worksession_exercises ? ws.worksession_exercises.map(we => {
+        let parsedLoad = '';
+        if (we.notes && we.notes.includes('Load:')) {
+          const m = we.notes.match(/Load:\s*([0-9.]+\s*kg|[0-9.]+)/i);
+          parsedLoad = m ? m[1].replace(/kg/i, '').trim() : '';
+        }
+        return {
+          ...we,
+          target_load: parsedLoad
+        };
+      }) : []);
     } else {
       setDraftWsId(null);
       setDraftWsName('');
@@ -383,20 +437,35 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
 
       // Bulk insert new draftExercises
       if (draftExercises.length > 0) {
-        const inserts = draftExercises.map(ex => ({
-          worksession_id: currentWsId,
-          exercise_id: ex.exercise_id || ex.exercises?.id, 
-          tracking_type: ex.tracking_type || 'reps',
-          target_sets: ex.target_sets || 0,
-          target_reps: ex.target_reps || 0,
-          target_time: ex.target_time || 0
-        }));
+        const inserts = draftExercises.map(ex => {
+          let notesVal = ex.notes || null;
+          if (ex.target_load && String(ex.target_load).trim() !== '') {
+            const cleanLoad = String(ex.target_load).replace(/[^0-9.]/g, '');
+            if (cleanLoad) {
+              notesVal = notesVal ? `${notesVal} | Load: ${cleanLoad}kg` : `Load: ${cleanLoad}kg`;
+            }
+          }
+          return {
+            worksession_id: currentWsId,
+            exercise_id: ex.exercise_id || ex.exercises?.id, 
+            tracking_type: ex.tracking_type || 'reps',
+            target_sets: ex.target_sets || 0,
+            target_reps: ex.target_reps || 0,
+            target_time: ex.target_time || 0,
+            notes: notesVal
+          };
+        });
         const { error: insertError } = await supabase.from('worksession_exercises').insert(inserts);
         if (insertError) throw insertError;
       }
 
       setIsFocusModeVisible(false);
+      setDraftWsId(null);
+      setDraftWsName('');
+      setDraftWsModality(MODALITIES[0]);
+      setDraftExercises([]);
       await fetchData();
+      Alert.alert('Success', 'Worksession created successfully!');
     } catch (e) {
       console.error(e);
       Alert.alert('Error', 'Failed to save worksession.');
@@ -409,14 +478,17 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
     const exObj = exercisesList.find(e => e.id === exerciseId);
     if (!exObj) return;
 
+    const isWeighted = exObj.equipment && (exObj.equipment.includes('Barbell') || exObj.equipment.includes('Dumbbell') || exObj.equipment === 'Kettlebell');
+
     setDraftExercises(prev => [...prev, {
       id: `temp-${Date.now()}`,
       exercise_id: exerciseId,
-      exercises: { id: exerciseId, name: exObj.name, category: exObj.category },
+      exercises: { id: exerciseId, name: exObj.name, category: exObj.category, equipment: exObj.equipment },
       tracking_type: 'reps',
       target_sets: 3,
       target_reps: 10,
-      target_time: 60
+      target_time: 60,
+      target_load: isWeighted ? '60' : ''
     }]);
     setIsExerciseModalVisible(false);
   };
@@ -550,6 +622,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       setNewPlanSessions('3');
       setNewPlanDescription('');
       await fetchData();
+      Alert.alert('Success', 'Plan created successfully!');
     } catch (e) {
       Alert.alert('Error', 'Failed to create plan.');
     }
@@ -698,16 +771,34 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       const cat = newExerciseCategory.trim() || 'Chest';
       const eq = newExerciseEquipment.trim() || 'Bodyweight';
       const vid = newExerciseVideoUrl.trim() || null;
-      const { error } = await supabase.from('exercises').insert([{
-        user_id: makeDefault ? null : userId,
-        name: newExerciseName.trim(),
-        category: cat,
-        muscle_group: cat,
-        equipment: eq,
-        video_url: vid,
-        is_default: makeDefault
-      }]);
-      if (error) throw error;
+
+      if (editingExerciseId) {
+        const { error } = await supabase.from('exercises').update({
+          name: newExerciseName.trim(),
+          category: cat,
+          muscle_group: cat,
+          equipment: eq,
+          video_url: vid,
+          is_default: makeDefault,
+          user_id: makeDefault ? null : userId
+        }).eq('id', editingExerciseId);
+        if (error) throw error;
+        setEditingExerciseId(null);
+        Alert.alert('Success', 'Exercise updated successfully!');
+      } else {
+        const { error } = await supabase.from('exercises').insert([{
+          user_id: makeDefault ? null : userId,
+          name: newExerciseName.trim(),
+          category: cat,
+          muscle_group: cat,
+          equipment: eq,
+          video_url: vid,
+          is_default: makeDefault
+        }]);
+        if (error) throw error;
+        Alert.alert('Success', makeDefault ? 'Default exercise created for all users!' : 'Custom exercise created successfully!');
+      }
+
       setIsCreatingExercise(false);
       setNewExerciseName('');
       setNewExerciseCategory('Chest');
@@ -715,10 +806,9 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
       setNewExerciseVideoUrl('');
       setIsDefaultExercise(false);
       await fetchExercises();
-      Alert.alert('Success', makeDefault ? 'Default exercise created for all users!' : 'Custom exercise created successfully!');
     } catch (e) {
-      console.error('Failed to create exercise:', e);
-      Alert.alert('Error', e.message || 'Failed to create exercise.');
+      console.error('Failed to save exercise:', e);
+      Alert.alert('Error', e.message || 'Failed to save exercise.');
     } finally {
       setLoading(false);
     }
@@ -1198,429 +1288,789 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
     );
   };
 
+  const ContentContainer = isEmbedded ? View : ScrollView;
+
   return (
-    <View style={styles.container}>
-      {!isFocusModeVisible ? (
-        <>
-          <View style={styles.tabContainer}>
-            {['plans', 'worksessions', 'exercises'].map(tab => (
-              <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.activeTab]} onPress={() => setActiveTab(tab)}>
-                <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-                  {tab === 'worksessions' ? 'Worksessions' : tab === 'exercises' ? 'Exercises' : 'Plans'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+    <View style={[styles.container, isEmbedded && { flex: 0, paddingBottom: 24 }]}>
+      <View style={styles.tabContainer}>
+        {['plans', 'worksessions', 'exercises'].map(tab => (
+          <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.activeTab]} onPress={() => setActiveTab(tab)}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons 
+                name={tab === 'worksessions' ? 'flash-outline' : tab === 'exercises' ? 'barbell-outline' : 'layers-outline'} 
+                size={14} 
+                color={activeTab === tab ? '#2563EB' : '#64748B'} 
+                style={{ marginRight: 5 }} 
+              />
+              <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
+                {tab === 'worksessions' ? 'Worksessions' : tab === 'exercises' ? 'Exercises' : 'Plans'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
 
-          {loading ? (
-            <View style={styles.centerContainer}><ActivityIndicator size="large" color="#00D09E" /></View>
-          ) : (
-            <ScrollView style={styles.scrollContent}>
-              {/* WORKSESSIONS TAB */}
-              {activeTab === 'worksessions' && (
-                <TouchableOpacity style={styles.createButton} onPress={() => openFocusMode()}>
-                  <Ionicons name="add" size={24} color="#FFF" />
-                  <Text style={styles.createButtonText}>Create Worksession</Text>
+      {loading ? (
+        <View style={styles.centerContainer}><ActivityIndicator size="large" color="#2563EB" /></View>
+      ) : (
+        <ContentContainer style={styles.scrollContent} {...(!isEmbedded ? { keyboardShouldPersistTaps: 'handled' } : {})}>
+          {/* PLANS TAB (Existing Plans & Direct Creation) */}
+          {activeTab === 'plans' && (
+            <View>
+              {/* Existing Plans Section */}
+              <View style={styles.existingSectionWrapper}>
+                <View style={styles.sectionTitleRow}>
+                  <Ionicons name="layers-outline" size={16} color="#2563EB" />
+                  <Text style={styles.sectionTitleText}>Existing Plans ({customPlans.length + standardPlans.length})</Text>
+                </View>
+
+                <View style={styles.simpleSectionList}>
+                  {[...customPlans, ...standardPlans].map(plan => {
+                    const isEditing = editingPlanId === plan.id;
+                    return (
+                      <View key={plan.id}>
+                        <View style={[styles.simpleSectionCard, isEditing && styles.simpleSectionCardActive]}>
+                          <View style={styles.simpleSectionContent}>
+                            <Text style={styles.simpleSectionName}>{plan.name}</Text>
+                            {plan.is_standard_template ? (
+                              <View style={styles.badgeTemplate}>
+                                <Text style={styles.badgeTemplateText}>Template</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <TouchableOpacity
+                              style={[styles.simpleEditButton, isEditing && styles.simpleEditButtonActive]}
+                              onPress={() => {
+                                if (isEditing) {
+                                  setEditingPlanId(null);
+                                } else {
+                                  if (plan.is_standard_template && !isAdmin) {
+                                    handleCopyPlan(plan);
+                                  } else {
+                                    setEditingPlanId(plan.id);
+                                    setEditPlanName(plan.name);
+                                    setEditPlanGoal(plan.goal_category || '');
+                                    setEditPlanIntensity(plan.intensity || '');
+                                    setEditPlanSessions(plan.sessions_per_week?.toString() || '');
+                                    setEditPlanDescription(plan.description || '');
+                                  }
+                                }
+                              }}
+                            >
+                              <Ionicons 
+                                name={isEditing ? "close-outline" : "create-outline"} 
+                                size={14} 
+                                color={isEditing ? "#FFFFFF" : "#2563EB"} 
+                              />
+                              <Text style={[styles.simpleEditButtonText, isEditing && { color: '#FFFFFF' }]}>
+                                {isEditing ? "Cancel" : "Edit"}
+                              </Text>
+                            </TouchableOpacity>
+                            {!plan.is_standard_template && (
+                              <TouchableOpacity onPress={() => handleDeletePlan(plan.id)} style={{ padding: 6 }}>
+                                <Ionicons name="trash-outline" size={16} color="#F43F5E" />
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+
+                        {/* Inline Plan Editor if this plan is selected */}
+                        {isEditing && (
+                          <View style={[styles.createForm, { marginBottom: 14, borderColor: '#2563EB', borderWidth: 1.5 }]}>
+                            <View style={styles.formHeader}>
+                              <Text style={[styles.formTitle, { color: '#2563EB' }]}>Edit Plan: {plan.name}</Text>
+                            </View>
+
+                            <Text style={styles.label}>Plan Name</Text>
+                            <TextInput
+                              style={styles.input}
+                              value={editPlanName}
+                              onChangeText={setEditPlanName}
+                              placeholderTextColor="#94A3B8"
+                            />
+
+                            <View style={{ flexDirection: 'row', gap: 10 }}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.label}>Goal</Text>
+                                <TextInput
+                                  style={styles.input}
+                                  value={editPlanGoal}
+                                  onChangeText={setEditPlanGoal}
+                                  placeholderTextColor="#94A3B8"
+                                />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.label}>Intensity</Text>
+                                <TextInput
+                                  style={styles.input}
+                                  value={editPlanIntensity}
+                                  onChangeText={setEditPlanIntensity}
+                                  placeholderTextColor="#94A3B8"
+                                />
+                              </View>
+                              <View style={{ width: 68 }}>
+                                <Text style={styles.label}>Days</Text>
+                                <TextInput
+                                  style={styles.input}
+                                  value={editPlanSessions}
+                                  onChangeText={setEditPlanSessions}
+                                  keyboardType="numeric"
+                                  placeholderTextColor="#94A3B8"
+                                />
+                              </View>
+                            </View>
+
+                            <Text style={styles.label}>Description</Text>
+                            <TextInput
+                              style={[styles.input, { height: 60 }]}
+                              value={editPlanDescription}
+                              onChangeText={setEditPlanDescription}
+                              multiline
+                              placeholderTextColor="#94A3B8"
+                            />
+
+                            <View style={{ marginTop: 8, marginBottom: 8 }}>
+                              <Text style={styles.label}>Attached Worksessions ({plan.plan_worksessions?.length || 0})</Text>
+                              {plan.plan_worksessions?.map((pw, index) => (
+                                <View key={pw.id} style={styles.exerciseEditRow}>
+                                  {plan.schedule_type !== 'anchored' && (
+                                    <View style={styles.exerciseEditReorderArrows}>
+                                      <TouchableOpacity onPress={() => moveWorksessionInPlan(plan.id, index, 'up')} disabled={index === 0}>
+                                        <Ionicons name="chevron-up" size={22} color={index === 0 ? '#CBD5E1' : '#2563EB'} />
+                                      </TouchableOpacity>
+                                      <TouchableOpacity onPress={() => moveWorksessionInPlan(plan.id, index, 'down')} disabled={index === plan.plan_worksessions.length - 1}>
+                                        <Ionicons name="chevron-down" size={22} color={index === plan.plan_worksessions.length - 1 ? '#CBD5E1' : '#2563EB'} />
+                                      </TouchableOpacity>
+                                    </View>
+                                  )}
+                                  <View style={{ flex: 1, paddingLeft: plan.schedule_type === 'anchored' ? 0 : 10 }}>
+                                    <Text style={styles.exerciseEditName}>{pw.worksessions?.name || 'Worksession'}</Text>
+                                    {plan.schedule_type === 'anchored' && (
+                                      <TouchableOpacity 
+                                        style={[styles.smallToggle, { alignSelf: 'flex-start', marginTop: 6, backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}
+                                        onPress={() => {
+                                          setEditDayPwId(pw.id);
+                                          const parts = (pw.day_name || 'Monday').split(' ');
+                                          setEditDaySelectedDay(parts[0] || 'Monday');
+                                          setEditDaySelectedTime(parts[1] || 'Any Time');
+                                          setIsEditDayModalVisible(true);
+                                        }}
+                                      >
+                                        <Text style={{ color: '#2563EB', fontSize: 12, fontWeight: 'bold' }}>{pw.day_name}</Text>
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
+                                  <TouchableOpacity onPress={() => handleRemoveWorksessionFromPlan(pw.id)} style={{ padding: 6 }}>
+                                    <Ionicons name="trash-outline" size={20} color="#F43F5E" />
+                                  </TouchableOpacity>
+                                </View>
+                              ))}
+
+                              <TouchableOpacity 
+                                style={styles.addExerciseBtn} 
+                                onPress={() => { setActivePlanForWs(plan.id); setIsAddWsModalVisible(true); }}
+                              >
+                                <Ionicons name="add-circle-outline" size={18} color="#2563EB" />
+                                <Text style={styles.addExerciseBtnText}>Attach Worksession</Text>
+                              </TouchableOpacity>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                              <TouchableOpacity 
+                                style={[styles.saveButton, { flex: 1, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' }]} 
+                                onPress={() => setEditingPlanId(null)}
+                              >
+                                <Text style={[styles.saveButtonText, { color: '#64748B' }]}>Cancel</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity 
+                                style={[styles.saveButton, { flex: 2 }]} 
+                                onPress={() => saveEditPlan(plan.id)}
+                              >
+                                <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                                <Text style={styles.saveButtonText}>Save Plan Changes</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                  {[...customPlans, ...standardPlans].length === 0 && (
+                    <Text style={{ color: '#64748B', fontSize: 13, paddingVertical: 8 }}>No plans available.</Text>
+                  )}
+                </View>
+              </View>
+
+              {/* Option to Create New Plan */}
+              <View style={styles.createForm}>
+                <View style={styles.formHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={[styles.headerIconCircle, { backgroundColor: '#EFF6FF' }]}>
+                      <Ionicons name="layers" size={17} color="#2563EB" />
+                    </View>
+                    <View>
+                      <Text style={styles.formTitle}>New Plan</Text>
+                      <Text style={styles.formSubtitle}>Design a multi-day or floating routine</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <Text style={styles.label}>Plan Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g., Summer Shred"
+                  placeholderTextColor="#94A3B8"
+                  value={newPlanName}
+                  onChangeText={setNewPlanName}
+                />
+
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Goal</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={newPlanGoal}
+                      onChangeText={setNewPlanGoal}
+                      placeholder="e.g. Strength"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Intensity</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={newPlanIntensity}
+                      onChangeText={setNewPlanIntensity}
+                      placeholder="e.g. Adv"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                  <View style={{ width: 68 }}>
+                    <Text style={styles.label}>Days</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={newPlanSessions}
+                      onChangeText={setNewPlanSessions}
+                      keyboardType="numeric"
+                      placeholder="3"
+                      placeholderTextColor="#94A3B8"
+                    />
+                  </View>
+                </View>
+
+                <Text style={styles.label}>Description</Text>
+                <TextInput
+                  style={[styles.input, { height: 60 }]}
+                  value={newPlanDescription}
+                  onChangeText={setNewPlanDescription}
+                  multiline
+                  placeholder="Brief description..."
+                  placeholderTextColor="#94A3B8"
+                />
+                
+                <Text style={styles.label}>Schedule Type</Text>
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+                  <TouchableOpacity
+                    style={[styles.scheduleBtn, newPlanSchedule === 'anchored' && styles.scheduleBtnActive]}
+                    onPress={() => setNewPlanSchedule('anchored')}
+                  >
+                    <Ionicons name="calendar-outline" size={15} color={newPlanSchedule === 'anchored' ? '#2563EB' : '#64748B'} style={{ marginRight: 6 }} />
+                    <Text style={[styles.scheduleBtnText, newPlanSchedule === 'anchored' && styles.scheduleBtnTextActive]}>Anchored</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.scheduleBtn, newPlanSchedule === 'floating' && styles.scheduleBtnActive]}
+                    onPress={() => setNewPlanSchedule('floating')}
+                  >
+                    <Ionicons name="swap-horizontal-outline" size={15} color={newPlanSchedule === 'floating' ? '#2563EB' : '#64748B'} style={{ marginRight: 6 }} />
+                    <Text style={[styles.scheduleBtnText, newPlanSchedule === 'floating' && styles.scheduleBtnTextActive]}>Floating</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, { marginTop: 6 }]}
+                  onPress={handleCreatePlan}
+                >
+                  <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.saveButtonText}>Save Plan</Text>
                 </TouchableOpacity>
-              )}
+              </View>
+            </View>
+          )}
 
-              {activeTab === 'worksessions' && worksessions.map(renderWorksessionCard)}
+          {/* WORKSESSIONS TAB (Existing Worksessions & Direct Creation) */}
+          {activeTab === 'worksessions' && (
+            <View>
+              {/* Existing Worksessions Section */}
+              <View style={styles.existingSectionWrapper}>
+                <View style={styles.sectionTitleRow}>
+                  <Ionicons name="barbell-outline" size={16} color="#2563EB" />
+                  <Text style={styles.sectionTitleText}>Existing Worksessions ({worksessions.length})</Text>
+                </View>
 
-              {/* EXERCISES TAB */}
-              {activeTab === 'exercises' && !isCreatingExercise && (
-                <View style={{ marginBottom: 15 }}>
+                <View style={styles.simpleSectionList}>
+                  {worksessions.map(ws => {
+                    const isBeingEdited = draftWsId === ws.id;
+                    const isTemplate = !ws.user_id || ws.id?.startsWith('b0000001');
+                    return (
+                      <View key={ws.id} style={[styles.simpleSectionCard, isBeingEdited && styles.simpleSectionCardActive]}>
+                        <View style={styles.simpleSectionContent}>
+                          <Text style={styles.simpleSectionName}>{ws.name}</Text>
+                          {isTemplate ? (
+                            <View style={styles.badgeTemplate}>
+                              <Text style={styles.badgeTemplateText}>Template</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <TouchableOpacity
+                            style={[styles.simpleEditButton, isBeingEdited && styles.simpleEditButtonActive]}
+                            onPress={() => {
+                              if (isBeingEdited) {
+                                openFocusMode(null);
+                              } else {
+                                openFocusMode(ws);
+                              }
+                            }}
+                          >
+                            <Ionicons 
+                              name={isBeingEdited ? "close-outline" : "create-outline"} 
+                              size={14} 
+                              color={isBeingEdited ? "#FFFFFF" : "#2563EB"} 
+                            />
+                            <Text style={[styles.simpleEditButtonText, isBeingEdited && { color: '#FFFFFF' }]}>
+                              {isBeingEdited ? "Cancel" : "Edit"}
+                            </Text>
+                          </TouchableOpacity>
+                          {(!isTemplate || isAdmin) && (
+                            <TouchableOpacity onPress={() => handleDeleteWorksession(ws.id)} style={{ padding: 6 }}>
+                              <Ionicons name="trash-outline" size={16} color="#F43F5E" />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {worksessions.length === 0 && (
+                    <Text style={{ color: '#64748B', fontSize: 13, paddingVertical: 8 }}>No worksessions available.</Text>
+                  )}
+                </View>
+              </View>
+
+              {/* Worksession Create / Edit Form */}
+              <View style={[styles.createForm, draftWsId && { borderColor: '#2563EB', borderWidth: 1.5 }]}>
+                <View style={styles.formHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                        <Ionicons name="barbell" size={20} color="#2563EB" />
+                      </View>
+                      <View>
+                        <Text style={styles.formTitle}>{draftWsId ? "Edit Worksession" : "New Worksession"}</Text>
+                        <Text style={styles.formSubtitle}>{draftWsId ? `Editing: ${draftWsName || 'Routine'}` : "Build a standalone routine or session"}</Text>
+                      </View>
+                    </View>
+                    {draftWsId && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setDraftWsId(null);
+                          setDraftWsName('');
+                          setDraftWsModality(MODALITIES[0]);
+                          setDraftExercises([]);
+                        }}
+                        style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: '#F1F5F9' }}
+                      >
+                        <Text style={{ fontSize: 12, color: '#64748B', fontWeight: '600' }}>Cancel</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+
+                <Text style={styles.label}>Worksession Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g., Pull Day & Core"
+                  placeholderTextColor="#94A3B8"
+                  value={draftWsName}
+                  onChangeText={setDraftWsName}
+                />
+
+                <Text style={styles.label}>Modality</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modalityScroll}>
+                  {MODALITIES.map(m => (
+                    <TouchableOpacity
+                      key={m}
+                      style={[styles.modalityPill, draftWsModality === m && styles.modalityPillActive]}
+                      onPress={() => setDraftWsModality(m)}
+                    >
+                      <Text style={[styles.modalityText, draftWsModality === m && styles.modalityTextActive]}>{m}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <View style={styles.draftExercisesContainer}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text style={[styles.label, { marginTop: 0, marginBottom: 0 }]}>Exercises ({draftExercises.length})</Text>
+                    <TouchableOpacity
+                      style={styles.addExerciseSmallBtn}
+                      onPress={() => setIsExerciseModalVisible(true)}
+                    >
+                      <Ionicons name="add" size={16} color="#2563EB" />
+                      <Text style={styles.addExerciseSmallBtnText}>Add Move</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {draftExercises.map((ex, index) => (
+                    <View key={ex.id || index} style={styles.exerciseEditRow}>
+                      <View style={styles.exerciseEditReorderArrows}>
+                        <TouchableOpacity onPress={() => moveDraftExercise(index, 'up')} disabled={index === 0}>
+                          <Ionicons name="chevron-up" size={22} color={index === 0 ? '#CBD5E1' : '#2563EB'} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => moveDraftExercise(index, 'down')} disabled={index === draftExercises.length - 1}>
+                          <Ionicons name="chevron-down" size={22} color={index === draftExercises.length - 1 ? '#CBD5E1' : '#2563EB'} />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={{ flex: 1, paddingLeft: 10 }}>
+                        <Text style={styles.exerciseEditName}>{ex.exercises?.name || ex.name || 'Exercise'}</Text>
+                        
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, marginBottom: 6 }}>
+                          <TouchableOpacity 
+                            style={[styles.smallToggle, (!ex.tracking_type || ex.tracking_type === 'reps') && styles.smallToggleActive]}
+                            onPress={() => {
+                              const newDraft = [...draftExercises];
+                              newDraft[index].tracking_type = 'reps';
+                              setDraftExercises(newDraft);
+                            }}>
+                            <Text style={[styles.smallToggleText, (!ex.tracking_type || ex.tracking_type === 'reps') && styles.smallToggleTextActive]}>Reps</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity 
+                            style={[styles.smallToggle, ex.tracking_type === 'time' && styles.smallToggleActive, { marginLeft: 6 }]}
+                            onPress={() => {
+                              const newDraft = [...draftExercises];
+                              newDraft[index].tracking_type = 'time';
+                              setDraftExercises(newDraft);
+                            }}>
+                            <Text style={[styles.smallToggleText, ex.tracking_type === 'time' && styles.smallToggleTextActive]}>Time</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          {ex.tracking_type === 'time' ? (
+                            <>
+                              <TextInput 
+                                style={styles.smallInput} 
+                                value={ex.target_time?.toString() || '60'} 
+                                keyboardType="numeric"
+                                onChangeText={(text) => {
+                                  const newDraft = [...draftExercises];
+                                  newDraft[index].target_time = parseInt(text) || 0;
+                                  setDraftExercises(newDraft);
+                                }}
+                              />
+                              <Text style={{ color: '#64748B', marginHorizontal: 6, fontSize: 13, fontWeight: '500' }}>seconds</Text>
+                            </>
+                          ) : (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <TextInput 
+                                style={styles.smallInput} 
+                                value={ex.target_sets?.toString() || '3'} 
+                                keyboardType="numeric"
+                                onChangeText={(text) => {
+                                  const newDraft = [...draftExercises];
+                                  newDraft[index].target_sets = parseInt(text) || 0;
+                                  setDraftExercises(newDraft);
+                                }}
+                              />
+                              <Text style={{ color: '#64748B', marginHorizontal: 4, fontSize: 13, fontWeight: '500' }}>sets x</Text>
+                              <TextInput 
+                                style={styles.smallInput} 
+                                value={ex.target_reps?.toString() || '10'} 
+                                keyboardType="numeric"
+                                onChangeText={(text) => {
+                                  const newDraft = [...draftExercises];
+                                  newDraft[index].target_reps = parseInt(text) || 0;
+                                  setDraftExercises(newDraft);
+                                }}
+                              />
+                              <Text style={{ color: '#64748B', marginHorizontal: 4, fontSize: 13, fontWeight: '500' }}>reps</Text>
+                              <Text style={{ color: '#2563EB', marginHorizontal: 4, fontWeight: '700' }}>@</Text>
+                              <TextInput 
+                                style={[styles.smallInput, { width: 48, color: '#2563EB', fontWeight: 'bold' }]} 
+                                placeholder="kg"
+                                placeholderTextColor="#94A3B8"
+                                value={ex.target_load?.toString() || ''} 
+                                keyboardType="numeric"
+                                onChangeText={(text) => {
+                                  const newDraft = [...draftExercises];
+                                  newDraft[index].target_load = text;
+                                  setDraftExercises(newDraft);
+                                }}
+                              />
+                              <Text style={{ color: '#64748B', marginLeft: 4, fontSize: 13, fontWeight: '500' }}>kg</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+
+                      <TouchableOpacity onPress={() => removeDraftExercise(index)} style={{ padding: 6 }}>
+                        <Ionicons name="trash-outline" size={20} color="#F43F5E" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+
+                  {draftExercises.length === 0 && (
+                    <View style={{ padding: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', borderStyle: 'dashed', marginBottom: 14 }}>
+                      <Ionicons name="barbell-outline" size={26} color="#94A3B8" style={{ marginBottom: 6 }} />
+                      <Text style={{ color: '#64748B', fontSize: 13, textAlign: 'center' }}>
+                        No exercises added to sequence yet.
+                      </Text>
+                    </View>
+                  )}
+
+                  <TouchableOpacity style={styles.addExerciseBtn} onPress={() => setIsExerciseModalVisible(true)}>
+                    <Ionicons name="add" size={18} color="#2563EB" />
+                    <Text style={styles.addExerciseBtnText}>Add Exercise</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, { marginTop: 6 }]}
+                  onPress={saveFocusMode}
+                >
+                  <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.saveButtonText}>{draftWsId ? "Save Worksession Changes" : "Save Worksession"}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* EXERCISES TAB (Existing Exercises & Direct Creation) */}
+          {activeTab === 'exercises' && (
+            <View>
+              {/* Existing Exercises Section */}
+              <View style={styles.existingSectionWrapper}>
+                <View style={styles.sectionTitleRow}>
+                  <Ionicons name="fitness-outline" size={16} color="#2563EB" />
+                  <Text style={styles.sectionTitleText}>Existing Exercises ({exercisesList.length})</Text>
+                </View>
+
+                <View style={styles.exerciseSearchContainer}>
+                  <Ionicons name="search" size={16} color="#94A3B8" />
                   <TextInput
-                    style={[styles.input, { marginBottom: 10, padding: 12 }]}
-                    placeholder="Search by name, muscle, or equipment..."
-                    placeholderTextColor="#666"
+                    style={styles.exerciseSearchInput}
+                    placeholder="Search existing exercises to edit..."
+                    placeholderTextColor="#94A3B8"
                     value={globalExerciseSearchQuery}
                     onChangeText={setGlobalExerciseSearchQuery}
                   />
-
-                  {/* SORT / GROUP BY SEGMENTED CONTROL */}
-                  <View style={styles.sortBarContainer}>
-                    <Text style={styles.sortBarLabel}>GROUP BY:</Text>
-                    <View style={styles.sortSegmentGroup}>
-                      <TouchableOpacity 
-                        style={[styles.sortSegment, exerciseSortMode === 'category' && styles.sortSegmentActive]} 
-                        onPress={() => { setExerciseSortMode('category'); setExerciseFilterTag('All'); }}
-                      >
-                        <Text style={[styles.sortSegmentText, exerciseSortMode === 'category' && styles.sortSegmentTextActive]}>
-                          Category
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.sortSegment, exerciseSortMode === 'muscle' && styles.sortSegmentActive]} 
-                        onPress={() => { setExerciseSortMode('muscle'); setExerciseFilterTag('All'); }}
-                      >
-                        <Text style={[styles.sortSegmentText, exerciseSortMode === 'muscle' && styles.sortSegmentTextActive]}>
-                          Muscle
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.sortSegment, exerciseSortMode === 'equipment' && styles.sortSegmentActive]} 
-                        onPress={() => { setExerciseSortMode('equipment'); setExerciseFilterTag('All'); }}
-                      >
-                        <Text style={[styles.sortSegmentText, exerciseSortMode === 'equipment' && styles.sortSegmentTextActive]}>
-                          Equipment
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.sortSegment, exerciseSortMode === 'alpha' && styles.sortSegmentActive]} 
-                        onPress={() => { setExerciseSortMode('alpha'); setExerciseFilterTag('All'); }}
-                      >
-                        <Text style={[styles.sortSegmentText, exerciseSortMode === 'alpha' && styles.sortSegmentTextActive]}>
-                          A-Z
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  {/* HORIZONTAL FILTER PILLS */}
-                  {exerciseSortMode !== 'alpha' && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                      {['All', ...(exerciseSortMode === 'category' ? CATEGORY_OPTIONS : exerciseSortMode === 'equipment' ? EQUIPMENT_OPTIONS : MUSCLE_OPTIONS)].map(tag => (
-                        <TouchableOpacity
-                          key={tag}
-                          style={[styles.filterPill, exerciseFilterTag === tag && styles.filterPillActive]}
-                          onPress={() => setExerciseFilterTag(tag)}
-                        >
-                          <Text style={[styles.filterText, exerciseFilterTag === tag && styles.filterTextActive]}>{tag}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  )}
-
-                  <TouchableOpacity style={styles.createButton} onPress={() => setIsCreatingExercise(true)}>
-                    <Ionicons name="add" size={24} color="#FFF" />
-                    <Text style={styles.createButtonText}>Create Exercise</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {isCreatingExercise && activeTab === 'exercises' && (
-                <View style={styles.createForm}>
-                  <View style={styles.formHeader}>
-                    <Text style={styles.formTitle}>New Exercise</Text>
-                    <TouchableOpacity onPress={() => setIsCreatingExercise(false)}><Ionicons name="close" size={24} color="#AAA" /></TouchableOpacity>
-                  </View>
-                  <Text style={styles.label}>Exercise Name</Text>
-                  <TextInput style={styles.input} placeholder="e.g., Bench Press" placeholderTextColor="#666" value={newExerciseName} onChangeText={setNewExerciseName} />
-                  
-                  <Text style={styles.label}>Muscle Group</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-                    {MUSCLE_OPTIONS.map(m => (
-                      <TouchableOpacity 
-                        key={m} 
-                        style={[styles.smallPill, newExerciseCategory === m && styles.smallPillActive]}
-                        onPress={() => setNewExerciseCategory(m)}
-                      >
-                        <Text style={[styles.smallPillText, newExerciseCategory === m && styles.smallPillTextActive]}>{m}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                  <TextInput style={[styles.input, { marginBottom: 12 }]} placeholder="Or custom muscle group..." placeholderTextColor="#666" value={newExerciseCategory} onChangeText={setNewExerciseCategory} />
-
-                  <Text style={styles.label}>Equipment</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-                    {EQUIPMENT_OPTIONS.map(eq => (
-                      <TouchableOpacity 
-                        key={eq} 
-                        style={[styles.smallPill, newExerciseEquipment === eq && styles.smallPillActive]}
-                        onPress={() => setNewExerciseEquipment(eq)}
-                      >
-                        <Text style={[styles.smallPillText, newExerciseEquipment === eq && styles.smallPillTextActive]}>{eq}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                  <TextInput style={[styles.input, { marginBottom: 12 }]} placeholder="Or custom equipment..." placeholderTextColor="#666" value={newExerciseEquipment} onChangeText={setNewExerciseEquipment} />
-
-                  <Text style={[styles.label, { marginBottom: 4, marginTop: 4 }]}>Bunny.net Video Demo URL (Optional):</Text>
-                  <TextInput 
-                    style={[styles.input, { marginBottom: 12 }]} 
-                    placeholder="e.g., https://vz-xxxx.b-cdn.net/VIDEO_ID/playlist.m3u8" 
-                    placeholderTextColor="#666" 
-                    value={newExerciseVideoUrl} 
-                    onChangeText={setNewExerciseVideoUrl}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-
-                  {isAdmin && (
-                    <TouchableOpacity 
-                      style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, marginTop: 5 }}
-                      onPress={() => setIsDefaultExercise(!isDefaultExercise)}
-                    >
-                      <Ionicons 
-                        name={isDefaultExercise ? "checkbox" : "square-outline"} 
-                        size={22} 
-                        color={isDefaultExercise ? "#FFD700" : "#888"} 
-                      />
-                      <Text style={{ color: '#FFF', marginLeft: 8, fontSize: 14 }}>
-                        Make default for all users (Global Library)
-                      </Text>
+                  {globalExerciseSearchQuery ? (
+                    <TouchableOpacity onPress={() => setGlobalExerciseSearchQuery('')}>
+                      <Ionicons name="close-circle" size={16} color="#94A3B8" />
                     </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity style={styles.saveButton} onPress={handleCreateExercise}><Text style={styles.saveButtonText}>Save Exercise</Text></TouchableOpacity>
+                  ) : null}
                 </View>
-              )}
 
-              {activeTab === 'exercises' && (() => {
-                const search = globalExerciseSearchQuery.toLowerCase();
-                const filtered = exercisesList.filter(ex => {
-                  const nameMatch = ex.name.toLowerCase().includes(search);
-                  const catMatch = (ex.category || '').toLowerCase().includes(search);
-                  const eqMatch = getExerciseEquipment(ex).toLowerCase().includes(search);
-                  const mgMatch = getExerciseMuscleGroup(ex).toLowerCase().includes(search);
-                  const instMatch = (getExerciseInstructions(ex) || '').toLowerCase().includes(search);
-                  const diffMatch = (getExerciseDifficulty(ex) || '').toLowerCase().includes(search);
-                  const mechMatch = (getExerciseMechanics(ex) || '').toLowerCase().includes(search);
-                  const matchesSearch = nameMatch || catMatch || eqMatch || mgMatch || instMatch || diffMatch || mechMatch;
+                <View style={styles.simpleSectionList}>
+                  {(() => {
+                    const q = globalExerciseSearchQuery.trim().toLowerCase();
+                    const filtered = q
+                      ? exercisesList.filter(e => e.name.toLowerCase().includes(q) || (e.category || '').toLowerCase().includes(q) || (e.muscle_group || '').toLowerCase().includes(q) || (e.equipment || '').toLowerCase().includes(q))
+                      : (showAllExercises ? exercisesList : exercisesList.slice(0, 8));
 
-                  if (!matchesSearch) return false;
-                  if (exerciseFilterTag === 'All') return true;
+                    return (
+                      <>
+                        {filtered.map(ex => {
+                          const isBeingEdited = editingExerciseId === ex.id;
+                          const isCustom = Boolean(ex.user_id && !ex.is_default);
+                          return (
+                            <View key={ex.id} style={[styles.simpleSectionCard, isBeingEdited && styles.simpleSectionCardActive]}>
+                              <View style={styles.simpleSectionContent}>
+                                <Text style={styles.simpleSectionName}>{ex.name}</Text>
+                                {isCustom ? (
+                                  <View style={[styles.badgeTemplate, { backgroundColor: '#FEF3C7' }]}>
+                                    <Text style={[styles.badgeTemplateText, { color: '#D97706' }]}>Custom</Text>
+                                  </View>
+                                ) : null}
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <TouchableOpacity
+                                  style={[styles.simpleEditButton, isBeingEdited && styles.simpleEditButtonActive]}
+                                  onPress={() => {
+                                    if (isBeingEdited) {
+                                      setEditingExerciseId(null);
+                                      setNewExerciseName('');
+                                      setNewExerciseCategory('Chest');
+                                      setNewExerciseEquipment('Bodyweight');
+                                      setNewExerciseVideoUrl('');
+                                      setIsDefaultExercise(false);
+                                    } else {
+                                      setEditingExerciseId(ex.id);
+                                      setNewExerciseName(ex.name);
+                                      setNewExerciseCategory(ex.category || ex.muscle_group || 'Chest');
+                                      setNewExerciseEquipment(ex.equipment || 'Bodyweight');
+                                      setNewExerciseVideoUrl(ex.video_url || '');
+                                      setIsDefaultExercise(Boolean(ex.is_default));
+                                    }
+                                  }}
+                                >
+                                  <Ionicons 
+                                    name={isBeingEdited ? "close-outline" : "create-outline"} 
+                                    size={14} 
+                                    color={isBeingEdited ? "#FFFFFF" : "#2563EB"} 
+                                  />
+                                  <Text style={[styles.simpleEditButtonText, isBeingEdited && { color: '#FFFFFF' }]}>
+                                    {isBeingEdited ? "Cancel" : "Edit"}
+                                  </Text>
+                                </TouchableOpacity>
+                                {(isCustom || isAdmin) && (
+                                  <TouchableOpacity onPress={() => handleDeleteExercise(ex)} style={{ padding: 6 }}>
+                                    <Ionicons name="trash-outline" size={16} color="#F43F5E" />
+                                  </TouchableOpacity>
+                                )}
+                              </View>
+                            </View>
+                          );
+                        })}
 
-                  if (exerciseSortMode === 'category') {
-                    return (ex.category || 'Other') === exerciseFilterTag;
-                  }
-                  if (exerciseSortMode === 'equipment') {
-                    return getExerciseEquipment(ex) === exerciseFilterTag;
-                  }
-                  if (exerciseSortMode === 'muscle') {
-                    return getExerciseMuscleGroup(ex) === exerciseFilterTag;
-                  }
-                  return true;
-                });
+                        {!q && exercisesList.length > 8 && (
+                          <TouchableOpacity
+                            style={styles.showMoreBtn}
+                            onPress={() => setShowAllExercises(!showAllExercises)}
+                          >
+                            <Text style={styles.showMoreBtnText}>
+                              {showAllExercises ? "Show Less" : `Show All ${exercisesList.length} Exercises`}
+                            </Text>
+                            <Ionicons name={showAllExercises ? "chevron-up" : "chevron-down"} size={14} color="#2563EB" />
+                          </TouchableOpacity>
+                        )}
+                      </>
+                    );
+                  })()}
+                  {exercisesList.length === 0 && (
+                    <Text style={{ color: '#64748B', fontSize: 13, paddingVertical: 8 }}>No exercises available.</Text>
+                  )}
+                </View>
+              </View>
 
-                if (filtered.length === 0) {
-                  return (
-                    <View style={{ alignItems: 'center', marginTop: 30, paddingBottom: 40 }}>
-                      <Text style={{ color: '#888', fontSize: 16 }}>No exercises found matching your filter.</Text>
-                    </View>
-                  );
-                }
-
-                if (exerciseSortMode === 'alpha') {
-                  const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
-                  return (
-                    <View style={{ marginBottom: 20 }}>
-                      <Text style={{ color: '#AAA', fontSize: 14, fontWeight: 'bold', marginBottom: 10 }}>
-                        All Exercises ({sorted.length})
-                      </Text>
-                      {sorted.map(renderExerciseCard)}
-                    </View>
-                  );
-                }
-
-                // Group by category, equipment, or muscle
-                const grouped = filtered.reduce((acc, ex) => {
-                  const groupKey = exerciseSortMode === 'category'
-                    ? (ex.category || 'Other')
-                    : exerciseSortMode === 'equipment' 
-                    ? getExerciseEquipment(ex) 
-                    : getExerciseMuscleGroup(ex);
-                  if (!acc[groupKey]) acc[groupKey] = [];
-                  acc[groupKey].push(ex);
-                  return acc;
-                }, {});
-
-                return Object.keys(grouped).sort().map(groupKey => (
-                  <View key={groupKey} style={{ marginBottom: 15 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, marginTop: 5 }}>
-                      <Text style={{ color: '#FFF', fontSize: 16, fontWeight: 'bold' }}>{groupKey}</Text>
-                      <View style={{ backgroundColor: '#2A2A35', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 }}>
-                        <Text style={{ color: '#888', fontSize: 12, fontWeight: 'bold' }}>{grouped[groupKey].length}</Text>
+              {/* Exercise Create / Edit Form */}
+              <View style={[styles.createForm, editingExerciseId && { borderColor: '#2563EB', borderWidth: 1.5 }]}>
+                <View style={styles.formHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                        <Ionicons name="fitness" size={20} color="#2563EB" />
+                      </View>
+                      <View>
+                        <Text style={styles.formTitle}>{editingExerciseId ? "Edit Exercise" : "New Exercise"}</Text>
+                        <Text style={styles.formSubtitle}>{editingExerciseId ? `Editing: ${newExerciseName || 'Exercise'}` : "Add a custom exercise to your library"}</Text>
                       </View>
                     </View>
-                    {grouped[groupKey].map(renderExerciseCard)}
+                    {editingExerciseId && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setEditingExerciseId(null);
+                          setNewExerciseName('');
+                          setNewExerciseCategory('Chest');
+                          setNewExerciseEquipment('Bodyweight');
+                          setNewExerciseVideoUrl('');
+                          setIsDefaultExercise(false);
+                        }}
+                        style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: '#F1F5F9' }}
+                      >
+                        <Text style={{ fontSize: 12, color: '#64748B', fontWeight: '600' }}>Cancel</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
-                ));
-              })()}
-
-              {/* PLANS TAB */}
-              {activeTab === 'plans' && !isCreatingPlan && !editingPlanId && (
-                <TouchableOpacity style={styles.createButton} onPress={() => setIsCreatingPlan(true)}>
-                  <Ionicons name="add" size={24} color="#FFF" />
-                  <Text style={styles.createButtonText}>Create Plan</Text>
-                </TouchableOpacity>
-              )}
-
-              {isCreatingPlan && activeTab === 'plans' && (
-                <View style={styles.createForm}>
-                  <View style={styles.formHeader}>
-                    <Text style={styles.formTitle}>New Plan</Text>
-                    <TouchableOpacity onPress={() => setIsCreatingPlan(false)}><Ionicons name="close" size={24} color="#AAA" /></TouchableOpacity>
-                  </View>
-                  <Text style={styles.label}>Plan Name</Text>
-                  <TextInput style={styles.input} placeholder="e.g., Summer Shred" placeholderTextColor="#666" value={newPlanName} onChangeText={setNewPlanName} />
-
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.label}>Goal</Text>
-                      <TextInput style={styles.input} value={newPlanGoal} onChangeText={setNewPlanGoal} placeholder="e.g. Strength" placeholderTextColor="#666" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.label}>Intensity</Text>
-                      <TextInput style={styles.input} value={newPlanIntensity} onChangeText={setNewPlanIntensity} placeholder="e.g. Adv" placeholderTextColor="#666" />
-                    </View>
-                    <View style={{ width: 60 }}>
-                      <Text style={styles.label}>Days</Text>
-                      <TextInput style={styles.input} value={newPlanSessions} onChangeText={setNewPlanSessions} keyboardType="numeric" placeholder="3" placeholderTextColor="#666" />
-                    </View>
-                  </View>
-
-                  <Text style={styles.label}>Description</Text>
-                  <TextInput style={[styles.input, { height: 60 }]} value={newPlanDescription} onChangeText={setNewPlanDescription} multiline placeholder="Brief description..." placeholderTextColor="#666" />
-                  
-                  <Text style={styles.label}>Schedule Type</Text>
-                  <View style={{ flexDirection: 'row', marginBottom: 15 }}>
-                    <TouchableOpacity style={[styles.modalityPill, newPlanSchedule === 'anchored' && styles.modalityPillActive, { flex: 1, alignItems: 'center' }]} onPress={() => setNewPlanSchedule('anchored')}>
-                      <Text style={[styles.modalityText, newPlanSchedule === 'anchored' && styles.modalityTextActive]}>Anchored</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.modalityPill, newPlanSchedule === 'floating' && styles.modalityPillActive, { flex: 1, alignItems: 'center' }]} onPress={() => setNewPlanSchedule('floating')}>
-                      <Text style={[styles.modalityText, newPlanSchedule === 'floating' && styles.modalityTextActive]}>Floating</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <TouchableOpacity style={styles.saveButton} onPress={handleCreatePlan}><Text style={styles.saveButtonText}>Save Plan</Text></TouchableOpacity>
                 </View>
-              )}
 
-              {activeTab === 'plans' && (
-                <>
-                  {standardPlans.length > 0 && <Text style={{ color: '#AAA', fontSize: 16, fontWeight: 'bold', marginBottom: 15, marginTop: 5 }}>Standard Templates</Text>}
-                  {standardPlans.map(renderPlanCard)}
-                  
-                  <Text style={{ color: '#AAA', fontSize: 16, fontWeight: 'bold', marginBottom: 15, marginTop: 15 }}>Your Custom Plans</Text>
-                  {customPlans.length === 0 ? (
-                    <Text style={{ color: '#666', marginBottom: 20 }}>You haven't created any custom plans yet.</Text>
-                  ) : (
-                    customPlans.map(renderPlanCard)
-                  )}
-                </>
-              )}
-
-            </ScrollView>
-          )}
-        </>
-      ) : (
-        <View style={styles.focusContainer}>
-          <View style={styles.focusHeader}>
-            <TouchableOpacity onPress={closeFocusMode}>
-              <Text style={styles.focusCancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.focusTitle}>{draftWsId ? 'Edit Worksession' : 'New Worksession'}</Text>
-            <TouchableOpacity onPress={saveFocusMode}>
-              <Text style={styles.focusSaveText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.focusContent}>
-            <Text style={styles.label}>Name</Text>
-            <TextInput style={styles.input} placeholder="e.g., Pull Day" placeholderTextColor="#666" value={draftWsName} onChangeText={setDraftWsName} />
-            <Text style={styles.label}>Modality</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modalityScroll}>
-              {MODALITIES.map(m => (
-                <TouchableOpacity key={m} style={[styles.modalityPill, draftWsModality === m && styles.modalityPillActive]} onPress={() => setDraftWsModality(m)}>
-                  <Text style={[styles.modalityText, draftWsModality === m && styles.modalityTextActive]}>{m}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <View style={styles.draftExercisesContainer}>
-              <Text style={styles.label}>Exercises</Text>
-              {draftExercises.map((ex, index) => (
-                <View key={ex.id} style={styles.exerciseEditRow}>
-                  <View style={styles.exerciseEditReorderArrows}>
-                    <TouchableOpacity onPress={() => moveDraftExercise(index, 'up')} disabled={index === 0}>
-                      <Ionicons name="chevron-up" size={24} color={index === 0 ? '#444' : '#00D09E'} />
+                <Text style={styles.label}>Exercise Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g., Incline Dumbbell Bench Press"
+                  placeholderTextColor="#94A3B8"
+                  value={newExerciseName}
+                  onChangeText={setNewExerciseName}
+                />
+                
+                <Text style={styles.label}>Muscle Group</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                  {MUSCLE_OPTIONS.map(m => (
+                    <TouchableOpacity 
+                      key={m} 
+                      style={[styles.smallPill, newExerciseCategory === m && styles.smallPillActive]}
+                      onPress={() => setNewExerciseCategory(m)}
+                    >
+                      <Text style={[styles.smallPillText, newExerciseCategory === m && styles.smallPillTextActive]}>{m}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => moveDraftExercise(index, 'down')} disabled={index === draftExercises.length - 1}>
-                      <Ionicons name="chevron-down" size={24} color={index === draftExercises.length - 1 ? '#444' : '#00D09E'} />
-                    </TouchableOpacity>
-                  </View>
-                  <View style={{ flex: 1, paddingLeft: 10 }}>
-                    <Text style={styles.exerciseEditName}>{ex.exercises?.name}</Text>
-                    
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, marginBottom: 4 }}>
-                      <TouchableOpacity 
-                        style={[styles.smallToggle, (!ex.tracking_type || ex.tracking_type === 'reps') && styles.smallToggleActive]}
-                        onPress={() => {
-                          const newDraft = [...draftExercises];
-                          newDraft[index].tracking_type = 'reps';
-                          setDraftExercises(newDraft);
-                        }}>
-                        <Text style={[styles.smallToggleText, (!ex.tracking_type || ex.tracking_type === 'reps') && styles.smallToggleTextActive]}>Reps</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.smallToggle, ex.tracking_type === 'time' && styles.smallToggleActive, { marginLeft: 5 }]}
-                        onPress={() => {
-                          const newDraft = [...draftExercises];
-                          newDraft[index].tracking_type = 'time';
-                          setDraftExercises(newDraft);
-                        }}>
-                        <Text style={[styles.smallToggleText, ex.tracking_type === 'time' && styles.smallToggleTextActive]}>Time</Text>
-                      </TouchableOpacity>
-                    </View>
+                  ))}
+                </ScrollView>
+                <TextInput
+                  style={[styles.input, { marginBottom: 14 }]}
+                  placeholder="Or custom muscle group..."
+                  placeholderTextColor="#94A3B8"
+                  value={newExerciseCategory}
+                  onChangeText={setNewExerciseCategory}
+                />
 
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      {ex.tracking_type === 'time' ? (
-                        <>
-                          <TextInput 
-                            style={styles.smallInput} 
-                            value={ex.target_time?.toString() || '60'} 
-                            keyboardType="numeric"
-                            onChangeText={(text) => {
-                              const newDraft = [...draftExercises];
-                              newDraft[index].target_time = parseInt(text) || 0;
-                              setDraftExercises(newDraft);
-                            }}
-                          />
-                          <Text style={{ color: '#888', marginHorizontal: 4 }}>seconds</Text>
-                        </>
-                      ) : (
-                        <>
-                          <TextInput 
-                            style={styles.smallInput} 
-                            value={ex.target_sets?.toString() || '3'} 
-                            keyboardType="numeric"
-                            onChangeText={(text) => {
-                              const newDraft = [...draftExercises];
-                              newDraft[index].target_sets = parseInt(text) || 0;
-                              setDraftExercises(newDraft);
-                            }}
-                          />
-                          <Text style={{ color: '#888', marginHorizontal: 4 }}>sets x</Text>
-                          <TextInput 
-                            style={styles.smallInput} 
-                            value={ex.target_reps?.toString() || '10'} 
-                            keyboardType="numeric"
-                            onChangeText={(text) => {
-                              const newDraft = [...draftExercises];
-                              newDraft[index].target_reps = parseInt(text) || 0;
-                              setDraftExercises(newDraft);
-                            }}
-                          />
-                          <Text style={{ color: '#888', marginLeft: 4 }}>reps</Text>
-                        </>
-                      )}
-                    </View>
-                  </View>
-                  <TouchableOpacity onPress={() => removeDraftExercise(index)} style={{ padding: 5 }}>
-                    <Ionicons name="trash" size={24} color="#FF4C4C" />
+                <Text style={styles.label}>Equipment</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                  {EQUIPMENT_OPTIONS.map(eq => (
+                    <TouchableOpacity 
+                      key={eq} 
+                      style={[styles.smallPill, newExerciseEquipment === eq && styles.smallPillActive]}
+                      onPress={() => setNewExerciseEquipment(eq)}
+                    >
+                      <Text style={[styles.smallPillText, newExerciseEquipment === eq && styles.smallPillTextActive]}>{eq}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <TextInput
+                  style={[styles.input, { marginBottom: 14 }]}
+                  placeholder="Or custom equipment..."
+                  placeholderTextColor="#94A3B8"
+                  value={newExerciseEquipment}
+                  onChangeText={setNewExerciseEquipment}
+                />
+
+                <Text style={[styles.label, { marginBottom: 4, marginTop: 4 }]}>Bunny.net Video Demo URL (Optional):</Text>
+                <TextInput 
+                  style={[styles.input, { marginBottom: 14 }]} 
+                  placeholder="e.g., https://vz-xxxx.b-cdn.net/VIDEO_ID/playlist.m3u8" 
+                  placeholderTextColor="#94A3B8" 
+                  value={newExerciseVideoUrl} 
+                  onChangeText={setNewExerciseVideoUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+
+                {isAdmin && (
+                  <TouchableOpacity 
+                    style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 18, marginTop: 6 }}
+                    onPress={() => setIsDefaultExercise(!isDefaultExercise)}
+                  >
+                    <Ionicons 
+                      name={isDefaultExercise ? "checkbox" : "square-outline"} 
+                      size={22} 
+                      color={isDefaultExercise ? "#2563EB" : "#94A3B8"} 
+                    />
+                    <Text style={{ color: '#0F172A', marginLeft: 8, fontSize: 14, fontWeight: '500' }}>
+                      Make default for all users (Global Library)
+                    </Text>
                   </TouchableOpacity>
-                </View>
-              ))}
-              {draftExercises.length === 0 && <Text style={{ color: '#666', marginBottom: 15 }}>No exercises added yet.</Text>}
-              
-              <TouchableOpacity style={styles.addExerciseBtn} onPress={() => setIsExerciseModalVisible(true)}>
-                <Ionicons name="add" size={18} color="#FFF" />
-                <Text style={styles.addExerciseBtnText}>Add Exercise</Text>
-              </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.saveButton, { marginTop: 8 }]}
+                  onPress={handleCreateExercise}
+                >
+                  <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.saveButtonText}>{editingExerciseId ? "Save Exercise Changes" : "Save Exercise"}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </ScrollView>
-        </View>
+          )}
+        </ContentContainer>
       )}
 
       {/* Exercise Selection Modal */}
@@ -1629,21 +2079,23 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
           <View style={styles.exerciseModalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add Exercise</Text>
-              <TouchableOpacity onPress={() => { setIsExerciseModalVisible(false); setExerciseSearchQuery(''); }}><Ionicons name="close" size={24} color="#FFF" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => { setIsExerciseModalVisible(false); setExerciseSearchQuery(''); }}>
+                <Ionicons name="close" size={24} color="#0F172A" />
+              </TouchableOpacity>
             </View>
 
             <TextInput
-              style={[styles.input, { marginHorizontal: 20, marginBottom: 10 }]}
+              style={[styles.input, { marginHorizontal: 20, marginBottom: 12 }]}
               placeholder="Search by name, muscle, equipment..."
-              placeholderTextColor="#888"
+              placeholderTextColor="#94A3B8"
               value={exerciseSearchQuery}
               onChangeText={setExerciseSearchQuery}
             />
 
             {/* Toggle Sort: Category vs Muscle vs Equipment in Worksession Modal */}
-            <View style={{ flexDirection: 'row', paddingHorizontal: 20, alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <Text style={{ color: '#888', fontSize: 12, fontWeight: 'bold' }}>FILTER BY:</Text>
-              <View style={{ flexDirection: 'row', backgroundColor: '#1E1E24', borderRadius: 8, padding: 2, borderWidth: 1, borderColor: '#3A3A45' }}>
+            <View style={{ flexDirection: 'row', paddingHorizontal: 20, alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Text style={{ color: '#64748B', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 }}>FILTER BY:</Text>
+              <View style={{ flexDirection: 'row', backgroundColor: '#F1F5F9', borderRadius: 8, padding: 3, borderWidth: 1, borderColor: '#E2E8F0' }}>
                 <TouchableOpacity 
                   style={[styles.smallToggle, pickerSortMode === 'category' && styles.smallToggleActive]}
                   onPress={() => { setPickerSortMode('category'); setSelectedExerciseFilter('All'); }}
@@ -1703,18 +2155,18 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <Text style={styles.exerciseListItemName}>{ex.name}</Text>
                       {ex.user_id && !ex.is_default && (
-                        <View style={[styles.metadataBadge, { backgroundColor: '#332414', paddingHorizontal: 6, paddingVertical: 2 }]}>
-                          <Text style={[styles.metadataText, { color: '#FFA726', fontSize: 10 }]}>Custom</Text>
+                        <View style={[styles.metadataBadge, { backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }]}>
+                          <Text style={[styles.metadataText, { color: '#D97706', fontSize: 10 }]}>Custom</Text>
                         </View>
                       )}
                     </View>
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, alignItems: 'center' }}>
-                      <Text style={{ color: '#00D09E', fontSize: 12, fontWeight: '600' }}>💪 {getExerciseMuscleGroup(ex)}</Text>
-                      <Text style={{ color: '#666', fontSize: 11 }}>•</Text>
-                      <Text style={{ color: '#60A5FA', fontSize: 12, fontWeight: '600' }}>⚙️ {getExerciseEquipment(ex)}</Text>
+                      <Text style={{ color: '#2563EB', fontSize: 12, fontWeight: '600' }}>💪 {getExerciseMuscleGroup(ex)}</Text>
+                      <Text style={{ color: '#CBD5E1', fontSize: 11 }}>•</Text>
+                      <Text style={{ color: '#475569', fontSize: 12, fontWeight: '600' }}>⚙️ {getExerciseEquipment(ex)}</Text>
                     </View>
                   </View>
-                  <Ionicons name="add-circle" size={24} color="#00D09E" />
+                  <Ionicons name="add-circle" size={24} color="#2563EB" />
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -1728,7 +2180,9 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
           <View style={styles.exerciseModalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Worksession</Text>
-              <TouchableOpacity onPress={() => { setIsAddWsModalVisible(false); setSelectedWsIdForAttach(null); setNewWsName(''); }}><Ionicons name="close" size={24} color="#FFF" /></TouchableOpacity>
+              <TouchableOpacity onPress={() => { setIsAddWsModalVisible(false); setSelectedWsIdForAttach(null); setNewWsName(''); }}>
+                <Ionicons name="close" size={24} color="#0F172A" />
+              </TouchableOpacity>
             </View>
 
             <ScrollView style={[styles.exerciseListScroll, { maxHeight: 200, marginBottom: 15 }]}>
@@ -1736,7 +2190,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               {worksessions.map(ws => (
                 <TouchableOpacity 
                   key={ws.id} 
-                  style={[styles.exerciseListItem, selectedWsIdForAttach === ws.id && { borderColor: '#00D09E', borderWidth: 1 }]} 
+                  style={[styles.exerciseListItem, selectedWsIdForAttach === ws.id && { borderColor: '#2563EB', borderWidth: 1.5, backgroundColor: '#EFF6FF' }]} 
                   onPress={() => {
                     setSelectedWsIdForAttach(ws.id);
                     setNewWsName('');
@@ -1746,18 +2200,18 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                     <Text style={styles.exerciseListItemName}>{ws.name}</Text>
                     <Text style={styles.exerciseListItemCategory}>{ws.modality}</Text>
                   </View>
-                  {selectedWsIdForAttach === ws.id && <Ionicons name="checkmark-circle" size={24} color="#00D09E" />}
+                  {selectedWsIdForAttach === ws.id && <Ionicons name="checkmark-circle" size={22} color="#2563EB" />}
                 </TouchableOpacity>
               ))}
-              {worksessions.length === 0 && <Text style={{ color: '#888' }}>No worksessions available.</Text>}
+              {worksessions.length === 0 && <Text style={{ color: '#64748B', fontSize: 13, fontStyle: 'italic' }}>No worksessions available.</Text>}
             </ScrollView>
 
-            <View style={{ marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#3A3A45', paddingBottom: 15 }}>
+            <View style={{ marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingBottom: 15 }}>
               <Text style={styles.label}>Or Create & Attach New Worksession</Text>
               <TextInput 
                 style={styles.input} 
                 placeholder="New Worksession Name" 
-                placeholderTextColor="#666" 
+                placeholderTextColor="#94A3B8" 
                 value={newWsName} 
                 onChangeText={(text) => {
                   setNewWsName(text);
@@ -1770,7 +2224,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
               const activePlanObj = customPlans.find(p => p.id === activePlanForWs) || standardPlans.find(p => p.id === activePlanForWs);
               const isAnchored = activePlanObj?.schedule_type === 'anchored';
               return isAnchored ? (
-                <View style={{ marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#3A3A45', paddingBottom: 15 }}>
+                <View style={{ marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingBottom: 15 }}>
                   <Text style={styles.label}>Select Day</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
                     {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => (
@@ -1800,6 +2254,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
             })()}
             
             <TouchableOpacity style={styles.saveButton} onPress={handleFinalAddWorksession}>
+              <Ionicons name="add-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
               <Text style={styles.saveButtonText}>Add Worksession to Plan</Text>
             </TouchableOpacity>
           </View>
@@ -1812,7 +2267,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Change Day</Text>
               <TouchableOpacity onPress={() => setIsEditDayModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#FFF" />
+                <Ionicons name="close" size={24} color="#0F172A" />
               </TouchableOpacity>
             </View>
             <View style={{ marginBottom: 15 }}>
@@ -1848,6 +2303,7 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
                 updateWorksessionDay(editDayPwId, `${editDaySelectedDay}${timeSuffix}`);
               }}
             >
+              <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
               <Text style={styles.saveButtonText}>Save Day</Text>
             </TouchableOpacity>
           </View>
@@ -1866,84 +2322,497 @@ export default function PlanBuilder({ onSetDefaultPlan, defaultPlanId }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1E1E24' },
-  tabContainer: { flexDirection: 'row', marginHorizontal: 15, marginTop: 15, marginBottom: 20, backgroundColor: '#2A2A31', borderRadius: 12, padding: 4 },
-  tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8 },
-  activeTab: { backgroundColor: '#3A3A45' },
-  tabText: { color: '#888', fontWeight: '600', fontSize: 13 },
-  activeTabText: { color: '#FFF' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scrollContent: { flex: 1, paddingHorizontal: 15 },
-  createButton: { flexDirection: 'row', backgroundColor: '#00D09E', padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  createButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
-  createForm: { backgroundColor: '#2A2A31', borderRadius: 12, padding: 20, marginBottom: 20 },
-  formHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  formTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
-  label: { color: '#AAA', fontSize: 14, marginBottom: 8, marginTop: 10 },
-  input: { backgroundColor: '#1E1E24', color: '#FFF', padding: 15, borderRadius: 8, fontSize: 16, borderWidth: 1, borderColor: '#3A3A45', marginBottom: 10 },
-  smallInput: { backgroundColor: '#121214', color: '#FFF', padding: 8, borderRadius: 8, fontSize: 14, borderWidth: 1, borderColor: '#3A3A45', width: 40, textAlign: 'center' },
-  modalityScroll: { marginBottom: 20 },
-  modalityPill: { backgroundColor: '#1E1E24', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#3A3A45' },
-  modalityPillActive: { backgroundColor: '#00D09E20', borderColor: '#00D09E' },
-  modalityText: { color: '#AAA', fontWeight: '500' },
-  modalityTextActive: { color: '#00D09E', fontWeight: 'bold' },
-  saveButton: { backgroundColor: '#00D09E', padding: 16, borderRadius: 12, alignItems: 'center' },
-  saveButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  container: { 
+    flex: 1, 
+    backgroundColor: KinetixTheme.colors.background,
+  },
+  tabContainer: { 
+    flexDirection: 'row', 
+    marginHorizontal: 16, 
+    marginTop: 14, 
+    marginBottom: 16, 
+    backgroundColor: '#E2E8F0', 
+    borderRadius: 12, 
+    padding: 4,
+  },
+  tab: { 
+    flex: 1, 
+    paddingVertical: 10, 
+    alignItems: 'center', 
+    borderRadius: 9,
+  },
+  activeTab: { 
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tabText: { 
+    color: '#64748B', 
+    fontWeight: '600', 
+    fontSize: 13,
+  },
+  activeTabText: { 
+    color: '#2563EB', 
+    fontWeight: 'bold',
+  },
+  centerContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    backgroundColor: KinetixTheme.colors.background,
+  },
+  scrollContent: { 
+    flex: 1, 
+    paddingHorizontal: 16,
+  },
+  createButton: { 
+    flexDirection: 'row', 
+    backgroundColor: '#2563EB', 
+    padding: 16, 
+    borderRadius: 12, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    marginBottom: 20,
+    ...KinetixTheme.shadows.card,
+  },
+  createButtonText: { 
+    color: '#FFFFFF', 
+    fontSize: 16, 
+    fontWeight: 'bold', 
+    marginLeft: 8,
+  },
+  createForm: { 
+    backgroundColor: '#FFFFFF', 
+    borderRadius: 16, 
+    padding: 18, 
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...KinetixTheme.shadows.card,
+  },
+  formHeader: { 
+    marginBottom: 16,
+  },
+  formTitle: { 
+    color: '#0F172A', 
+    fontSize: 18, 
+    fontWeight: 'bold',
+  },
+  formSubtitle: {
+    color: '#64748B',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  headerIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  label: { 
+    color: '#475569', 
+    fontSize: 13, 
+    fontWeight: '600',
+    marginBottom: 6, 
+    marginTop: 10,
+  },
+  input: { 
+    backgroundColor: '#F8FAFC', 
+    color: '#0F172A', 
+    paddingHorizontal: 14, 
+    paddingVertical: 12, 
+    borderRadius: 10, 
+    fontSize: 15, 
+    borderWidth: 1, 
+    borderColor: '#E2E8F0', 
+    marginBottom: 8,
+  },
+  smallInput: { 
+    backgroundColor: '#FFFFFF', 
+    color: '#0F172A', 
+    paddingHorizontal: 6, 
+    paddingVertical: 6, 
+    borderRadius: 8, 
+    fontSize: 13, 
+    borderWidth: 1, 
+    borderColor: '#CBD5E1', 
+    minWidth: 42, 
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  modalityScroll: { 
+    marginBottom: 16,
+  },
+  modalityPill: { 
+    backgroundColor: '#F1F5F9', 
+    paddingHorizontal: 14, 
+    paddingVertical: 8, 
+    borderRadius: 20, 
+    marginRight: 8, 
+    borderWidth: 1, 
+    borderColor: '#E2E8F0',
+  },
+  modalityPillActive: { 
+    backgroundColor: '#EFF6FF', 
+    borderColor: '#2563EB',
+  },
+  modalityText: { 
+    color: '#64748B', 
+    fontWeight: '500',
+    fontSize: 13,
+  },
+  modalityTextActive: { 
+    color: '#2563EB', 
+    fontWeight: 'bold',
+  },
+  saveButton: { 
+    flexDirection: 'row',
+    backgroundColor: '#2563EB', 
+    paddingVertical: 14, 
+    paddingHorizontal: 20, 
+    borderRadius: 12, 
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...KinetixTheme.shadows.card,
+  },
+  saveButtonText: { 
+    color: '#FFFFFF', 
+    fontSize: 15, 
+    fontWeight: 'bold',
+  },
+  scheduleBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    alignItems: 'center',
+    borderRadius: 9,
+  },
+  scheduleBtnActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  scheduleBtnText: {
+    color: '#64748B',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  scheduleBtnTextActive: {
+    color: '#2563EB',
+    fontWeight: 'bold',
+  },
   planList: { paddingBottom: 40 },
-  planCard: { backgroundColor: '#2A2A31', borderRadius: 12, padding: 16, marginBottom: 15 },
-  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  planName: { color: '#FFF', fontSize: 18, fontWeight: 'bold', flex: 1 },
-  startButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00D09E', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginLeft: 10 },
-  startButtonText: { color: '#FFF', fontWeight: 'bold', marginRight: 4, fontSize: 14 },
-  exerciseSummaryList: { marginTop: 5 },
-  exerciseSummaryText: { color: '#AAA', fontSize: 14, marginBottom: 4 },
-  editExercisesContainer: { marginTop: 15, borderTopWidth: 1, borderTopColor: '#3A3A45', paddingTop: 10 },
-  exerciseEditRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1E1E24', padding: 12, borderRadius: 8, marginBottom: 8 },
-  exerciseEditReorderArrows: { flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingRight: 10, borderRightWidth: 1, borderRightColor: '#3A3A45' },
-  exerciseEditName: { color: '#FFF', fontSize: 16, fontWeight: '600' },
-  exerciseEditDetails: { color: '#888', fontSize: 12, marginTop: 4 },
-  addExerciseBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#3A3A45', padding: 12, borderRadius: 8, marginTop: 10 },
-  addExerciseBtnText: { color: '#FFF', fontWeight: 'bold', marginLeft: 6 },
+  planCard: { 
+    backgroundColor: '#FFFFFF', 
+    borderRadius: 14, 
+    padding: 16, 
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...KinetixTheme.shadows.card,
+  },
+  planHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 12,
+  },
+  planName: { 
+    color: '#0F172A', 
+    fontSize: 17, 
+    fontWeight: 'bold', 
+    flex: 1,
+  },
+  startButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#2563EB', 
+    paddingHorizontal: 12, 
+    paddingVertical: 8, 
+    borderRadius: 20, 
+    marginLeft: 10,
+  },
+  startButtonText: { 
+    color: '#FFFFFF', 
+    fontWeight: 'bold', 
+    marginRight: 4, 
+    fontSize: 13,
+  },
+  exerciseSummaryList: { marginTop: 4 },
+  exerciseSummaryText: { color: '#64748B', fontSize: 13, marginBottom: 3 },
+  editExercisesContainer: { 
+    marginTop: 14, 
+    borderTopWidth: 1, 
+    borderTopColor: '#E2E8F0', 
+    paddingTop: 10,
+  },
+  exerciseEditRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    backgroundColor: '#F8FAFC', 
+    padding: 12, 
+    borderRadius: 12, 
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  exerciseEditReorderArrows: { 
+    flexDirection: 'column', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingRight: 10, 
+    borderRightWidth: 1, 
+    borderRightColor: '#E2E8F0',
+  },
+  exerciseEditName: { color: '#0F172A', fontSize: 15, fontWeight: '600' },
+  exerciseEditDetails: { color: '#64748B', fontSize: 12, marginTop: 3 },
+  addExerciseBtn: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    backgroundColor: '#EFF6FF', 
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    padding: 12, 
+    borderRadius: 10, 
+    marginTop: 10,
+  },
+  addExerciseBtnText: { color: '#2563EB', fontWeight: 'bold', marginLeft: 6, fontSize: 14 },
+  addExerciseSmallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  addExerciseSmallBtnText: {
+    color: '#2563EB',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 4,
+  },
   cardActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10, gap: 10, alignItems: 'center' },
   actionIcon: { padding: 5 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  exerciseModalContent: { backgroundColor: '#2A2A31', borderTopLeftRadius: 20, borderTopRightRadius: 20, height: '80%', padding: 20 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.45)', justifyContent: 'flex-end' },
+  exerciseModalContent: { 
+    backgroundColor: '#FFFFFF', 
+    borderTopLeftRadius: 24, 
+    borderTopRightRadius: 24, 
+    height: '82%', 
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  modalTitle: { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
-  filterScrollContainer: { marginBottom: 15 },
-  filterPill: { paddingHorizontal: 15, paddingVertical: 8, backgroundColor: '#1E1E24', borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#3A3A45' },
-  filterPillActive: { backgroundColor: '#00D09E20', borderColor: '#00D09E' },
-  filterText: { color: '#AAA', fontWeight: '500' },
-  filterTextActive: { color: '#00D09E', fontWeight: 'bold' },
+  modalTitle: { color: '#0F172A', fontSize: 18, fontWeight: 'bold' },
+  filterScrollContainer: { marginBottom: 12 },
+  filterPill: { 
+    paddingHorizontal: 14, 
+    paddingVertical: 7, 
+    backgroundColor: '#F1F5F9', 
+    borderRadius: 20, 
+    marginRight: 8, 
+    borderWidth: 1, 
+    borderColor: '#E2E8F0',
+  },
+  filterPillActive: { backgroundColor: '#EFF6FF', borderColor: '#2563EB' },
+  filterText: { color: '#64748B', fontWeight: '500', fontSize: 12 },
+  filterTextActive: { color: '#2563EB', fontWeight: 'bold' },
   exerciseListScroll: { flex: 1 },
-  exerciseListItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1E1E24', padding: 15, borderRadius: 12, marginBottom: 10 },
-  exerciseListItemName: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  exerciseListItemCategory: { color: '#888', fontSize: 12, marginTop: 4 },
-  focusContainer: { flex: 1, backgroundColor: '#1E1E24', paddingTop: 50 },
-  metadataBadge: { backgroundColor: '#3A3A45', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  metadataText: { color: '#00D09E', fontSize: 11, fontWeight: 'bold' },
+  exerciseListItem: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    backgroundColor: '#F8FAFC', 
+    padding: 14, 
+    borderRadius: 12, 
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  exerciseListItemName: { color: '#0F172A', fontSize: 15, fontWeight: 'bold' },
+  exerciseListItemCategory: { color: '#64748B', fontSize: 12, marginTop: 3 },
+  focusContainer: { flex: 1, backgroundColor: '#F8FAFC', paddingTop: 50 },
+  metadataBadge: { backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  metadataText: { color: '#2563EB', fontSize: 11, fontWeight: 'bold' },
   editRow: { flexDirection: 'row', alignItems: 'center' },
-  editLabel: { color: '#AAA', fontSize: 13, width: 75, fontWeight: 'bold' },
+  editLabel: { color: '#64748B', fontSize: 13, width: 75, fontWeight: 'bold' },
   editInput: { flex: 1, marginBottom: 0, padding: 8 },
-  focusHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#2A2A31' },
-  focusCancelText: { color: '#FF4C4C', fontSize: 16, fontWeight: '500' },
-  focusSaveText: { color: '#00D09E', fontSize: 16, fontWeight: 'bold' },
-  focusTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  focusHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    paddingHorizontal: 20, 
+    paddingBottom: 16, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#E2E8F0',
+  },
+  focusCancelText: { color: '#F43F5E', fontSize: 15, fontWeight: '500' },
+  focusSaveText: { color: '#2563EB', fontSize: 15, fontWeight: 'bold' },
+  focusTitle: { color: '#0F172A', fontSize: 18, fontWeight: 'bold' },
   focusContent: { flex: 1, padding: 20 },
-  draftExercisesContainer: { marginTop: 20, paddingBottom: 50 },
-  smallToggle: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: '#1E1E24', borderWidth: 1, borderColor: '#3A3A45' },
-  smallToggleActive: { backgroundColor: '#00D09E20', borderColor: '#00D09E' },
-  smallToggleText: { color: '#888', fontSize: 12 },
-  smallToggleTextActive: { color: '#00D09E', fontWeight: 'bold' },
+  draftExercisesContainer: { marginTop: 16, paddingBottom: 40 },
+  smallToggle: { 
+    paddingHorizontal: 10, 
+    paddingVertical: 4, 
+    borderRadius: 8, 
+    backgroundColor: '#FFFFFF', 
+    borderWidth: 1, 
+    borderColor: '#CBD5E1',
+  },
+  smallToggleActive: { backgroundColor: '#EFF6FF', borderColor: '#2563EB' },
+  smallToggleText: { color: '#64748B', fontSize: 12, fontWeight: '500' },
+  smallToggleTextActive: { color: '#2563EB', fontWeight: 'bold' },
   sortBarContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, marginTop: 4 },
-  sortBarLabel: { color: '#888', fontSize: 12, fontWeight: 'bold', letterSpacing: 0.5 },
-  sortSegmentGroup: { flexDirection: 'row', backgroundColor: '#1E1E24', borderRadius: 8, padding: 3, borderWidth: 1, borderColor: '#3A3A45' },
+  sortBarLabel: { color: '#64748B', fontSize: 11, fontWeight: 'bold', letterSpacing: 0.5 },
+  sortSegmentGroup: { 
+    flexDirection: 'row', 
+    backgroundColor: '#F1F5F9', 
+    borderRadius: 8, 
+    padding: 3, 
+    borderWidth: 1, 
+    borderColor: '#E2E8F0',
+  },
   sortSegment: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  sortSegmentActive: { backgroundColor: '#00D09E25' },
-  sortSegmentText: { color: '#888', fontSize: 12, fontWeight: '600' },
-  sortSegmentTextActive: { color: '#00D09E', fontWeight: 'bold' },
-  smallPill: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#1E1E24', borderRadius: 16, marginRight: 8, borderWidth: 1, borderColor: '#3A3A45' },
-  smallPillActive: { backgroundColor: '#00D09E20', borderColor: '#00D09E' },
-  smallPillText: { color: '#888', fontSize: 12 },
-  smallPillTextActive: { color: '#00D09E', fontWeight: 'bold' }
+  sortSegmentActive: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' },
+  sortSegmentText: { color: '#64748B', fontSize: 12, fontWeight: '600' },
+  sortSegmentTextActive: { color: '#2563EB', fontWeight: 'bold' },
+  smallPill: { 
+    paddingHorizontal: 12, 
+    paddingVertical: 6, 
+    backgroundColor: '#F1F5F9', 
+    borderRadius: 16, 
+    marginRight: 8, 
+    borderWidth: 1, 
+    borderColor: '#E2E8F0',
+  },
+  smallPillActive: { backgroundColor: '#EFF6FF', borderColor: '#2563EB' },
+  smallPillText: { color: '#64748B', fontSize: 12, fontWeight: '500' },
+  smallPillTextActive: { color: '#2563EB', fontWeight: 'bold' },
+  existingSectionWrapper: {
+    marginBottom: 20,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  sectionTitleText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: 0.3,
+  },
+  simpleSectionList: {
+    gap: 8,
+  },
+  simpleSectionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 8,
+    ...KinetixTheme.shadows.card,
+  },
+  simpleSectionCardActive: {
+    borderColor: '#2563EB',
+    backgroundColor: '#F8FAFC',
+  },
+  simpleSectionContent: {
+    flex: 1,
+    marginRight: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  simpleSectionName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  badgeTemplate: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+  },
+  badgeTemplateText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  simpleEditButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  simpleEditButtonActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#2563EB',
+  },
+  simpleEditButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  showMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  showMoreBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  exerciseSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 10,
+  },
+  exerciseSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#0F172A',
+    padding: 0,
+  }
 });

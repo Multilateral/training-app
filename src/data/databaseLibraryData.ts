@@ -26,6 +26,7 @@ export interface DatabaseWorksessionCard {
     muscle_group?: string;
     difficulty?: string;
     mechanics?: string;
+    description?: string | null;
   }[];
 }
 
@@ -68,11 +69,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Bodyweight",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Floor Mat",
         "muscle_group": "Deep Core / Hip Flexors",
         "difficulty": "Beginner",
-        "mechanics": "Motor Control"
+        "mechanics": "Motor Control",
+        "description": null
       },
       {
         "name": "TRX Pike",
@@ -85,7 +87,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "TRX",
         "muscle_group": "Lower Abs / Hip Flexors / Shoulders",
         "difficulty": "Intermediate",
-        "mechanics": "Flexion / Anti-Extension"
+        "mechanics": "Flexion / Anti-Extension",
+        "description": null
       },
       {
         "name": "Russian Twist",
@@ -98,7 +101,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Obliques / Transverse Abdominis",
         "difficulty": "Beginner",
-        "mechanics": "Rotational Dynamic"
+        "mechanics": "Rotational Dynamic",
+        "description": null
       },
       {
         "name": "Kettlebell Suitcase Carry",
@@ -107,11 +111,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "30",
         "weight": "24kg",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Kettlebell",
         "muscle_group": "Obliques / Quadratus Lumborum",
         "difficulty": "Intermediate",
-        "mechanics": "Loaded Carry / Anti-Lateral"
+        "mechanics": "Loaded Carry / Anti-Lateral",
+        "description": null
       },
       {
         "name": "Hollow Body Hold",
@@ -124,7 +129,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Rectus Abdominis / Transverse Abdominis",
         "difficulty": "Intermediate",
-        "mechanics": "Anti-Extension"
+        "mechanics": "Anti-Extension",
+        "description": null
       }
     ]
   },
@@ -149,11 +155,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "24kg",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Kettlebell",
         "muscle_group": "Shoulders / Scapula / Core",
         "difficulty": "Beginner",
-        "mechanics": "Rotational Mobility"
+        "mechanics": "Rotational Mobility",
+        "description": null
       },
       {
         "name": "Kettlebell Russian Swing",
@@ -162,11 +169,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "15",
         "weight": "24kg",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Kettlebell",
         "muscle_group": "Posterior Chain / Glutes & Hips",
         "difficulty": "Beginner",
-        "mechanics": "Ballistic / Hip Hinge"
+        "mechanics": "Ballistic / Hip Hinge",
+        "description": null
       },
       {
         "name": "Kettlebell Goblet Squat",
@@ -175,11 +183,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "24kg",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Kettlebell",
         "muscle_group": "Quadriceps / Glutes / Core",
         "difficulty": "Beginner",
-        "mechanics": "Knee-Dominant"
+        "mechanics": "Knee-Dominant",
+        "description": null
       },
       {
         "name": "Kettlebell Gorilla Row",
@@ -188,11 +197,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "8",
         "weight": "24kg",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Kettlebell",
         "muscle_group": "Lats / Rhomboids / Core",
         "difficulty": "Intermediate",
-        "mechanics": "Horizontal Pull"
+        "mechanics": "Horizontal Pull",
+        "description": null
       },
       {
         "name": "Kettlebell Farmer's Carry",
@@ -201,11 +211,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "40",
         "weight": "24kg",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Kettlebell",
         "muscle_group": "Forearms / Traps / Core Stability",
         "difficulty": "Beginner",
-        "mechanics": "Loaded Carry"
+        "mechanics": "Loaded Carry",
+        "description": null
       }
     ]
   },
@@ -230,11 +241,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "26",
         "weight": "Bodyweight",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Bodyweight",
         "muscle_group": "Ankle & Achilles",
         "difficulty": "Beginner",
-        "mechanics": "Mobility"
+        "mechanics": "Mobility",
+        "description": null
       },
       {
         "name": "Eccentric Heel Drops",
@@ -247,7 +259,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Plyo Box",
         "muscle_group": "Ankle & Achilles",
         "difficulty": "Beginner",
-        "mechanics": "Eccentric"
+        "mechanics": "Eccentric",
+        "description": null
       },
       {
         "name": "Tibialis Wall Raises",
@@ -260,20 +273,22 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Bodyweight",
         "muscle_group": "Ankle & Achilles",
         "difficulty": "Beginner",
-        "mechanics": "Concentric"
+        "mechanics": "Concentric",
+        "description": null
       },
       {
-        "name": "Single-Leg Balance (Pad)",
+        "name": "Single-Leg Balance (Unstable Surface)",
         "cue": "Proprioception",
         "sets": 3,
         "reps": "45s",
-        "weight": "Bodyweight",
+        "weight": "Moderate",
         "restSeconds": 45,
         "tracking_type": "time",
-        "equipment": "Floor Mat",
-        "muscle_group": "Ankle & Achilles",
+        "equipment": "Airex Pad / Towel",
+        "muscle_group": "Ankle / Proprioception",
         "difficulty": "Intermediate",
-        "mechanics": "Isometric"
+        "mechanics": "Isometric",
+        "description": "Target Musculature & Clinical Purpose:\nRestores neuromuscular proprioception. Ligament tears disrupt the ankle's spatial awareness; this drill forces the brain to rapidly communicate with the ankle stabilizers to maintain a center of gravity.\n\nSetup & Joint Positioning:\nStand barefoot on an Airex pad, folded towel, or thick yoga mat. Hands on hips, spine tall.\n\nBiomechanical Execution & Cues:\n• Lift the non-working leg to 90 degrees.\n• Maintain a micro-bend in the working knee (do not lock it out).\n• Fixate your eyes on a single point on the wall.\n• Internal & External Cues: \"Grip the floor with your toes like eagle talons.\"\n\nCommon Faults & Kinetotherapy Fixes:\nFlailing the arms or overarching the lower back to catch balance. Fix: If the user cannot hold strict form for 10 seconds, move to a flat, hard floor before progressing to the unstable pad.\n\nRehab / Loading Parameters:\n3 sets × 45 seconds per leg. Progression: Close eyes."
       }
     ]
   },
@@ -298,11 +313,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Bodyweight",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Floor Mat",
-        "muscle_group": "Lower Back Pain",
+        "muscle_group": "Thoracic / Lumbar Spine",
         "difficulty": "Beginner",
-        "mechanics": "Mobility"
+        "mechanics": "Mobility",
+        "description": "Target Musculature & Clinical Purpose:\nThoracic and lumbar spine mobility. This is a friction-reducing, joint-lubricating movement, not a stretching exercise to pull muscles. It maps out the pain-free boundaries of spinal flexion and extension.\n\nSetup & Joint Positioning:\nAssume a quadruped (all-fours) position. Hands directly under shoulders, knees directly under hips. Spine in a neutral baseline.\n\nBiomechanical Execution & Cues:\n• Flexion (Cat): Slowly tuck the chin to the chest, tuck the pelvis under, and round the mid-back toward the ceiling.\n• Extension (Cow): Slowly lift the head, push the chest forward, and allow the belly to drop toward the floor, slightly arching the lower back.\n• Internal & External Cues: \"Move smoothly like a segmented chain.\"\n\nCommon Faults & Kinetotherapy Fixes:\nPushing deeply into pain or holding the end ranges like a static stretch. Fix: Only move within the middle 70% of your available range of motion. Do not pause at the ends; keep it dynamic and rhythmic.\n\nRehab / Loading Parameters:\n2 sets × 10 full cycles (Tempo: 2-0-2-0)."
       },
       {
         "name": "McGill Curl-up",
@@ -313,9 +329,10 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "restSeconds": 45,
         "tracking_type": "time",
         "equipment": "Floor Mat",
-        "muscle_group": "Lower Back Pain",
+        "muscle_group": "Rectus Abdominis / Anterior Core",
         "difficulty": "Beginner",
-        "mechanics": "Isometric"
+        "mechanics": "Isometric",
+        "description": "Target Musculature & Clinical Purpose:\nRectus abdominis endurance. Builds anterior core stiffness without the destructive spinal flexion and disc compression caused by traditional sit-ups.\n\nSetup & Joint Positioning:\nLie face up on the floor. Bend one knee to 90 degrees with the foot flat; keep the other leg completely straight. Slide both hands (palms down) under the small of your lower back to preserve the natural lumbar arch.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Brace the abdominal wall. Lift your head, neck, and the top of your shoulder blades as a single, rigid block just 1 to 2 inches off the floor.\n• Isometric Hold: Hold the hover for 10 seconds. Do not hold your breath; sip air rhythmically over the brace.\n• Eccentric / Loading: Lower smoothly back to the floor.\n• Internal & External Cues: \"Imagine your head and upper chest are resting on a bathroom scale, and you only want to make it read zero.\"\n\nCommon Faults & Kinetotherapy Fixes:\nFlattening the lower back into the floor and crushing the hands. Fix: The pressure on your hands should remain completely unchanged throughout the entire movement. If it gets heavier, you are flexing the lumbar spine.\n\nRehab / Loading Parameters:\n3 sets × Descending Pyramid (5, 3, 1 reps) × 10-second holds. Switch the bent/straight leg halfway through each set."
       },
       {
         "name": "Bird-Dog",
@@ -326,9 +343,10 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "restSeconds": 45,
         "tracking_type": "time",
         "equipment": "Floor Mat",
-        "muscle_group": "Lower Back Pain",
+        "muscle_group": "Erector Spinae / Multifidus / Gluteal",
         "difficulty": "Beginner",
-        "mechanics": "Core Stability"
+        "mechanics": "Core Stability",
+        "description": "Target Musculature & Clinical Purpose:\nErector spinae, multifidus, and gluteal endurance. Teaches the body to lock the spine in a neutral position while the arms and legs move independently (anti-extension and anti-rotation).\n\nSetup & Joint Positioning:\nQuadruped position. Hands under shoulders, knees under hips. Stiffen the core 360 degrees.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Simultaneously extend one arm straight forward and the opposite leg straight backward until they are parallel to the floor.\n• Isometric Hold: Hold the peak extension for 10 seconds. Keep the foot flexed and toes pointing straight down.\n• Eccentric / Loading: Return hand and knee to the floor with total control.\n• Internal & External Cues: \"Push the wall away with your heel\" and \"Balance a full glass of water on your lower back.\"\n\nCommon Faults & Kinetotherapy Fixes:\nLifting the leg too high, which arches the lower back, or rotating the pelvis open toward the ceiling. Fix: Only lift the heel to hip height. Point the toes of the extended leg strictly at the floor to internally rotate the hip and lock the pelvis square.\n\nRehab / Loading Parameters:\n3 sets × Descending Pyramid (5, 3, 1 reps) × 10-second holds per side."
       },
       {
         "name": "Side Plank",
@@ -339,9 +357,10 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "restSeconds": 45,
         "tracking_type": "time",
         "equipment": "Floor Mat",
-        "muscle_group": "Lower Back Pain",
+        "muscle_group": "Obliques / Quadratus Lumborum",
         "difficulty": "Intermediate",
-        "mechanics": "Isometric"
+        "mechanics": "Isometric",
+        "description": "Target Musculature & Clinical Purpose:\nObliques and quadratus lumborum (QL). Creates lateral spinal stability, essential for carrying asymmetrical loads or preventing the spine from buckling sideways under fatigue.\n\nSetup & Joint Positioning:\nLie on your side. Place the bottom elbow directly under the shoulder. Stack the feet (or place the top foot directly in front of the bottom foot for a wider base). Place the free hand on the opposite shoulder.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Drive the hips up until the body forms a perfect, rigid straight line from the ankles through the knees, hips, and ears.\n• Isometric Hold: Hold for 10 seconds.\n• Eccentric / Loading: Hinge smoothly from the hips to lower back down.\n• Internal & External Cues: \"Make your body stiff like a steel beam.\"\n\nCommon Faults & Kinetotherapy Fixes:\nSagging the hips toward the floor or twisting the chest toward the ground. Fix: If the 10-second hold cannot be maintained without sagging, regress to performing the side plank from the knees instead of the feet.\n\nRehab / Loading Parameters:\n3 sets × Descending Pyramid (5, 3, 1 reps) × 10-second holds per side."
       },
       {
         "name": "Pallof Press",
@@ -350,11 +369,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "12",
         "weight": "Moderate",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Resistance Band",
         "muscle_group": "Lower Back Pain",
         "difficulty": "Intermediate",
-        "mechanics": "Isometric"
+        "mechanics": "Isometric",
+        "description": null
       }
     ]
   },
@@ -383,7 +403,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Knee Rehab",
         "difficulty": "Beginner",
-        "mechanics": "Concentric"
+        "mechanics": "Concentric",
+        "description": null
       },
       {
         "name": "Spanish Squat",
@@ -393,10 +414,11 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "weight": "Moderate",
         "restSeconds": 45,
         "tracking_type": "time",
-        "equipment": "Resistance Band",
-        "muscle_group": "Knee Rehab",
+        "equipment": "Heavy Resistance Band",
+        "muscle_group": "Patellar Tendon / Quadriceps",
         "difficulty": "Intermediate",
-        "mechanics": "Isometric"
+        "mechanics": "Isometric",
+        "description": "Target Musculature & Clinical Purpose:\nPatellar tendon analgesia and quadriceps isometric capacity. Heavy isometrics safely load the muscle-tendon unit, reducing tendon pain via cortical inhibition without joint friction.\n\nSetup & Joint Positioning:\nLoop a heavy resistance band around a rig or solid anchor point. Step inside the loop, placing the band directly behind both knees. Step backward until the band is under maximum tension. Stand with feet shoulder-width apart and a neutral spine.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Sit backward, allowing the band to support your center of mass.\n• Bottom Position: Stop at 70–90 degrees of knee flexion. The shins must remain perfectly vertical (perpendicular to the floor).\n• Isometric Hold: Brace the core and hold this position statically.\n• Internal & External Cues: \"Sit back into an invisible chair\" and \"Drive the floor straight down.\"\n\nCommon Faults & Kinetotherapy Fixes:\nKnees drifting forward over the toes, defeating the band's mechanical advantage. Fix: Shift the center of mass onto the heels and trust the band to support the body's weight.\n\nRehab / Loading Parameters:\n4 sets × 45-second holds (Tempo: Isometric). RPE 8."
       },
       {
         "name": "Terminal Knee Extension (TKE)",
@@ -405,11 +427,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "15",
         "weight": "Moderate",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Resistance Band",
-        "muscle_group": "Knee Rehab",
+        "muscle_group": "VMO / Quadriceps",
         "difficulty": "Beginner",
-        "mechanics": "Isometric / Concentric"
+        "mechanics": "Isometric / Concentric",
+        "description": "Target Musculature & Clinical Purpose:\nVMO activation and joint centration. A low-threshold movement that ensures proper patellar tracking before heavy loading phases.\n\nSetup & Joint Positioning:\nAnchor a light resistance band at knee height. Step inside, placing the band directly behind the working knee. Step backward to create tension.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Start with the working knee slightly bent and the heel lifted slightly off the floor.\n• Concentric / Drive: Contract the quadriceps to forcefully snap the knee straight, driving the heel flat into the floor against the band's resistance.\n• Bottom Position: Hold the locked-out position for 2 seconds, maximally contracting the quad.\n• Internal & External Cues: \"Crush a grape under your heel\" and \"Lock the joint solid.\"\n\nCommon Faults & Kinetotherapy Fixes:\nExtending the hips to pull the band back rather than isolating the knee. Fix: Keep the hips completely static; only the knee joint should articulate.\n\nRehab / Loading Parameters:\n3 sets × 15 reps per leg (Tempo: 1-2-2-0)."
       },
       {
         "name": "Peterson Step-Up",
@@ -419,23 +442,25 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "weight": "Moderate",
         "restSeconds": 60,
         "tracking_type": "reps",
-        "equipment": "Plyo Box",
-        "muscle_group": "Knee Rehab",
+        "equipment": "Step / Low Box",
+        "muscle_group": "VMO / Patellar Tracking",
         "difficulty": "Intermediate",
-        "mechanics": "Concentric"
+        "mechanics": "Concentric / Eccentric",
+        "description": "Target Musculature & Clinical Purpose:\nEccentric deceleration capacity and patellar tracking. Rebuilds the precise motor control required for soft, silent landings.\n\nSetup & Joint Positioning:\nStand sideways on the edge of a small 4- to 6-inch elevation (a weight plate or aerobic step). The working foot is flat on the box; the non-working foot hangs free.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Keeping the hips level, slowly bend the working knee to lower the non-working heel straight down to the floor over a 3-second count.\n• Bottom Position: Lightly tap the floor with the heel. Do not transfer weight to the floor.\n• Concentric / Drive: Drive through the working midfoot to return to the starting position.\n• Internal & External Cues: \"Tap glass lightly with your heel—don't break it.\"\n\nCommon Faults & Kinetotherapy Fixes:\nDropping too fast and bouncing off the floor, or dipping the pelvis on the non-working side. Fix: Lower the box height if the pelvis tilts, and strictly enforce the 3-second descent.\n\nRehab / Loading Parameters:\n3 sets × 10 reps per leg (Tempo: 3-0-1-0)."
       },
       {
         "name": "Nordic Hamstring Curl",
         "cue": "Posterior Chain",
         "sets": 3,
         "reps": "5",
-        "weight": "Bodyweight",
+        "weight": "Moderate",
         "restSeconds": 60,
         "tracking_type": "reps",
-        "equipment": "Bodyweight",
-        "muscle_group": "Knee Rehab",
+        "equipment": "Floor Mat & Anchor/Partner",
+        "muscle_group": "Hamstrings / ACL Synergist",
         "difficulty": "Advanced",
-        "mechanics": "Eccentric"
+        "mechanics": "Eccentric",
+        "description": "Target Musculature & Clinical Purpose:\nSupramaximal eccentric hamstring strength. The hamstrings are the primary muscular synergists to the ACL (they physically prevent the tibia from sliding forward). If the athlete had a hamstring autograft, this exercise is non-negotiable for rebuilding the donor site tissue.\n\nSetup & Joint Positioning:\nKneel on a soft pad. Have a partner firmly hold your ankles down, or anchor your heels under a heavy barbell/machine. Knees, hips, and shoulders must form a perfectly straight line.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Keeping the hips fully extended (locked out), slowly lower your chest toward the floor. Use your hamstrings to brake your descent for as long as possible.\n• The Catch: When your hamstrings give out, catch yourself softly with your hands in a push-up position.\n• Concentric / Drive: Give yourself a light push off the floor while contracting the hamstrings to return to the tall kneeling position.\n• Internal & External Cues: \"Fall like a falling tree, straight as a board\" and \"Fight the fall with your heels.\"\n\nCommon Faults & Kinetotherapy Fixes:\nHinging at the hips (sticking the butt out) to make the exercise easier. Fix: Squeeze the glutes as hard as possible before starting the descent to lock the pelvis in place.\n\nRehab / Loading Parameters:\n3 sets × 5 reps (Tempo: 4-0-X-0)."
       }
     ]
   },
@@ -460,50 +485,54 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Bodyweight",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Floor Mat",
         "muscle_group": "Shoulder Rehab",
         "difficulty": "Beginner",
-        "mechanics": "Mobility"
+        "mechanics": "Mobility",
+        "description": null
       },
       {
         "name": "Scapular Wall Slides",
         "cue": "Activation",
         "sets": 3,
         "reps": "12",
-        "weight": "Bodyweight",
+        "weight": "Moderate",
         "restSeconds": 60,
         "tracking_type": "reps",
-        "equipment": "Bodyweight",
-        "muscle_group": "Shoulder Rehab",
+        "equipment": "Wall",
+        "muscle_group": "Serratus Anterior / Lower Trap",
         "difficulty": "Beginner",
-        "mechanics": "Mobility"
+        "mechanics": "Scapular Mobility",
+        "description": "Target Musculature & Clinical Purpose:\nSerratus anterior and lower trapezius activation. This drill trains the scapula to properly upwardly rotate and posteriorly tilt, ensuring the acromion clears the rotator cuff during overhead movements.\n\nSetup & Joint Positioning:\nStand with your back, head, and glutes flush against a wall. Place your feet a few inches away from the wall. Bring your arms into a \"goalpost\" position (elbows bent at 90 degrees) with wrists and elbows touching the wall. Pull your ribcage down to brace the core.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Slide your forearms slowly upward along the wall in a \"V\" shape.\n• Top Position: Reach as high as possible without allowing the lower back to arch off the wall or the elbows to lose contact with the surface.\n• Eccentric / Loading: Pull the elbows actively back down into the starting goalpost position.\n• Internal & External Cues: \"Push the wall away as you slide up\" and \"Keep your ribs glued to the wall.\"\n\nCommon Faults & Kinetotherapy Fixes:\nShrugging the upper traps toward the ears or arching the lumbar spine to fake overhead mobility. Fix: Stop the upward slide the moment the lower back loses contact with the wall, even if the hands are barely above the head. Range of motion will improve over time.\n\nRehab / Loading Parameters:\n3 sets × 12 reps (Tempo: 2-1-2-1)."
       },
       {
-        "name": "Banded External Rotation",
+        "name": "Banded External Rotation (Eccentric Focus)",
         "cue": "Strength",
         "sets": 3,
         "reps": "15",
         "weight": "Moderate",
         "restSeconds": 60,
         "tracking_type": "reps",
-        "equipment": "Resistance Band",
-        "muscle_group": "Shoulder Rehab",
+        "equipment": "Resistance Band & Towel",
+        "muscle_group": "Infraspinatus / Teres Minor / Rotator Cuff",
         "difficulty": "Beginner",
-        "mechanics": "Concentric / Eccentric"
+        "mechanics": "Isolation / Eccentric",
+        "description": "Target Musculature & Clinical Purpose:\nInfraspinatus and teres minor (the posterior rotator cuff). Rebuilds the tendon's capacity to decelerate the arm after a violent throw or strike.\n\nSetup & Joint Positioning:\nAnchor a light resistance band at waist height. Stand perpendicular to the anchor. Hold the band in the outside hand. Pin the working elbow to your ribs (place a rolled-up towel between the elbow and ribs to ensure joint centration). Elbow bent at exactly 90 degrees.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Rotate the forearm outward away from the stomach as far as comfortable.\n• Eccentric / Loading: Fight the band's pull, allowing the hand to return to the stomach over a painfully slow 4-second count.\n• Internal & External Cues: \"Keep the elbow glued\" and \"Act like a rusty door hinge closing slowly.\"\n\nCommon Faults & Kinetotherapy Fixes:\nLetting the elbow drift away from the torso, which turns the movement into a deltoid lateral raise. Fix: Squeeze the towel roll firmly against the ribs; if the towel drops, the rep does not count.\n\nRehab / Loading Parameters:\n3 sets × 12 reps per side (Tempo: 4-0-1-1)."
       },
       {
         "name": "Y-T-W Raises",
         "cue": "Stability",
         "sets": 3,
         "reps": "10",
-        "weight": "Bodyweight",
+        "weight": "Moderate",
         "restSeconds": 60,
-        "tracking_type": "reps",
-        "equipment": "Floor Mat",
-        "muscle_group": "Shoulder Rehab",
-        "difficulty": "Intermediate",
-        "mechanics": "Isotonic"
+        "tracking_type": "weight_reps",
+        "equipment": "Incline Bench / Light Dumbbells",
+        "muscle_group": "Lower/Mid Traps / Rhomboids",
+        "difficulty": "Beginner",
+        "mechanics": "Scapular / Compound",
+        "description": "Target Musculature & Clinical Purpose:\nComprehensive conditioning of the scapular stabilizers (lower traps, middle traps, and rhomboids) to counteract the forward-rounded posture typical in athletes.\n\nSetup & Joint Positioning:\nLie prone (face down) on an incline bench set to 30–45 degrees. Hold very light dumbbells (or no weight). Keep the neck neutral. Thumbs point up toward the ceiling for all movements.\n\nBiomechanical Execution & Cues:\n• The \"Y\": Raise straight arms up and forward at a 45-degree angle. Pause, then lower. (Targets lower traps).\n• The \"T\": Raise straight arms directly out to the sides. Pause, squeeze shoulder blades together, then lower. (Targets middle traps).\n• The \"W\": Bend elbows to 90 degrees. Pull the elbows and wrists up to the ceiling simultaneously, squeezing the shoulder blades hard. (Targets rhomboids and external rotators).\n• Internal & External Cues: \"Pinch a coin between your shoulder blades\" and \"Pull your shoulder blades down into your back pockets.\"\n\nCommon Faults & Kinetotherapy Fixes:\nUsing momentum to swing the weights up or shrugging the neck. Fix: Use bare hands instead of dumbbells until the mind-muscle connection is established in the middle back.\n\nRehab / Loading Parameters:\n3 sets × 10 reps of each letter (30 total movements per set). (Tempo: 2-1-2-0)."
       },
       {
         "name": "Face Pulls",
@@ -512,11 +541,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "2s",
         "weight": "Moderate",
         "restSeconds": 45,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Resistance Band",
         "muscle_group": "Shoulder Rehab",
         "difficulty": "Intermediate",
-        "mechanics": "Concentric"
+        "mechanics": "Concentric",
+        "description": null
       }
     ]
   },
@@ -545,7 +575,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Pull-up Bar",
         "muscle_group": "Back",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Push-ups",
@@ -558,7 +589,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Chest",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Dips",
@@ -571,7 +603,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Dip Station",
         "muscle_group": "Chest",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       }
     ]
   },
@@ -645,7 +678,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Stationary Bike",
         "muscle_group": "Cardio",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       }
     ]
   },
@@ -674,7 +708,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Bodyweight",
         "muscle_group": "Legs",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Jump Squats",
@@ -687,7 +722,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Bodyweight",
         "muscle_group": "Legs",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Clap Push-ups",
@@ -700,7 +736,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Chest",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Burpees",
@@ -713,7 +750,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Full Body",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       }
     ]
   },
@@ -742,7 +780,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Dip Station",
         "muscle_group": "Chest",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Pull-ups",
@@ -755,7 +794,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Pull-up Bar",
         "muscle_group": "Back",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Push-ups",
@@ -768,7 +808,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Chest",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       }
     ]
   },
@@ -793,11 +834,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Bodyweight",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Floor Mat",
         "muscle_group": "Yoga",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Child's Pose",
@@ -806,11 +848,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Bodyweight",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Floor Mat",
         "muscle_group": "Yoga",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       }
     ]
   },
@@ -835,11 +878,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Moderate",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Dumbbell / Barbell",
         "muscle_group": "Legs",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Bench Press",
@@ -848,11 +892,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Moderate",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Dumbbell / Barbell",
         "muscle_group": "Chest",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Box Jumps",
@@ -865,7 +910,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Plyo Box",
         "muscle_group": "Legs",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       }
     ]
   },
@@ -894,7 +940,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Chest",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Plank",
@@ -903,11 +950,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Bodyweight",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "time",
         "equipment": "Floor Mat",
         "muscle_group": "Core",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       }
     ]
   },
@@ -936,7 +984,8 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "equipment": "Floor Mat",
         "muscle_group": "Full Body",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       },
       {
         "name": "Bicep Curl",
@@ -945,11 +994,12 @@ export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = [
         "reps": "10",
         "weight": "Moderate",
         "restSeconds": 60,
-        "tracking_type": "reps",
+        "tracking_type": "weight_reps",
         "equipment": "Dumbbell / Barbell",
         "muscle_group": "Arms",
         "difficulty": "Intermediate",
-        "mechanics": "Compound"
+        "mechanics": "Compound",
+        "description": null
       }
     ]
   }
@@ -991,50 +1041,54 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
               "muscle_group": "Shoulder Rehab",
               "difficulty": "Beginner",
-              "mechanics": "Mobility"
+              "mechanics": "Mobility",
+              "description": null
             },
             {
               "name": "Scapular Wall Slides",
               "cue": "Activation",
               "sets": 3,
               "reps": "12",
-              "weight": "Bodyweight",
+              "weight": "Moderate",
               "restSeconds": 60,
               "tracking_type": "reps",
-              "equipment": "Bodyweight",
-              "muscle_group": "Shoulder Rehab",
+              "equipment": "Wall",
+              "muscle_group": "Serratus Anterior / Lower Trap",
               "difficulty": "Beginner",
-              "mechanics": "Mobility"
+              "mechanics": "Scapular Mobility",
+              "description": "Target Musculature & Clinical Purpose:\nSerratus anterior and lower trapezius activation. This drill trains the scapula to properly upwardly rotate and posteriorly tilt, ensuring the acromion clears the rotator cuff during overhead movements.\n\nSetup & Joint Positioning:\nStand with your back, head, and glutes flush against a wall. Place your feet a few inches away from the wall. Bring your arms into a \"goalpost\" position (elbows bent at 90 degrees) with wrists and elbows touching the wall. Pull your ribcage down to brace the core.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Slide your forearms slowly upward along the wall in a \"V\" shape.\n• Top Position: Reach as high as possible without allowing the lower back to arch off the wall or the elbows to lose contact with the surface.\n• Eccentric / Loading: Pull the elbows actively back down into the starting goalpost position.\n• Internal & External Cues: \"Push the wall away as you slide up\" and \"Keep your ribs glued to the wall.\"\n\nCommon Faults & Kinetotherapy Fixes:\nShrugging the upper traps toward the ears or arching the lumbar spine to fake overhead mobility. Fix: Stop the upward slide the moment the lower back loses contact with the wall, even if the hands are barely above the head. Range of motion will improve over time.\n\nRehab / Loading Parameters:\n3 sets × 12 reps (Tempo: 2-1-2-1)."
             },
             {
-              "name": "Banded External Rotation",
+              "name": "Banded External Rotation (Eccentric Focus)",
               "cue": "Strength",
               "sets": 3,
               "reps": "15",
               "weight": "Moderate",
               "restSeconds": 60,
               "tracking_type": "reps",
-              "equipment": "Resistance Band",
-              "muscle_group": "Shoulder Rehab",
+              "equipment": "Resistance Band & Towel",
+              "muscle_group": "Infraspinatus / Teres Minor / Rotator Cuff",
               "difficulty": "Beginner",
-              "mechanics": "Concentric / Eccentric"
+              "mechanics": "Isolation / Eccentric",
+              "description": "Target Musculature & Clinical Purpose:\nInfraspinatus and teres minor (the posterior rotator cuff). Rebuilds the tendon's capacity to decelerate the arm after a violent throw or strike.\n\nSetup & Joint Positioning:\nAnchor a light resistance band at waist height. Stand perpendicular to the anchor. Hold the band in the outside hand. Pin the working elbow to your ribs (place a rolled-up towel between the elbow and ribs to ensure joint centration). Elbow bent at exactly 90 degrees.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Rotate the forearm outward away from the stomach as far as comfortable.\n• Eccentric / Loading: Fight the band's pull, allowing the hand to return to the stomach over a painfully slow 4-second count.\n• Internal & External Cues: \"Keep the elbow glued\" and \"Act like a rusty door hinge closing slowly.\"\n\nCommon Faults & Kinetotherapy Fixes:\nLetting the elbow drift away from the torso, which turns the movement into a deltoid lateral raise. Fix: Squeeze the towel roll firmly against the ribs; if the towel drops, the rep does not count.\n\nRehab / Loading Parameters:\n3 sets × 12 reps per side (Tempo: 4-0-1-1)."
             },
             {
               "name": "Y-T-W Raises",
               "cue": "Stability",
               "sets": 3,
               "reps": "10",
-              "weight": "Bodyweight",
+              "weight": "Moderate",
               "restSeconds": 60,
-              "tracking_type": "reps",
-              "equipment": "Floor Mat",
-              "muscle_group": "Shoulder Rehab",
-              "difficulty": "Intermediate",
-              "mechanics": "Isotonic"
+              "tracking_type": "weight_reps",
+              "equipment": "Incline Bench / Light Dumbbells",
+              "muscle_group": "Lower/Mid Traps / Rhomboids",
+              "difficulty": "Beginner",
+              "mechanics": "Scapular / Compound",
+              "description": "Target Musculature & Clinical Purpose:\nComprehensive conditioning of the scapular stabilizers (lower traps, middle traps, and rhomboids) to counteract the forward-rounded posture typical in athletes.\n\nSetup & Joint Positioning:\nLie prone (face down) on an incline bench set to 30–45 degrees. Hold very light dumbbells (or no weight). Keep the neck neutral. Thumbs point up toward the ceiling for all movements.\n\nBiomechanical Execution & Cues:\n• The \"Y\": Raise straight arms up and forward at a 45-degree angle. Pause, then lower. (Targets lower traps).\n• The \"T\": Raise straight arms directly out to the sides. Pause, squeeze shoulder blades together, then lower. (Targets middle traps).\n• The \"W\": Bend elbows to 90 degrees. Pull the elbows and wrists up to the ceiling simultaneously, squeezing the shoulder blades hard. (Targets rhomboids and external rotators).\n• Internal & External Cues: \"Pinch a coin between your shoulder blades\" and \"Pull your shoulder blades down into your back pockets.\"\n\nCommon Faults & Kinetotherapy Fixes:\nUsing momentum to swing the weights up or shrugging the neck. Fix: Use bare hands instead of dumbbells until the mind-muscle connection is established in the middle back.\n\nRehab / Loading Parameters:\n3 sets × 10 reps of each letter (30 total movements per set). (Tempo: 2-1-2-0)."
             },
             {
               "name": "Face Pulls",
@@ -1043,11 +1097,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "2s",
               "weight": "Moderate",
               "restSeconds": 45,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Resistance Band",
               "muscle_group": "Shoulder Rehab",
               "difficulty": "Intermediate",
-              "mechanics": "Concentric"
+              "mechanics": "Concentric",
+              "description": null
             }
           ]
         }
@@ -1083,7 +1138,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Knee Rehab",
               "difficulty": "Beginner",
-              "mechanics": "Concentric"
+              "mechanics": "Concentric",
+              "description": null
             },
             {
               "name": "Spanish Squat",
@@ -1093,10 +1149,11 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "weight": "Moderate",
               "restSeconds": 45,
               "tracking_type": "time",
-              "equipment": "Resistance Band",
-              "muscle_group": "Knee Rehab",
+              "equipment": "Heavy Resistance Band",
+              "muscle_group": "Patellar Tendon / Quadriceps",
               "difficulty": "Intermediate",
-              "mechanics": "Isometric"
+              "mechanics": "Isometric",
+              "description": "Target Musculature & Clinical Purpose:\nPatellar tendon analgesia and quadriceps isometric capacity. Heavy isometrics safely load the muscle-tendon unit, reducing tendon pain via cortical inhibition without joint friction.\n\nSetup & Joint Positioning:\nLoop a heavy resistance band around a rig or solid anchor point. Step inside the loop, placing the band directly behind both knees. Step backward until the band is under maximum tension. Stand with feet shoulder-width apart and a neutral spine.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Sit backward, allowing the band to support your center of mass.\n• Bottom Position: Stop at 70–90 degrees of knee flexion. The shins must remain perfectly vertical (perpendicular to the floor).\n• Isometric Hold: Brace the core and hold this position statically.\n• Internal & External Cues: \"Sit back into an invisible chair\" and \"Drive the floor straight down.\"\n\nCommon Faults & Kinetotherapy Fixes:\nKnees drifting forward over the toes, defeating the band's mechanical advantage. Fix: Shift the center of mass onto the heels and trust the band to support the body's weight.\n\nRehab / Loading Parameters:\n4 sets × 45-second holds (Tempo: Isometric). RPE 8."
             },
             {
               "name": "Terminal Knee Extension (TKE)",
@@ -1105,11 +1162,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "15",
               "weight": "Moderate",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Resistance Band",
-              "muscle_group": "Knee Rehab",
+              "muscle_group": "VMO / Quadriceps",
               "difficulty": "Beginner",
-              "mechanics": "Isometric / Concentric"
+              "mechanics": "Isometric / Concentric",
+              "description": "Target Musculature & Clinical Purpose:\nVMO activation and joint centration. A low-threshold movement that ensures proper patellar tracking before heavy loading phases.\n\nSetup & Joint Positioning:\nAnchor a light resistance band at knee height. Step inside, placing the band directly behind the working knee. Step backward to create tension.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Start with the working knee slightly bent and the heel lifted slightly off the floor.\n• Concentric / Drive: Contract the quadriceps to forcefully snap the knee straight, driving the heel flat into the floor against the band's resistance.\n• Bottom Position: Hold the locked-out position for 2 seconds, maximally contracting the quad.\n• Internal & External Cues: \"Crush a grape under your heel\" and \"Lock the joint solid.\"\n\nCommon Faults & Kinetotherapy Fixes:\nExtending the hips to pull the band back rather than isolating the knee. Fix: Keep the hips completely static; only the knee joint should articulate.\n\nRehab / Loading Parameters:\n3 sets × 15 reps per leg (Tempo: 1-2-2-0)."
             },
             {
               "name": "Peterson Step-Up",
@@ -1119,23 +1177,25 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "weight": "Moderate",
               "restSeconds": 60,
               "tracking_type": "reps",
-              "equipment": "Plyo Box",
-              "muscle_group": "Knee Rehab",
+              "equipment": "Step / Low Box",
+              "muscle_group": "VMO / Patellar Tracking",
               "difficulty": "Intermediate",
-              "mechanics": "Concentric"
+              "mechanics": "Concentric / Eccentric",
+              "description": "Target Musculature & Clinical Purpose:\nEccentric deceleration capacity and patellar tracking. Rebuilds the precise motor control required for soft, silent landings.\n\nSetup & Joint Positioning:\nStand sideways on the edge of a small 4- to 6-inch elevation (a weight plate or aerobic step). The working foot is flat on the box; the non-working foot hangs free.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Keeping the hips level, slowly bend the working knee to lower the non-working heel straight down to the floor over a 3-second count.\n• Bottom Position: Lightly tap the floor with the heel. Do not transfer weight to the floor.\n• Concentric / Drive: Drive through the working midfoot to return to the starting position.\n• Internal & External Cues: \"Tap glass lightly with your heel—don't break it.\"\n\nCommon Faults & Kinetotherapy Fixes:\nDropping too fast and bouncing off the floor, or dipping the pelvis on the non-working side. Fix: Lower the box height if the pelvis tilts, and strictly enforce the 3-second descent.\n\nRehab / Loading Parameters:\n3 sets × 10 reps per leg (Tempo: 3-0-1-0)."
             },
             {
               "name": "Nordic Hamstring Curl",
               "cue": "Posterior Chain",
               "sets": 3,
               "reps": "5",
-              "weight": "Bodyweight",
+              "weight": "Moderate",
               "restSeconds": 60,
               "tracking_type": "reps",
-              "equipment": "Bodyweight",
-              "muscle_group": "Knee Rehab",
+              "equipment": "Floor Mat & Anchor/Partner",
+              "muscle_group": "Hamstrings / ACL Synergist",
               "difficulty": "Advanced",
-              "mechanics": "Eccentric"
+              "mechanics": "Eccentric",
+              "description": "Target Musculature & Clinical Purpose:\nSupramaximal eccentric hamstring strength. The hamstrings are the primary muscular synergists to the ACL (they physically prevent the tibia from sliding forward). If the athlete had a hamstring autograft, this exercise is non-negotiable for rebuilding the donor site tissue.\n\nSetup & Joint Positioning:\nKneel on a soft pad. Have a partner firmly hold your ankles down, or anchor your heels under a heavy barbell/machine. Knees, hips, and shoulders must form a perfectly straight line.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Keeping the hips fully extended (locked out), slowly lower your chest toward the floor. Use your hamstrings to brake your descent for as long as possible.\n• The Catch: When your hamstrings give out, catch yourself softly with your hands in a push-up position.\n• Concentric / Drive: Give yourself a light push off the floor while contracting the hamstrings to return to the tall kneeling position.\n• Internal & External Cues: \"Fall like a falling tree, straight as a board\" and \"Fight the fall with your heels.\"\n\nCommon Faults & Kinetotherapy Fixes:\nHinging at the hips (sticking the butt out) to make the exercise easier. Fix: Squeeze the glutes as hard as possible before starting the descent to lock the pelvis in place.\n\nRehab / Loading Parameters:\n3 sets × 5 reps (Tempo: 4-0-X-0)."
             }
           ]
         }
@@ -1167,11 +1227,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
-              "muscle_group": "Lower Back Pain",
+              "muscle_group": "Thoracic / Lumbar Spine",
               "difficulty": "Beginner",
-              "mechanics": "Mobility"
+              "mechanics": "Mobility",
+              "description": "Target Musculature & Clinical Purpose:\nThoracic and lumbar spine mobility. This is a friction-reducing, joint-lubricating movement, not a stretching exercise to pull muscles. It maps out the pain-free boundaries of spinal flexion and extension.\n\nSetup & Joint Positioning:\nAssume a quadruped (all-fours) position. Hands directly under shoulders, knees directly under hips. Spine in a neutral baseline.\n\nBiomechanical Execution & Cues:\n• Flexion (Cat): Slowly tuck the chin to the chest, tuck the pelvis under, and round the mid-back toward the ceiling.\n• Extension (Cow): Slowly lift the head, push the chest forward, and allow the belly to drop toward the floor, slightly arching the lower back.\n• Internal & External Cues: \"Move smoothly like a segmented chain.\"\n\nCommon Faults & Kinetotherapy Fixes:\nPushing deeply into pain or holding the end ranges like a static stretch. Fix: Only move within the middle 70% of your available range of motion. Do not pause at the ends; keep it dynamic and rhythmic.\n\nRehab / Loading Parameters:\n2 sets × 10 full cycles (Tempo: 2-0-2-0)."
             },
             {
               "name": "McGill Curl-up",
@@ -1182,9 +1243,10 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "restSeconds": 45,
               "tracking_type": "time",
               "equipment": "Floor Mat",
-              "muscle_group": "Lower Back Pain",
+              "muscle_group": "Rectus Abdominis / Anterior Core",
               "difficulty": "Beginner",
-              "mechanics": "Isometric"
+              "mechanics": "Isometric",
+              "description": "Target Musculature & Clinical Purpose:\nRectus abdominis endurance. Builds anterior core stiffness without the destructive spinal flexion and disc compression caused by traditional sit-ups.\n\nSetup & Joint Positioning:\nLie face up on the floor. Bend one knee to 90 degrees with the foot flat; keep the other leg completely straight. Slide both hands (palms down) under the small of your lower back to preserve the natural lumbar arch.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Brace the abdominal wall. Lift your head, neck, and the top of your shoulder blades as a single, rigid block just 1 to 2 inches off the floor.\n• Isometric Hold: Hold the hover for 10 seconds. Do not hold your breath; sip air rhythmically over the brace.\n• Eccentric / Loading: Lower smoothly back to the floor.\n• Internal & External Cues: \"Imagine your head and upper chest are resting on a bathroom scale, and you only want to make it read zero.\"\n\nCommon Faults & Kinetotherapy Fixes:\nFlattening the lower back into the floor and crushing the hands. Fix: The pressure on your hands should remain completely unchanged throughout the entire movement. If it gets heavier, you are flexing the lumbar spine.\n\nRehab / Loading Parameters:\n3 sets × Descending Pyramid (5, 3, 1 reps) × 10-second holds. Switch the bent/straight leg halfway through each set."
             },
             {
               "name": "Bird-Dog",
@@ -1195,9 +1257,10 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "restSeconds": 45,
               "tracking_type": "time",
               "equipment": "Floor Mat",
-              "muscle_group": "Lower Back Pain",
+              "muscle_group": "Erector Spinae / Multifidus / Gluteal",
               "difficulty": "Beginner",
-              "mechanics": "Core Stability"
+              "mechanics": "Core Stability",
+              "description": "Target Musculature & Clinical Purpose:\nErector spinae, multifidus, and gluteal endurance. Teaches the body to lock the spine in a neutral position while the arms and legs move independently (anti-extension and anti-rotation).\n\nSetup & Joint Positioning:\nQuadruped position. Hands under shoulders, knees under hips. Stiffen the core 360 degrees.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Simultaneously extend one arm straight forward and the opposite leg straight backward until they are parallel to the floor.\n• Isometric Hold: Hold the peak extension for 10 seconds. Keep the foot flexed and toes pointing straight down.\n• Eccentric / Loading: Return hand and knee to the floor with total control.\n• Internal & External Cues: \"Push the wall away with your heel\" and \"Balance a full glass of water on your lower back.\"\n\nCommon Faults & Kinetotherapy Fixes:\nLifting the leg too high, which arches the lower back, or rotating the pelvis open toward the ceiling. Fix: Only lift the heel to hip height. Point the toes of the extended leg strictly at the floor to internally rotate the hip and lock the pelvis square.\n\nRehab / Loading Parameters:\n3 sets × Descending Pyramid (5, 3, 1 reps) × 10-second holds per side."
             },
             {
               "name": "Side Plank",
@@ -1208,9 +1271,10 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "restSeconds": 45,
               "tracking_type": "time",
               "equipment": "Floor Mat",
-              "muscle_group": "Lower Back Pain",
+              "muscle_group": "Obliques / Quadratus Lumborum",
               "difficulty": "Intermediate",
-              "mechanics": "Isometric"
+              "mechanics": "Isometric",
+              "description": "Target Musculature & Clinical Purpose:\nObliques and quadratus lumborum (QL). Creates lateral spinal stability, essential for carrying asymmetrical loads or preventing the spine from buckling sideways under fatigue.\n\nSetup & Joint Positioning:\nLie on your side. Place the bottom elbow directly under the shoulder. Stack the feet (or place the top foot directly in front of the bottom foot for a wider base). Place the free hand on the opposite shoulder.\n\nBiomechanical Execution & Cues:\n• Concentric / Drive: Drive the hips up until the body forms a perfect, rigid straight line from the ankles through the knees, hips, and ears.\n• Isometric Hold: Hold for 10 seconds.\n• Eccentric / Loading: Hinge smoothly from the hips to lower back down.\n• Internal & External Cues: \"Make your body stiff like a steel beam.\"\n\nCommon Faults & Kinetotherapy Fixes:\nSagging the hips toward the floor or twisting the chest toward the ground. Fix: If the 10-second hold cannot be maintained without sagging, regress to performing the side plank from the knees instead of the feet.\n\nRehab / Loading Parameters:\n3 sets × Descending Pyramid (5, 3, 1 reps) × 10-second holds per side."
             },
             {
               "name": "Pallof Press",
@@ -1219,11 +1283,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "12",
               "weight": "Moderate",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Resistance Band",
               "muscle_group": "Lower Back Pain",
               "difficulty": "Intermediate",
-              "mechanics": "Isometric"
+              "mechanics": "Isometric",
+              "description": null
             }
           ]
         }
@@ -1255,11 +1320,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "26",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Bodyweight",
               "muscle_group": "Ankle & Achilles",
               "difficulty": "Beginner",
-              "mechanics": "Mobility"
+              "mechanics": "Mobility",
+              "description": null
             },
             {
               "name": "Eccentric Heel Drops",
@@ -1272,7 +1338,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Plyo Box",
               "muscle_group": "Ankle & Achilles",
               "difficulty": "Beginner",
-              "mechanics": "Eccentric"
+              "mechanics": "Eccentric",
+              "description": null
             },
             {
               "name": "Tibialis Wall Raises",
@@ -1285,20 +1352,22 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Bodyweight",
               "muscle_group": "Ankle & Achilles",
               "difficulty": "Beginner",
-              "mechanics": "Concentric"
+              "mechanics": "Concentric",
+              "description": null
             },
             {
-              "name": "Single-Leg Balance (Pad)",
+              "name": "Single-Leg Balance (Unstable Surface)",
               "cue": "Proprioception",
               "sets": 3,
               "reps": "45s",
-              "weight": "Bodyweight",
+              "weight": "Moderate",
               "restSeconds": 45,
               "tracking_type": "time",
-              "equipment": "Floor Mat",
-              "muscle_group": "Ankle & Achilles",
+              "equipment": "Airex Pad / Towel",
+              "muscle_group": "Ankle / Proprioception",
               "difficulty": "Intermediate",
-              "mechanics": "Isometric"
+              "mechanics": "Isometric",
+              "description": "Target Musculature & Clinical Purpose:\nRestores neuromuscular proprioception. Ligament tears disrupt the ankle's spatial awareness; this drill forces the brain to rapidly communicate with the ankle stabilizers to maintain a center of gravity.\n\nSetup & Joint Positioning:\nStand barefoot on an Airex pad, folded towel, or thick yoga mat. Hands on hips, spine tall.\n\nBiomechanical Execution & Cues:\n• Lift the non-working leg to 90 degrees.\n• Maintain a micro-bend in the working knee (do not lock it out).\n• Fixate your eyes on a single point on the wall.\n• Internal & External Cues: \"Grip the floor with your toes like eagle talons.\"\n\nCommon Faults & Kinetotherapy Fixes:\nFlailing the arms or overarching the lower back to catch balance. Fix: If the user cannot hold strict form for 10 seconds, move to a flat, hard floor before progressing to the unstable pad.\n\nRehab / Loading Parameters:\n3 sets × 45 seconds per leg. Progression: Close eyes."
             }
           ]
         }
@@ -1353,7 +1422,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Pull-up Bar",
               "muscle_group": "Back",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Push-ups",
@@ -1366,7 +1436,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Dips",
@@ -1379,7 +1450,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Dip Station",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1437,7 +1509,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Pull-up Bar",
               "muscle_group": "Back",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Push-ups",
@@ -1450,7 +1523,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Dips",
@@ -1463,7 +1537,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Dip Station",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1543,7 +1618,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Pull-up Bar",
               "muscle_group": "Back",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Push-ups",
@@ -1556,7 +1632,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Dips",
@@ -1569,7 +1646,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Dip Station",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1615,7 +1693,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Stationary Bike",
               "muscle_group": "Cardio",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1651,7 +1730,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Bodyweight",
               "muscle_group": "Legs",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Jump Squats",
@@ -1664,7 +1744,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Bodyweight",
               "muscle_group": "Legs",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Clap Push-ups",
@@ -1677,7 +1758,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Burpees",
@@ -1690,7 +1772,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Full Body",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1722,11 +1805,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
               "muscle_group": "Yoga",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Child's Pose",
@@ -1735,11 +1819,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
               "muscle_group": "Yoga",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1781,11 +1866,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
               "muscle_group": "Yoga",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Child's Pose",
@@ -1794,11 +1880,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
               "muscle_group": "Yoga",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1834,7 +1921,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Stationary Bike",
               "muscle_group": "Cardio",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1870,7 +1958,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Bodyweight",
               "muscle_group": "Legs",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Jump Squats",
@@ -1883,7 +1972,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Bodyweight",
               "muscle_group": "Legs",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Clap Push-ups",
@@ -1896,7 +1986,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Burpees",
@@ -1909,7 +2000,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Full Body",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -1945,7 +2037,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Dip Station",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Pull-ups",
@@ -1958,7 +2051,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Pull-up Bar",
               "muscle_group": "Back",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Push-ups",
@@ -1971,7 +2065,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -2017,7 +2112,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Full Body",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Bicep Curl",
@@ -2026,11 +2122,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Moderate",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "weight_reps",
               "equipment": "Dumbbell / Barbell",
               "muscle_group": "Arms",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -2066,7 +2163,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Plank",
@@ -2075,11 +2173,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
               "muscle_group": "Core",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -2115,7 +2214,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Plank",
@@ -2124,11 +2224,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
               "muscle_group": "Core",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -2174,7 +2275,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Full Body",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Bicep Curl",
@@ -2183,11 +2285,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Moderate",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "weight_reps",
               "equipment": "Dumbbell / Barbell",
               "muscle_group": "Arms",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -2229,11 +2332,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Moderate",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "weight_reps",
               "equipment": "Dumbbell / Barbell",
               "muscle_group": "Legs",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Bench Press",
@@ -2242,11 +2346,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Moderate",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "weight_reps",
               "equipment": "Dumbbell / Barbell",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Box Jumps",
@@ -2259,7 +2364,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Plyo Box",
               "muscle_group": "Legs",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -2295,7 +2401,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Full Body",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Bicep Curl",
@@ -2304,11 +2411,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Moderate",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "weight_reps",
               "equipment": "Dumbbell / Barbell",
               "muscle_group": "Arms",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }
@@ -2344,7 +2452,8 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "equipment": "Floor Mat",
               "muscle_group": "Chest",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             },
             {
               "name": "Plank",
@@ -2353,11 +2462,12 @@ export const DATABASE_PLANS: DatabasePlan[] = [
               "reps": "10",
               "weight": "Bodyweight",
               "restSeconds": 60,
-              "tracking_type": "reps",
+              "tracking_type": "time",
               "equipment": "Floor Mat",
               "muscle_group": "Core",
               "difficulty": "Intermediate",
-              "mechanics": "Compound"
+              "mechanics": "Compound",
+              "description": null
             }
           ]
         }

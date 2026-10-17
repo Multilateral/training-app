@@ -85,16 +85,26 @@ export const computeWeeklyMetrics = (history = {}, weekDays = []) => {
       workouts.forEach(w => {
         const dur = parseInt(w.duration) || 0;
         totalMinutesThisWeek += dur;
-        const name = (w.type || '').toLowerCase();
-        if (
+        const name = `${w.type || ''} ${w.worksessionName || ''}`.toLowerCase();
+        const isRehab =
+          w.sessionType === 'rehab' ||
+          w.isRehab === true ||
+          w.type === 'rehab' ||
           name.includes('rehab') ||
           name.includes('recovery') ||
           name.includes('mobility') ||
+          name.includes('mcgill') ||
+          name.includes('protocol') ||
+          name.includes('relief') ||
+          name.includes('tendon') ||
+          name.includes('tendinopathy') ||
           name.includes('knee') ||
           name.includes('shoulder') ||
           name.includes('back') ||
-          name.includes('achilles')
-        ) {
+          name.includes('achilles') ||
+          name.includes('isometric');
+
+        if (isRehab) {
           recoverySessionsThisWeek += 1;
         }
       });

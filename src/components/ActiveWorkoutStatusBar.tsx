@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useRef } from 'react';
+import React, { useState, useContext, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -38,6 +38,27 @@ export default function ActiveWorkoutStatusBar() {
     return () => pulseLoop.stop();
   }, [pulseAnim]);
 
+  // Live elapsed duration stopwatch
+  const startTime = activeSessionMetadata?.startTime || null;
+  const [elapsedSecs, setElapsedSecs] = useState<number>(() => {
+    if (!startTime || typeof startTime !== 'number') return 0;
+    return Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+  });
+
+  useEffect(() => {
+    if (!startTime || typeof startTime !== 'number') return;
+    const interval = setInterval(() => {
+      setElapsedSecs(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [startTime]);
+
+  const formatDuration = (totalSeconds: number) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // Don't render if there's no active session or if already on the active workout screen
   if (!activeSessionMetadata?.isActive || pathname.includes('active-workout')) {
     return null;
@@ -75,8 +96,13 @@ export default function ActiveWorkoutStatusBar() {
           </View>
         </View>
 
-        {/* Right: Quick Action Pill */}
+        {/* Right: Live Elapsed Duration & Resume Pill */}
         <View style={styles.rightCol}>
+          <View style={styles.elapsedPill}>
+            <Ionicons name="time-outline" size={12} color="#00D09E" style={{ marginRight: 3 }} />
+            <Text style={styles.elapsedText}>{formatDuration(elapsedSecs)}</Text>
+          </View>
+
           <View style={styles.resumeBtn}>
             <Ionicons name="play" size={13} color="#FFFFFF" style={{ marginRight: 3 }} />
             <Text style={styles.resumeBtnText}>Resume</Text>
@@ -171,6 +197,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  elapsedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  elapsedText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#34D399',
+    fontVariant: ['tabular-nums'],
   },
   resumeBtn: {
     flexDirection: 'row',

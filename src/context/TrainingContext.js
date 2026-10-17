@@ -173,16 +173,84 @@ export const TrainingProvider = ({ children, session }) => {
     }
   };
 
-  const logWorkout = async (type, duration, intensity, planId = null) => {
+  const logWorkout = async (type, duration, intensity, planId = null, extraDetails = {}) => {
     const todayStr = getDateString();
     const todayProfile = history[todayStr] || { };
     const currentMove = todayProfile.move || { workouts: [], stepCount: 0 };
     
-    const newWorkout = { id: Date.now().toString(), type, duration, intensity, planId };
+    const now = new Date();
+    const startTimeIso = extraDetails.startTime 
+      ? new Date(extraDetails.startTime).toISOString() 
+      : new Date(now.getTime() - (duration ? duration * 60000 : 1500000)).toISOString();
+    const endTimeIso = extraDetails.endTime 
+      ? new Date(extraDetails.endTime).toISOString() 
+      : now.toISOString();
+
+    const durationMins = typeof duration === 'number' && duration > 0 
+      ? duration 
+      : Math.max(1, Math.round((extraDetails.durationSeconds || 0) / 60)) || 20;
+
+    const durationSecs = extraDetails.durationSeconds || (durationMins * 60);
+
+    const formatDurationStr = (sec) => {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      if (s === 0) return `${m} min`;
+      return `${m}m ${s.toString().padStart(2, '0')}s`;
+    };
+
+    const checkTitle = `${type || ''} ${extraDetails.worksessionName || ''}`.toLowerCase();
+    const isRehab = Boolean(
+      extraDetails.isRehab ||
+      extraDetails.sessionType === 'rehab' ||
+      checkTitle.includes('rehab') ||
+      checkTitle.includes('protocol') ||
+      checkTitle.includes('mcgill') ||
+      checkTitle.includes('relief') ||
+      checkTitle.includes('recovery') ||
+      checkTitle.includes('mobility') ||
+      checkTitle.includes('tendon') ||
+      checkTitle.includes('achilles') ||
+      checkTitle.includes('back')
+    );
+
+    const newWorkout = { 
+      id: Date.now().toString(), 
+      type, 
+      sessionType: isRehab ? 'rehab' : 'workout',
+      isRehab,
+      category: extraDetails.category || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
+      duration: durationMins,
+      durationSeconds: durationSecs,
+      durationFormatted: extraDetails.durationFormatted || formatDurationStr(durationSecs),
+      intensity: intensity || 'High', 
+      planId,
+      startTime: startTimeIso,
+      endTime: endTimeIso,
+      completedAt: endTimeIso,
+      timeOfDay: now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+      dateFormatted: now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }),
+      worksessionName: extraDetails.worksessionName || type,
+      exercisesCompleted: extraDetails.exercisesCompleted || null,
+      totalSets: extraDetails.totalSets || null,
+    };
+    
     const updatedMove = { ...currentMove, workouts: [newWorkout, ...currentMove.workouts] };
     
     await saveToCloud(todayStr, { ...todayProfile, move: updatedMove });
     setLatestWorkout(newWorkout);
+
+    if (session?.user?.id) {
+      try {
+        await supabase.from('active_sessions').insert([{
+          user_id: session.user.id,
+          start_time: startTimeIso,
+          end_time: endTimeIso,
+        }]);
+      } catch (err) {
+        console.error('Failed to log to active_sessions:', err);
+      }
+    }
   };
 
   return (
