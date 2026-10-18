@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,41 +6,658 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { KinetixTheme } from '../constants/theme';
-import { TrainingContext } from '../context/TrainingContext';
+import { TrainingContext, supabase } from '../context/TrainingContext';
 import KinetixHeader from './KinetixHeader';
 import KinetixBottomNav from './KinetixBottomNav';
-import { DATABASE_WORKSESSIONS } from '../data/databaseLibraryData';
+import {
+  DATABASE_WORKSESSIONS,
+  DATABASE_PLANS,
+  DatabasePlan,
+  DatabasePlanPhase,
+  DatabaseWorksessionCard,
+} from '../data/databaseLibraryData';
+import { getDeletedPlanIds } from '../services/planPersistence';
+
+// Image mapping helper for dynamic worksession imagery
+const getWorksessionImage = (modality?: string, type?: string) => {
+  const m = (modality || '').toLowerCase();
+  const t = (type || '').toLowerCase();
+  if (m.includes('shoulder')) {
+    return 'https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?auto=format&fit=crop&w=400&q=80';
+  }
+  if (m.includes('knee') || m.includes('tendon')) {
+    return 'https://images.unsplash.com/photo-1574680096145-d05b474e2155?auto=format&fit=crop&w=400&q=80';
+  }
+  if (m.includes('back') || m.includes('mcgill') || m.includes('spine')) {
+    return 'https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=400&q=80';
+  }
+  if (m.includes('ankle') || m.includes('achilles') || m.includes('calf')) {
+    return 'https://images.unsplash.com/photo-1538805060514-97d9cc17730c?auto=format&fit=crop&w=400&q=80';
+  }
+  if (m.includes('kettlebell')) {
+    return 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?auto=format&fit=crop&w=400&q=80';
+  }
+  if (m.includes('core') || m.includes('trx')) {
+    return 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=400&q=80';
+  }
+  if (m.includes('yoga')) {
+    return 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&w=400&q=80';
+  }
+  if (m.includes('cardio') || m.includes('run')) {
+    return 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=400&q=80';
+  }
+  if (m.includes('plyo') || m.includes('jump')) {
+    return 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=400&q=80';
+  }
+  if (t === 'rehab' || m.includes('rehab') || m.includes('recovery')) {
+    return 'https://images.unsplash.com/photo-1574680096145-d05b474e2155?auto=format&fit=crop&w=400&q=80';
+  }
+  // Default strength & power
+  return 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=400&q=80';
+};
+
+interface PlanSessionItem {
+  dayName: string;
+  worksessionId: string;
+  worksessionName: string;
+  modality: string;
+  exerciseCount: number;
+  worksession: DatabaseWorksessionCard;
+  trackType?: 'workout' | 'rehab';
+}
 
 export default function KinetixDashboard() {
   const router = useRouter();
-  const { session, setActiveSessionMetadata } = useContext(TrainingContext) || {};
-  const [activeTab, setActiveTab] = useState<'schedule' | 'logger'>('schedule');
+  const { session, workspaces, updateWorkspaces, history, setActiveSessionMetadata } =
+    useContext(TrainingContext) || {};
+
+  // Available plans state: initialized with static database plans, augmented with live plans from DB
+  const [plans, setPlans] = useState<DatabasePlan[]>(DATABASE_PLANS);
+  const [selectedWorkoutPlanId, setSelectedWorkoutPlanId] = useState<string | null>(null);
+  const [selectedRehabId, setSelectedRehabId] = useState<string | null>(null);
 
   const athleteName = session?.user?.user_metadata?.full_name || 'Alex';
+  const todayDate = new Date();
   const todayFormatted = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
     month: 'short',
     day: 'numeric',
-  }).format(new Date());
+  }).format(todayDate);
+  const todayDayName = todayDate.toLocaleDateString('en-US', { weekday: 'long' });
 
-  const performanceWs = DATABASE_WORKSESSIONS.find((w) => w.id === 'b0000001-0000-4000-a000-000000000005') || DATABASE_WORKSESSIONS.find((w) => w.type === 'workout') || DATABASE_WORKSESSIONS[0];
-  const rehabWs = DATABASE_WORKSESSIONS.find((w) => w.id === 'b0000001-0000-4000-a000-000000000002') || DATABASE_WORKSESSIONS.find((w) => w.type === 'rehab') || DATABASE_WORKSESSIONS[1];
+  // 1. Sync active workout plan and active rehab plan IDs
+  const syncActivePlans = async () => {
+    try {
+      const [storedWorkout, storedLegacy, storedRehab] = await Promise.all([
+        AsyncStorage.getItem('@active_workout_plan_id'),
+        AsyncStorage.getItem('@active_plan_id'),
+        AsyncStorage.getItem('@active_rehab_plan_id'),
+      ]);
 
-  const startTodaySession = (track?: 'performance' | 'rehab' | 'full') => {
-    const selected = track === 'rehab' ? rehabWs : performanceWs;
-    const isRehab = selected.type === 'rehab';
+      // 1. Workout Plan Candidate
+      const workoutCandidate =
+        workspaces?.activeWorkoutPlanId ||
+        workspaces?.defaultPlanId ||
+        workspaces?.activePlanId ||
+        storedWorkout ||
+        storedLegacy;
+
+      if (workoutCandidate) {
+        setSelectedWorkoutPlanId(workoutCandidate);
+      } else {
+        const firstWorkout = DATABASE_PLANS.find(
+          (p) => !p.name.toLowerCase().includes('rehab') && !p.name.toLowerCase().includes('recovery')
+        );
+        if (firstWorkout) setSelectedWorkoutPlanId(firstWorkout.id);
+      }
+
+      // 2. Rehab Plan / Protocol Candidate
+      const rehabCandidate = workspaces?.activeRehabPlanId || storedRehab;
+      if (rehabCandidate) {
+        setSelectedRehabId(rehabCandidate);
+      } else {
+        const firstRehabWs = DATABASE_WORKSESSIONS.find((w) => w.type === 'rehab');
+        if (firstRehabWs) {
+          setSelectedRehabId(firstRehabWs.id);
+        } else {
+          const firstRehabPlan = DATABASE_PLANS.find(
+            (p) => p.name.toLowerCase().includes('rehab') || p.name.toLowerCase().includes('recovery')
+          );
+          if (firstRehabPlan) setSelectedRehabId(firstRehabPlan.id);
+        }
+      }
+    } catch (e) {
+      console.error('[KinetixDashboard] Error syncing active plans:', e);
+    }
+  };
+
+  useEffect(() => {
+    syncActivePlans();
+  }, [
+    workspaces?.activeWorkoutPlanId,
+    workspaces?.defaultPlanId,
+    workspaces?.activePlanId,
+    workspaces?.activeRehabPlanId,
+  ]);
+
+  // Re-sync whenever dashboard regains focus (e.g. after choosing in Workouts)
+  useFocusEffect(
+    React.useCallback(() => {
+      syncActivePlans();
+    }, [
+      workspaces?.activeWorkoutPlanId,
+      workspaces?.defaultPlanId,
+      workspaces?.activePlanId,
+      workspaces?.activeRehabPlanId,
+    ])
+  );
+
+  // 2. Fetch live plans from Supabase if authenticated
+  useEffect(() => {
+    let isMounted = true;
+    const fetchLivePlans = async () => {
+      if (!session?.user?.id) return;
+
+      let mappedUserPlans: DatabasePlan[] = [];
+      try {
+        const { data: userPlans, error: planErr } = await supabase
+          .from('training_plans')
+          .select(`
+            id, name, schedule_type, goal_category, description, is_standard_template,
+            plan_worksessions (
+              id, day_name, order_index, worksession_id,
+              worksessions (
+                id, name, modality, description,
+                worksession_exercises (
+                  id, target_sets, target_reps, tracking_type, target_time, notes,
+                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics)
+                )
+              )
+            )
+          `)
+          .order('created_at', { ascending: false });
+
+        if (!planErr && userPlans) {
+          mappedUserPlans = userPlans.map((p: any) => {
+            const existing = DATABASE_PLANS.find((dp) => dp.id === p.id);
+            if (existing) return existing;
+
+            const isRehab =
+              (p.name || '').toLowerCase().includes('rehab') ||
+              (p.name || '').toLowerCase().includes('recovery') ||
+              (p.goal_category || '').toLowerCase().includes('rehab');
+
+            const sessions = (p.plan_worksessions || []).map((pw: any) => {
+              const ws = pw.worksessions;
+              const exercises = (ws?.worksession_exercises || []).map((we: any) => ({
+                name: we.exercises?.name || 'Exercise',
+                cue: we.notes || we.exercises?.instructions || 'Controlled execution.',
+                sets: we.target_sets || 3,
+                reps: we.tracking_type === 'time' ? `${we.target_time || 45}s` : String(we.target_reps || 10),
+                weight: 'Standard',
+                restSeconds: 60,
+                tracking_type: we.tracking_type || 'reps_weight',
+                equipment: we.exercises?.equipment || 'Bodyweight',
+                muscle_group: we.exercises?.muscle_group || 'General',
+                difficulty: we.exercises?.difficulty || 'Intermediate',
+                mechanics: we.exercises?.mechanics || 'Compound',
+                description: we.exercises?.description || null,
+              }));
+
+              const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
+              const fullWs: DatabaseWorksessionCard = {
+                id: ws?.id || pw.worksession_id,
+                type: isRehab ? 'rehab' : 'workout',
+                category: ws?.modality || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
+                title: ws?.name || 'Worksession',
+                filterTag: isRehab ? 'knee' : 'core',
+                description: ws?.description || '',
+                metrics: {
+                  duration: `${Math.max(15, exercises.length * 8)} min`,
+                  sets: `${totalSets} Sets`,
+                  reps: exercises[0] ? String(exercises[0].reps) : '8-12',
+                  load: isRehab ? 'Light' : 'Moderate',
+                },
+                exercises,
+              };
+
+              return {
+                dayName: pw.day_name || 'Day',
+                worksessionId: pw.worksession_id,
+                worksessionName: ws?.name || 'Session',
+                modality: ws?.modality || 'General',
+                exerciseCount: exercises.length || 3,
+                worksession: fullWs,
+              };
+            });
+
+            return {
+              id: p.id,
+              name: p.name,
+              schedule_type: p.schedule_type || 'floating',
+              goal_category: p.goal_category || 'General',
+              description: p.description || '',
+              is_standard_template: p.is_standard_template || false,
+              worksessions: sessions,
+            };
+          });
+        }
+      } catch (err) {
+        console.error('[KinetixDashboard] Error fetching live training plans:', err);
+      }
+
+      // Fetch live rehab programs with phases and worksessions
+      let mappedRehabPrograms: DatabasePlan[] = [];
+      try {
+        const { data: rehabData, error: rehabErr } = await supabase
+          .from('rehab_programs')
+          .select(`
+            id, title, description, target_joint, estimated_weeks,
+            program_phases (
+              id, phase_order, title, description, required_sessions_to_pass, max_allowed_pain_score,
+              phase_worksessions (
+                id, order_index, day_name, worksession_id
+              )
+            )
+          `)
+          .order('created_at', { ascending: false });
+
+        if (!rehabErr && rehabData) {
+          // Collect all unique worksession IDs across all phases
+          const wsIds: string[] = [];
+          rehabData.forEach((rp: any) => {
+            (rp.program_phases || []).forEach((ph: any) => {
+              (ph.phase_worksessions || []).forEach((pw: any) => {
+                if (pw.worksession_id) wsIds.push(pw.worksession_id);
+              });
+            });
+          });
+
+          // Fetch worksessions in batch if any exist
+          const worksessionMap = new Map<string, any>();
+          if (wsIds.length > 0) {
+            const { data: wsList } = await supabase
+              .from('worksessions')
+              .select(`
+                id, name, modality, description,
+                worksession_exercises (
+                  id, target_sets, target_reps, tracking_type, target_time, notes,
+                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics)
+                )
+              `)
+              .in('id', wsIds);
+
+            if (wsList) {
+              wsList.forEach((ws: any) => worksessionMap.set(ws.id, ws));
+            }
+          }
+
+          mappedRehabPrograms = rehabData.map((rp: any) => {
+            const sortedPhases = (rp.program_phases || []).sort(
+              (a: any, b: any) => a.phase_order - b.phase_order
+            );
+
+            const phases: DatabasePlanPhase[] = sortedPhases.map((ph: any) => {
+              const pwList = (ph.phase_worksessions || []).sort(
+                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+              );
+
+              const phaseSessions = pwList.map((pw: any, pIdx: number) => {
+                const ws = worksessionMap.get(pw.worksession_id);
+                const exercises = (ws?.worksession_exercises || []).map((we: any) => ({
+                  name: we.exercises?.name || 'Exercise',
+                  cue: we.notes || we.exercises?.instructions || 'Controlled execution.',
+                  sets: we.target_sets || 3,
+                  reps: we.tracking_type === 'time' ? `${we.target_time || 45}s` : String(we.target_reps || 10),
+                  weight: 'Standard',
+                  restSeconds: 60,
+                  tracking_type: we.tracking_type || 'reps',
+                  equipment: we.exercises?.equipment || 'Bodyweight',
+                  muscle_group: we.exercises?.muscle_group || 'General',
+                  difficulty: we.exercises?.difficulty || 'Intermediate',
+                  mechanics: we.exercises?.mechanics || 'Compound',
+                  description: we.exercises?.description || null,
+                }));
+
+                const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
+                const fullWs: DatabaseWorksessionCard = {
+                  id: ws?.id || pw.worksession_id,
+                  type: 'rehab',
+                  category: ws?.modality || 'Clinical Rehab',
+                  title: ws?.name || `Phase ${ph.phase_order} Session ${pIdx + 1}`,
+                  filterTag: 'knee',
+                  description: ws?.description || '',
+                  metrics: {
+                    duration: `${Math.max(15, exercises.length * 8)} min`,
+                    sets: `${totalSets} Sets`,
+                    reps: exercises[0] ? String(exercises[0].reps) : '8-12',
+                    load: 'Light',
+                  },
+                  exercises,
+                };
+
+                return {
+                  dayName: pw.day_name || `Phase ${ph.phase_order} - Session ${pIdx + 1}`,
+                  worksessionId: ws?.id || pw.worksession_id,
+                  worksessionName: ws?.name || 'Rehab Session',
+                  modality: ws?.modality || 'Clinical Rehab',
+                  exerciseCount: exercises.length || 3,
+                  worksession: fullWs,
+                };
+              });
+
+              return {
+                id: ph.id,
+                phase_order: ph.phase_order,
+                title: ph.title,
+                description: ph.description || '',
+                required_sessions_to_pass: ph.required_sessions_to_pass,
+                max_allowed_pain_score: Number(ph.max_allowed_pain_score),
+                worksessions: phaseSessions,
+              };
+            });
+
+            const allWorksessions = phases.flatMap((ph) => ph.worksessions);
+
+            return {
+              id: rp.id,
+              name: rp.title,
+              schedule_type: 'criteria_progression',
+              goal_category: rp.target_joint ? `Rehab (${rp.target_joint})` : 'Clinical Rehab',
+              description: rp.description || '',
+              is_standard_template: false,
+              phases,
+              worksessions: allWorksessions,
+            };
+          });
+        }
+      } catch (rErr) {
+        console.error('[KinetixDashboard] Error fetching user rehab programs:', rErr);
+      }
+
+      if (isMounted) {
+        const allFetched = [...mappedRehabPrograms, ...mappedUserPlans];
+        const deletedIds = await getDeletedPlanIds();
+        const existingPlanIds = new Set(allFetched.map((p) => p.id));
+        const mergedPlans = [
+          ...allFetched,
+          ...DATABASE_PLANS.filter((p) => !existingPlanIds.has(p.id)),
+        ].filter((p) => !deletedIds.includes(p.id));
+        setPlans(mergedPlans);
+      }
+    };
+
+    fetchLivePlans();
+    return () => {
+      isMounted = false;
+    };
+  }, [session?.user?.id]);
+
+  // 3. Resolve Currently Active Workout Plan
+  const activeWorkoutPlan = useMemo(() => {
+    const workoutPlans = plans.filter(
+      (p) => !p.name.toLowerCase().includes('rehab') && !p.name.toLowerCase().includes('recovery')
+    );
+    if (selectedWorkoutPlanId) {
+      const found = plans.find((p) => p.id === selectedWorkoutPlanId);
+      if (found && !found.name.toLowerCase().includes('rehab') && !found.name.toLowerCase().includes('recovery')) {
+        return found;
+      }
+    }
+    return workoutPlans[0] || plans[0] || DATABASE_PLANS[0];
+  }, [plans, selectedWorkoutPlanId]);
+
+  // 4. Resolve Currently Active Rehab Plan or Individual Protocol
+  const activeRehabPlan = useMemo((): DatabasePlan => {
+    if (selectedRehabId) {
+      const foundPlan = plans.find((p) => p.id === selectedRehabId);
+      if (foundPlan) return foundPlan;
+
+      const foundWs = DATABASE_WORKSESSIONS.find((w) => w.id === selectedRehabId);
+      if (foundWs) {
+        return {
+          id: foundWs.id,
+          name: foundWs.title,
+          schedule_type: 'floating',
+          goal_category: foundWs.category || 'Clinical Rehab',
+          description: foundWs.description || '',
+          is_standard_template: false,
+          worksessions: [
+            {
+              dayName: 'Daily Protocol',
+              worksessionId: foundWs.id,
+              worksessionName: foundWs.title,
+              modality: foundWs.category,
+              exerciseCount: foundWs.exercises?.length || 4,
+              worksession: foundWs,
+            },
+          ],
+        };
+      }
+    }
+
+    const defaultRehabWs = DATABASE_WORKSESSIONS.find((w) => w.type === 'rehab');
+    if (defaultRehabWs) {
+      return {
+        id: defaultRehabWs.id,
+        name: defaultRehabWs.title,
+        schedule_type: 'floating',
+        goal_category: defaultRehabWs.category || 'Clinical Rehab',
+        description: defaultRehabWs.description || '',
+        is_standard_template: false,
+        worksessions: [
+          {
+            dayName: 'Daily Protocol',
+            worksessionId: defaultRehabWs.id,
+            worksessionName: defaultRehabWs.title,
+            modality: defaultRehabWs.category,
+            exerciseCount: defaultRehabWs.exercises?.length || 4,
+            worksession: defaultRehabWs,
+          },
+        ],
+      };
+    }
+
+    const defaultRehabPlan = plans.find(
+      (p) => p.name.toLowerCase().includes('rehab') || p.name.toLowerCase().includes('recovery')
+    );
+    return defaultRehabPlan || DATABASE_PLANS[0];
+  }, [plans, selectedRehabId]);
+
+  // 5. Helper to resolve worksession cards for any plan
+  const resolvePlanSessions = (targetPlan: DatabasePlan | null, defaultTrack: 'workout' | 'rehab'): PlanSessionItem[] => {
+    if (!targetPlan || !targetPlan.worksessions) return [];
+
+    return targetPlan.worksessions.map((pw, idx) => {
+      let wsCard = pw.worksession;
+      if (!wsCard || !wsCard.exercises || wsCard.exercises.length === 0) {
+        const found = DATABASE_WORKSESSIONS.find((w) => w.id === pw.worksessionId);
+        if (found) wsCard = found;
+      }
+
+      const isRehab = defaultTrack === 'rehab' || (pw.modality || '').toLowerCase().includes('rehab');
+
+      if (!wsCard) {
+        wsCard = {
+          id: pw.worksessionId || `ws-fallback-${idx}`,
+          type: isRehab ? 'rehab' : 'workout',
+          category: pw.modality || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
+          title: pw.worksessionName || `Session ${idx + 1}`,
+          filterTag: isRehab ? 'knee' : 'core',
+          description: 'Prescribed routine tailored for athletic performance and tissue resilience.',
+          metrics: {
+            duration: isRehab ? '30 min' : '45 min',
+            sets: '9 Sets',
+            reps: '10',
+            load: isRehab ? 'Light' : 'Moderate',
+          },
+          exercises: [
+            {
+              name: isRehab ? 'Mobility & Activation' : 'Dynamic Joint Activation',
+              cue: 'Focus on fluid range of motion.',
+              sets: 3,
+              reps: '10',
+              weight: 'Bodyweight',
+              restSeconds: 45,
+              tracking_type: 'reps',
+            },
+          ],
+        };
+      }
+
+      return {
+        dayName: pw.dayName || `Day ${idx + 1}`,
+        worksessionId: pw.worksessionId,
+        worksessionName: wsCard.title || pw.worksessionName,
+        modality: wsCard.category || pw.modality || (isRehab ? 'Rehab' : 'Strength'),
+        exerciseCount: wsCard.exercises?.length || pw.exerciseCount || 3,
+        worksession: wsCard,
+        trackType: isRehab ? 'rehab' : 'workout',
+      };
+    });
+  };
+
+  const resolvedWorkoutSessions = useMemo(
+    () => resolvePlanSessions(activeWorkoutPlan, 'workout'),
+    [activeWorkoutPlan]
+  );
+  const resolvedRehabSessions = useMemo(
+    () => resolvePlanSessions(activeRehabPlan, 'rehab'),
+    [activeRehabPlan]
+  );
+
+  // 6. Compute Schedule helper
+  const computeSchedule = (targetPlan: DatabasePlan | null, sessions: PlanSessionItem[]) => {
+    if (!sessions || sessions.length === 0) {
+      return { todaySessions: [] as PlanSessionItem[], upcomingSessions: [] as PlanSessionItem[], isRestDay: false };
+    }
+
+    if (targetPlan?.schedule_type === 'anchored') {
+      const todayMatches = sessions.filter((s) => {
+        const d = (s.dayName || '').toLowerCase().trim();
+        const t = todayDayName.toLowerCase().trim();
+        return d.startsWith(t) || d.includes(t);
+      });
+
+      const dayOrder = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+      const todayIndex = (todayDate.getDay() + 6) % 7; // 0 = Mon, 6 = Sun
+
+      const upcoming = sessions
+        .filter((s) => !todayMatches.includes(s))
+        .sort((a, b) => {
+          const aIndex = dayOrder.findIndex((d) => (a.dayName || '').toLowerCase().includes(d));
+          const bIndex = dayOrder.findIndex((d) => (b.dayName || '').toLowerCase().includes(d));
+          const aOffset = (aIndex - todayIndex + 7) % 7 || 7;
+          const bOffset = (bIndex - todayIndex + 7) % 7 || 7;
+          return aOffset - bOffset;
+        });
+
+      return {
+        todaySessions: todayMatches,
+        upcomingSessions: upcoming,
+        isRestDay: todayMatches.length === 0,
+      };
+    }
+
+    // Floating schedule: Session 0 is today, subsequent are upcoming
+    return {
+      todaySessions: [sessions[0]],
+      upcomingSessions: sessions.slice(1),
+      isRestDay: false,
+    };
+  };
+
+  const workoutSchedule = useMemo(
+    () => computeSchedule(activeWorkoutPlan, resolvedWorkoutSessions),
+    [activeWorkoutPlan, resolvedWorkoutSessions, todayDayName]
+  );
+
+  const rehabSchedule = useMemo(
+    () => computeSchedule(activeRehabPlan, resolvedRehabSessions),
+    [activeRehabPlan, resolvedRehabSessions, todayDayName]
+  );
+
+  const allUpcomingSessions = useMemo(() => {
+    return [
+      ...workoutSchedule.upcomingSessions.map((s) => ({ ...s, trackType: 'workout' as const })),
+      ...rehabSchedule.upcomingSessions.map((s) => ({ ...s, trackType: 'rehab' as const })),
+    ];
+  }, [workoutSchedule.upcomingSessions, rehabSchedule.upcomingSessions]);
+
+  // Combined scheduled duration for today
+  const totalTodayDuration = useMemo(() => {
+    let mins = 0;
+    workoutSchedule.todaySessions.forEach((s) => {
+      mins += parseInt(s.worksession?.metrics?.duration || '45') || 45;
+    });
+    rehabSchedule.todaySessions.forEach((s) => {
+      mins += parseInt(s.worksession?.metrics?.duration || '30') || 30;
+    });
+    if (mins === 0) return 'RECOVERY DAY';
+    return `${mins} MIN TOTAL`;
+  }, [workoutSchedule.todaySessions, rehabSchedule.todaySessions]);
+
+  // 7. Dynamic Weekly Consistency Calculation from History
+  const weeklyConsistency = useMemo(() => {
+    let completedCount = 0;
+    let totalSecs = 0;
+    const targetSessions =
+      (activeWorkoutPlan?.worksessions?.length || 4) +
+      (activeRehabPlan?.worksessions?.length || 1);
+
+    if (history) {
+      const now = new Date();
+      const dayOfWeek = (now.getDay() + 6) % 7; // 0 = Mon, 6 = Sun
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - dayOfWeek);
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      Object.entries(history).forEach(([dateStr, dayData]: [string, any]) => {
+        const d = new Date(dateStr);
+        if (d >= startOfWeek && d <= now) {
+          const workouts = dayData?.move?.workouts || [];
+          completedCount += workouts.length;
+          workouts.forEach((w: any) => {
+            totalSecs += w.durationSeconds || (w.duration ? w.duration * 60 : 1500);
+          });
+        }
+      });
+    }
+
+    const totalMinutes = Math.round(totalSecs / 60);
+    const totalHours = Math.floor(totalMinutes / 60);
+    const remainingMins = totalMinutes % 60;
+    const percentMet = Math.min(100, Math.round((completedCount / Math.max(targetSessions, 1)) * 100));
+
+    return {
+      completedCount,
+      targetSessions,
+      percentMet,
+      activeTimeFormatted: totalHours > 0 ? `${totalHours}h ${remainingMins}m` : `${remainingMins}m`,
+    };
+  }, [history, activeWorkoutPlan, activeRehabPlan]);
+
+  // 8. Launch active workout
+  const startSession = (selectedWs: DatabaseWorksessionCard, planObj?: DatabasePlan | null) => {
+    const isRehab =
+      selectedWs.type === 'rehab' ||
+      (selectedWs.category || '').toLowerCase().includes('rehab') ||
+      (selectedWs.title || '').toLowerCase().includes('rehab');
+
     const worksessionData = {
-      name: selected.title,
-      focus: selected.category,
-      estimatedDuration: parseInt(selected.metrics.duration) || 30,
-      type: selected.type,
+      name: selectedWs.title,
+      focus: selectedWs.category,
+      estimatedDuration: parseInt(selectedWs.metrics?.duration || '30') || 30,
+      type: selectedWs.type,
       isRehab,
-      category: selected.category,
-      exercises: selected.exercises.map((e) => ({
+      category: selectedWs.category,
+      exercises: (selectedWs.exercises || []).map((e) => ({
         name: e.name,
         cue: e.cue || 'Maintain strict form.',
         sets: e.sets || 3,
@@ -54,14 +671,14 @@ export default function KinetixDashboard() {
     if (setActiveSessionMetadata) {
       setActiveSessionMetadata({
         isActive: true,
-        worksessionName: selected.title,
-        worksessionType: selected.type,
+        worksessionName: selectedWs.title,
+        worksessionType: selectedWs.type,
         isRehab,
-        currentExerciseName: selected.exercises[0]?.name || 'Exercise 1',
+        currentExerciseName: selectedWs.exercises?.[0]?.name || 'Exercise 1',
         currentExerciseIndex: 0,
-        totalExercises: selected.exercises.length,
+        totalExercises: selectedWs.exercises?.length || 0,
         currentSet: 1,
-        totalSets: selected.exercises[0]?.sets || 3,
+        totalSets: selectedWs.exercises?.[0]?.sets || 3,
         startTime: Date.now(),
       });
     }
@@ -70,9 +687,169 @@ export default function KinetixDashboard() {
       pathname: '/active-workout',
       params: {
         worksession: JSON.stringify(worksessionData),
-        plan: JSON.stringify({ id: selected.id, name: selected.title, type: selected.type, isRehab }),
+        plan: JSON.stringify({
+          id: planObj?.id || (isRehab ? activeRehabPlan?.id : activeWorkoutPlan?.id) || selectedWs.id,
+          name: planObj?.name || (isRehab ? activeRehabPlan?.name : activeWorkoutPlan?.name) || selectedWs.title,
+          type: selectedWs.type,
+          isRehab,
+        }),
       },
     });
+  };
+
+  // Helper to render session card for either track
+  const renderSessionCard = (
+    item: PlanSessionItem,
+    planObj: DatabasePlan | null,
+    isRehabTrack: boolean,
+    keyIdx: number | string
+  ) => {
+    const ws = item.worksession;
+    const isRehab = isRehabTrack || ws.type === 'rehab';
+    const themeColor = isRehab ? KinetixTheme.colors.coral : KinetixTheme.colors.primary;
+    const themeLight = isRehab ? KinetixTheme.colors.coralLight : KinetixTheme.colors.primaryLight;
+    const bannerImg = getWorksessionImage(item.modality, ws.type);
+
+    return (
+      <View key={keyIdx} style={styles.trackCard}>
+        {/* Track Top Bar */}
+        <View style={styles.trackTopBar}>
+          <View style={styles.trackIndicatorRow}>
+            <View style={[styles.trackDot, { backgroundColor: themeColor }]} />
+            <Text style={[styles.trackTrackTitle, { color: themeColor }]}>
+              {isRehab ? 'Rehab & Recovery Track' : 'Performance Track'}
+            </Text>
+          </View>
+          <View style={[styles.trackDurationPill, isRehab && { backgroundColor: themeLight }]}>
+            <Text
+              style={[
+                styles.trackDurationText,
+                isRehab && { color: themeColor },
+              ]}
+            >
+              {ws.metrics?.duration || '35 min'} • {ws.exercises?.length || 3} exercises
+            </Text>
+          </View>
+        </View>
+
+        {/* Track Banner Info */}
+        <View style={styles.trackBannerRow}>
+          <Image source={{ uri: bannerImg }} style={styles.trackImage} />
+          <View style={styles.trackBannerInfo}>
+            <Text style={styles.trackName} numberOfLines={1}>
+              {ws.title}
+            </Text>
+            <Text style={styles.trackDescription} numberOfLines={2}>
+              {ws.description || `${item.dayName} • Structured athletic focus on ${item.modality}`}
+            </Text>
+            <View style={styles.badgesRow}>
+              <View style={[styles.rpeBadge, { backgroundColor: themeLight }]}>
+                <Text style={[styles.rpeBadgeText, { color: themeColor }]}>
+                  {ws.metrics?.load || 'Standard Load'}
+                </Text>
+              </View>
+              <Text style={styles.blockText}>{item.modality}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Exercises Dynamic Preview List */}
+        <View style={styles.exercisesList}>
+          {(ws.exercises || []).slice(0, 3).map((ex: any, exIdx: number) => (
+            <View key={exIdx} style={styles.exerciseItem}>
+              <View
+                style={[
+                  styles.exerciseIndexBox,
+                  isRehab && { backgroundColor: themeLight },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.exerciseIndexText,
+                    isRehab && { color: themeColor },
+                  ]}
+                >
+                  {exIdx + 1}
+                </Text>
+              </View>
+              <View style={styles.exerciseDetails}>
+                <Text style={styles.exerciseTitle} numberOfLines={1}>
+                  {ex.name}
+                </Text>
+                <Text style={styles.exerciseType} numberOfLines={1}>
+                  {ex.muscle_group || ex.mechanics || ws.category}
+                </Text>
+              </View>
+              <View style={styles.exerciseStats}>
+                <Text
+                  style={[
+                    styles.exerciseSetsReps,
+                    isRehab && { color: themeColor },
+                  ]}
+                >
+                  {ex.sets} sets × {ex.reps}
+                </Text>
+                <Text style={styles.exerciseLoad}>
+                  {ex.weight || ex.equipment || 'Standard'}
+                </Text>
+              </View>
+            </View>
+          ))}
+
+          {(ws.exercises?.length || 0) > 3 && (
+            <Text style={styles.moreExercisesText}>
+              + {(ws.exercises?.length || 0) - 3} more exercises in this routine
+            </Text>
+          )}
+        </View>
+
+        {/* Start Workout Action Button */}
+        <TouchableOpacity
+          style={[styles.startWorkoutButton, { backgroundColor: themeColor }]}
+          onPress={() => startSession(ws, planObj)}
+          activeOpacity={0.88}
+        >
+          <View style={styles.ctaLeftContent}>
+            <View style={styles.ctaPlayCircle}>
+              <Ionicons name="play" size={20} color="#FFFFFF" />
+            </View>
+            <View>
+              <Text style={styles.ctaTitle}>
+                {isRehab ? 'Start Rehab Protocol' : 'Start Workout'}
+              </Text>
+              <Text style={styles.ctaSubtitle} numberOfLines={1}>
+                {ws.title}
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        {isRehab && planObj?.phases && planObj.phases.length > 0 && (
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              backgroundColor: '#FFF1F2',
+              paddingVertical: 9,
+              borderRadius: 8,
+              marginTop: 8,
+              borderWidth: 1,
+              borderColor: '#FECDD3',
+            }}
+            onPress={() => router.push('/rehab-program')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="shield-checkmark" size={15} color={themeColor} />
+            <Text style={{ fontSize: 12, fontWeight: '700', color: themeColor }}>
+              Criteria Progression Roadmap ({planObj.phases.length} Phases)
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
   };
 
   return (
@@ -90,7 +867,7 @@ export default function KinetixDashboard() {
           <Text style={styles.greetingDate}>{todayFormatted}</Text>
         </View>
 
-        {/* Weekly Consistency Card */}
+        {/* Weekly Consistency Card (Dynamic from History & Active Plan) */}
         <View style={styles.consistencyCard}>
           <View style={styles.consistencyHeader}>
             <View style={styles.consistencyTitleRow}>
@@ -98,201 +875,254 @@ export default function KinetixDashboard() {
               <Text style={styles.consistencyTitle}>Weekly Consistency</Text>
             </View>
             <View style={styles.consistencyBadge}>
-              <Text style={styles.consistencyBadgeText}>80% Target Met</Text>
+              <Text style={styles.consistencyBadgeText}>
+                {weeklyConsistency.percentMet}% Target Met
+              </Text>
             </View>
           </View>
 
           <View style={styles.metricsGrid}>
             <View style={styles.metricBlock}>
               <Text style={styles.metricLabel}>Completed</Text>
-              <Text style={styles.metricValue}>4 / 5</Text>
-              <Text style={styles.metricSub}>Sessions done</Text>
+              <Text style={styles.metricValue}>
+                {weeklyConsistency.completedCount} / {weeklyConsistency.targetSessions}
+              </Text>
+              <Text style={styles.metricSub}>Sessions target</Text>
             </View>
 
             <View style={styles.metricBlock}>
-              <Text style={styles.metricLabel}>Total Volume</Text>
-              <Text style={styles.metricValue}>12.4k <Text style={styles.metricUnit}>kg</Text></Text>
-              <Text style={[styles.metricSub, { color: KinetixTheme.colors.secondary }]}>+8% vs last wk</Text>
+              <Text style={styles.metricLabel}>Schedule</Text>
+              <Text style={styles.metricValue} numberOfLines={1}>
+                {activeWorkoutPlan?.schedule_type === 'anchored' ? 'Anchored' : 'Floating'}
+              </Text>
+              <Text style={[styles.metricSub, { color: KinetixTheme.colors.primary }]}>
+                {activeWorkoutPlan?.goal_category || 'Active'}
+              </Text>
             </View>
 
             <View style={styles.metricBlock}>
               <Text style={styles.metricLabel}>Active Time</Text>
-              <Text style={styles.metricValue}>3h 45m</Text>
-              <Text style={styles.metricSub}>Across 4 days</Text>
+              <Text style={styles.metricValue}>{weeklyConsistency.activeTimeFormatted}</Text>
+              <Text style={styles.metricSub}>This week</Text>
             </View>
           </View>
         </View>
 
-        {/* Today's Schedule Section */}
+        {/* Active Plans Container (Workout Plan & Rehab Protocol) */}
+        <View style={styles.activePlansContainer}>
+          {/* Row 1: Active Workout Plan */}
+          <View style={styles.activePlanRow}>
+            <View style={styles.activePlanInfoCol}>
+              <View style={styles.activePlanBadgeRow}>
+                <View style={styles.activePlanIndicatorDot} />
+                <Text style={styles.activePlanBadgeText}>ACTIVE WORKOUT PLAN</Text>
+              </View>
+              <Text style={styles.activePlanNameText} numberOfLines={1}>
+                {activeWorkoutPlan?.name || 'No Workout Plan Active'}
+              </Text>
+              <Text style={styles.activePlanScheduleMetaText} numberOfLines={1}>
+                {activeWorkoutPlan?.schedule_type === 'anchored' ? 'Fixed Days Schedule' : 'Floating Sequence'} •{' '}
+                {resolvedWorkoutSessions.length} {resolvedWorkoutSessions.length === 1 ? 'Session' : 'Sessions'}
+              </Text>
+            </View>
+
+            <View style={styles.activePlanStatusBadge}>
+              <Ionicons name="checkmark-circle" size={14} color="#059669" />
+              <Text style={styles.activePlanStatusText}>Active</Text>
+            </View>
+          </View>
+
+          <View style={styles.activePlansDivider} />
+
+          {/* Row 2: Active Rehab Protocol */}
+          <View style={styles.activePlanRow}>
+            <View style={styles.activePlanInfoCol}>
+              <View style={styles.activePlanBadgeRow}>
+                <View style={[styles.activePlanIndicatorDot, { backgroundColor: KinetixTheme.colors.coral }]} />
+                <Text style={[styles.activePlanBadgeText, { color: KinetixTheme.colors.coral }]}>ACTIVE REHAB PROTOCOL</Text>
+              </View>
+              <Text style={styles.activePlanNameText} numberOfLines={1}>
+                {activeRehabPlan?.name || 'No Rehab Protocol Active'}
+              </Text>
+              <Text style={styles.activePlanScheduleMetaText} numberOfLines={1}>
+                {activeRehabPlan?.schedule_type === 'anchored' ? 'Fixed Days Schedule' : 'Targeted Protocol'} •{' '}
+                {resolvedRehabSessions.length} {resolvedRehabSessions.length === 1 ? 'Routine' : 'Routines'}
+              </Text>
+            </View>
+
+            <View style={[styles.activePlanStatusBadge, { backgroundColor: KinetixTheme.colors.coralLight, borderColor: '#FED7AA' }]}>
+              <Ionicons name="checkmark-circle" size={14} color={KinetixTheme.colors.coral} />
+              <Text style={[styles.activePlanStatusText, { color: KinetixTheme.colors.coral }]}>Active</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Today's Schedule Section Heading */}
         <View style={styles.scheduleHeaderRow}>
           <Text style={styles.sectionHeading}>Today's Schedule</Text>
           <View style={styles.timeTag}>
-            <Ionicons name="time-outline" size={13} color={KinetixTheme.colors.textMuted} />
-            <Text style={styles.timeTagText}>60 MIN TOTAL</Text>
-          </View>
-        </View>
-
-        {/* Track 1: Performance Track (Cobalt Blue Accent) */}
-        <View style={styles.trackCard}>
-          <View style={styles.trackTopBar}>
-            <View style={styles.trackIndicatorRow}>
-              <View style={[styles.trackDot, { backgroundColor: KinetixTheme.colors.primary }]} />
-              <Text style={[styles.trackTrackTitle, { color: KinetixTheme.colors.primary }]}>
-                Performance Track
-              </Text>
-            </View>
-            <View style={styles.trackDurationPill}>
-              <Text style={styles.trackDurationText}>45 min • 4 exercises</Text>
-            </View>
-          </View>
-
-          <View style={styles.trackBannerRow}>
-            <Image
-              source={{
-                uri: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=200&q=80',
-              }}
-              style={styles.trackImage}
+            <Ionicons
+              name={workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 ? 'leaf-outline' : 'time-outline'}
+              size={13}
+              color={workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 ? '#059669' : KinetixTheme.colors.textMuted}
             />
-            <View style={styles.trackBannerInfo}>
-              <Text style={styles.trackName}>Strength & Power</Text>
-              <Text style={styles.trackDescription} numberOfLines={2}>
-                Lower body explosiveness & posterior chain focus
-              </Text>
-              <View style={styles.badgesRow}>
-                <View style={styles.rpeBadge}>
-                  <Text style={styles.rpeBadgeText}>RPE 8.0</Text>
-                </View>
-                <Text style={styles.blockText}>Block A & B</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Exercises Preview List */}
-          <View style={styles.exercisesList}>
-            <View style={styles.exerciseItem}>
-              <View style={styles.exerciseIndexBox}>
-                <Text style={styles.exerciseIndexText}>1</Text>
-              </View>
-              <View style={styles.exerciseDetails}>
-                <Text style={styles.exerciseTitle}>Trap Bar Deadlift</Text>
-                <Text style={styles.exerciseType}>Main Compound Lift</Text>
-              </View>
-              <View style={styles.exerciseStats}>
-                <Text style={styles.exerciseSetsReps}>4 sets × 6 reps</Text>
-                <Text style={styles.exerciseLoad}>@ 140 kg</Text>
-              </View>
-            </View>
-
-            <View style={styles.exerciseItem}>
-              <View style={styles.exerciseIndexBox}>
-                <Text style={styles.exerciseIndexText}>2</Text>
-              </View>
-              <View style={styles.exerciseDetails}>
-                <Text style={styles.exerciseTitle}>Box Jumps</Text>
-                <Text style={styles.exerciseType}>Reactive Power</Text>
-              </View>
-              <View style={styles.exerciseStats}>
-                <Text style={styles.exerciseSetsReps}>3 sets × 5 reps</Text>
-                <Text style={styles.exerciseLoad}>Bodyweight • 30"</Text>
-              </View>
-            </View>
+            <Text
+              style={[
+                styles.timeTagText,
+                workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 && { color: '#059669', fontWeight: '800' },
+              ]}
+            >
+              {totalTodayDuration}
+            </Text>
           </View>
         </View>
 
-        {/* Track 2: Rehab & Prehab Track (Coral Accent) */}
-        <View style={styles.trackCard}>
-          <View style={styles.trackTopBar}>
-            <View style={styles.trackIndicatorRow}>
-              <View style={[styles.trackDot, { backgroundColor: KinetixTheme.colors.coral }]} />
-              <Text style={[styles.trackTrackTitle, { color: KinetixTheme.colors.coral }]}>
-                Rehab & Prehab Track
-              </Text>
-            </View>
-            <View style={[styles.trackDurationPill, { backgroundColor: KinetixTheme.colors.coralLight }]}>
-              <Text style={[styles.trackDurationText, { color: KinetixTheme.colors.coral }]}>
-                15 min • 3 exercises
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.trackBannerRow}>
-            <Image
-              source={{
-                uri: 'https://images.unsplash.com/photo-1574680096145-d05b474e2155?auto=format&fit=crop&w=200&q=80',
-              }}
-              style={styles.trackImage}
-            />
-            <View style={styles.trackBannerInfo}>
-              <Text style={styles.trackName}>Knee Recovery</Text>
-              <Text style={styles.trackDescription} numberOfLines={2}>
-                Patellar tendon isometric load & terminal extension
-              </Text>
-              <View style={styles.badgesRow}>
-                <View style={[styles.rpeBadge, { backgroundColor: KinetixTheme.colors.coralLight }]}>
-                  <Text style={[styles.rpeBadgeText, { color: KinetixTheme.colors.coral }]}>
-                    Tendon Health
-                  </Text>
-                </View>
-                <Text style={styles.blockText}>Prescribed Routine</Text>
+        {/* 1. Both Tracks Rest Day */}
+        {workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 && (
+          <View style={styles.restDayCard}>
+            <View style={styles.restDayHeader}>
+              <View style={styles.restDayIconBadge}>
+                <Ionicons name="sparkles" size={18} color="#059669" />
               </View>
-            </View>
-          </View>
-
-          {/* Exercises Preview List */}
-          <View style={styles.exercisesList}>
-            <View style={styles.exerciseItem}>
-              <View style={[styles.exerciseIndexBox, { backgroundColor: KinetixTheme.colors.coralLight }]}>
-                <Text style={[styles.exerciseIndexText, { color: KinetixTheme.colors.coral }]}>1</Text>
-              </View>
-              <View style={styles.exerciseDetails}>
-                <Text style={styles.exerciseTitle}>Spanish Squats</Text>
-                <Text style={styles.exerciseType}>Isometric Load</Text>
-              </View>
-              <View style={styles.exerciseStats}>
-                <Text style={[styles.exerciseSetsReps, { color: KinetixTheme.colors.coral }]}>
-                  3 sets × 45s
+              <View style={{ flex: 1 }}>
+                <Text style={styles.restDayTitle}>Active Recovery & Regeneration</Text>
+                <Text style={styles.restDaySub}>
+                  No prescribed session for {todayDayName} in {activeWorkoutPlan?.name || 'Active Plan'}
                 </Text>
-                <Text style={styles.exerciseLoad}>Static Hold</Text>
               </View>
             </View>
+            <Text style={styles.restDayBody}>
+              Tendon remodeling, neuromuscular adaptation, and systemic recovery happen on rest days.
+              Focus on hydration, mobility, and light movement.
+            </Text>
 
-            <View style={styles.exerciseItem}>
-              <View style={[styles.exerciseIndexBox, { backgroundColor: KinetixTheme.colors.coralLight }]}>
-                <Text style={[styles.exerciseIndexText, { color: KinetixTheme.colors.coral }]}>2</Text>
-              </View>
-              <View style={styles.exerciseDetails}>
-                <Text style={styles.exerciseTitle}>Terminal Knee Extension</Text>
-                <Text style={styles.exerciseType}>Band Resistance</Text>
-              </View>
-              <View style={styles.exerciseStats}>
-                <Text style={[styles.exerciseSetsReps, { color: KinetixTheme.colors.coral }]}>
-                  3 sets × 12 reps
+            {allUpcomingSessions.length > 0 && (
+              <TouchableOpacity
+                style={styles.trainAheadBtn}
+                onPress={() => {
+                  const firstUpcoming = allUpcomingSessions[0];
+                  const planObj = firstUpcoming.trackType === 'rehab' ? activeRehabPlan : activeWorkoutPlan;
+                  startSession(firstUpcoming.worksession, planObj);
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="flash-outline" size={15} color={KinetixTheme.colors.primary} />
+                <Text style={styles.trainAheadBtnText}>
+                  Train Next Session Early ({allUpcomingSessions[0].dayName})
                 </Text>
-                <Text style={styles.exerciseLoad}>@ 15 kg band</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* 2. Performance Track Rest Day (while Rehab is active) */}
+        {workoutSchedule.isRestDay && rehabSchedule.todaySessions.length > 0 && (
+          <View style={styles.restDayCardCompact}>
+            <View style={styles.restDayHeaderCompact}>
+              <View style={styles.restDayIconBadgeCompact}>
+                <Ionicons name="sparkles" size={16} color="#059669" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.restDayTitleCompact}>Performance Track: Recovery Day</Text>
+                <Text style={styles.restDaySubCompact}>
+                  Rest day in {activeWorkoutPlan?.name || 'Workout Plan'}. Complete your active rehab protocol below.
+                </Text>
               </View>
             </View>
           </View>
-        </View>
+        )}
 
-        {/* Primary Hub CTA: Start Workout Action Button */}
-        <TouchableOpacity
-          style={styles.startWorkoutButton}
-          onPress={() => startTodaySession('full')}
-          activeOpacity={0.88}
-        >
-          <View style={styles.ctaLeftContent}>
-            <View style={styles.ctaPlayCircle}>
-              <Ionicons name="play" size={22} color="#FFFFFF" />
+        {/* 3. Performance Track Today's Sessions */}
+        {!workoutSchedule.isRestDay &&
+          workoutSchedule.todaySessions.map((item, sIndex) =>
+            renderSessionCard(item, activeWorkoutPlan, false, `workout-${sIndex}`)
+          )}
+
+        {/* 4. Rehab Track Today's Sessions */}
+        {rehabSchedule.todaySessions.map((item, sIndex) =>
+          renderSessionCard(item, activeRehabPlan, true, `rehab-${sIndex}`)
+        )}
+
+        {/* Upcoming Training Sessions Section */}
+        {allUpcomingSessions.length > 0 && (
+          <View style={styles.upcomingSection}>
+            <View style={styles.upcomingHeaderRow}>
+              <View style={styles.upcomingTitleGroup}>
+                <Ionicons name="calendar-outline" size={16} color={KinetixTheme.colors.primary} />
+                <Text style={styles.upcomingSectionTitle}>
+                  Upcoming Training Sessions
+                </Text>
+              </View>
+              <Text style={styles.upcomingCountBadge}>
+                {allUpcomingSessions.length} {allUpcomingSessions.length === 1 ? 'SESSION' : 'SESSIONS'}
+              </Text>
             </View>
-            <View>
-              <Text style={styles.ctaTitle}>Start Workout</Text>
-              <Text style={styles.ctaSubtitle}>Strength & Knee Recovery Sequence</Text>
-            </View>
+
+            {allUpcomingSessions.map((item, idx) => {
+              const isRehab = item.trackType === 'rehab';
+              const planObj = isRehab ? activeRehabPlan : activeWorkoutPlan;
+              const themeColor = isRehab ? KinetixTheme.colors.coral : KinetixTheme.colors.primary;
+              const themeLight = isRehab ? KinetixTheme.colors.coralLight : KinetixTheme.colors.primaryLight;
+
+              return (
+                <TouchableOpacity
+                  key={`upcoming-${idx}`}
+                  style={styles.upcomingItemCard}
+                  activeOpacity={0.7}
+                  onPress={() => startSession(item.worksession, planObj)}
+                >
+                  <View style={[styles.upcomingDayBadge, isRehab && { backgroundColor: themeLight }]}>
+                    <Text style={[styles.upcomingDayText, isRehab && { color: themeColor }]}>
+                      {item.dayName.toUpperCase()}
+                    </Text>
+                  </View>
+
+                  <View style={styles.upcomingInfoCol}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <View style={[styles.trackPillSmall, { backgroundColor: isRehab ? themeLight : '#ECFDF5' }]}>
+                        <Text style={[styles.trackPillSmallText, { color: isRehab ? themeColor : '#059669' }]}>
+                          {isRehab ? 'REHAB' : 'WORKOUT'}
+                        </Text>
+                      </View>
+                      <Text style={styles.upcomingTitleText} numberOfLines={1}>
+                        {item.worksession.title}
+                      </Text>
+                    </View>
+                    <Text style={styles.upcomingMetaText} numberOfLines={1}>
+                      {item.modality} • {item.worksession.metrics?.duration || '35 min'} •{' '}
+                      {item.worksession.exercises?.length || 3} exercises
+                    </Text>
+                  </View>
+
+                  <View style={[styles.upcomingPlayBtn, isRehab && { backgroundColor: themeLight }]}>
+                    <Ionicons name="play" size={13} color={themeColor} />
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </View>
-          <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
-        </TouchableOpacity>
+        )}
 
-        <View style={{ height: 20 }} />
+        {/* Empty Sessions State */}
+        {resolvedWorkoutSessions.length === 0 && resolvedRehabSessions.length === 0 && (
+          <View style={styles.emptyPlanCard}>
+            <Ionicons name="barbell-outline" size={36} color={KinetixTheme.colors.textMuted} />
+            <Text style={styles.emptyPlanTitle}>No Sessions Attached</Text>
+            <Text style={styles.emptyPlanSubtitle}>
+              Neither your active workout plan nor your active rehab protocol has worksessions attached yet.
+              Choose another active plan or protocol in the Workouts tab.
+            </Text>
+            <TouchableOpacity
+              style={styles.emptyPlanChangeBtn}
+              onPress={() => router.push('/plans')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.emptyPlanChangeBtnText}>Browse Plans in Workouts</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={{ height: 24 }} />
       </ScrollView>
 
       {/* Persistent Bottom Nav */}
@@ -337,7 +1167,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: KinetixTheme.colors.border,
-    marginBottom: 20,
+    marginBottom: 16,
     ...KinetixTheme.shadows.card,
   },
   consistencyHeader: {
@@ -392,21 +1222,97 @@ const styles = StyleSheet.create({
     color: KinetixTheme.colors.textMuted,
   },
   metricValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
     color: KinetixTheme.colors.text,
     marginTop: 3,
-  },
-  metricUnit: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: KinetixTheme.colors.textMuted,
   },
   metricSub: {
     fontSize: 10,
     fontWeight: '600',
     color: KinetixTheme.colors.textMuted,
     marginTop: 2,
+  },
+  activePlansContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: KinetixTheme.borderRadius.xl,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    marginBottom: 20,
+    overflow: 'hidden',
+    ...KinetixTheme.shadows.card,
+  },
+  activePlanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+  },
+  activePlansDivider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    marginHorizontal: 14,
+  },
+  activePlanStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: KinetixTheme.borderRadius.xl,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    marginBottom: 20,
+    ...KinetixTheme.shadows.card,
+  },
+  activePlanInfoCol: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 10,
+  },
+  activePlanBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  activePlanIndicatorDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: KinetixTheme.colors.primary,
+  },
+  activePlanBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: KinetixTheme.colors.primary,
+    letterSpacing: 0.6,
+  },
+  activePlanNameText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: KinetixTheme.colors.text,
+    letterSpacing: -0.2,
+  },
+  activePlanScheduleMetaText: {
+    fontSize: 11,
+    color: KinetixTheme.colors.textMuted,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  activePlanStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: '#ECFDF5',
+    borderRadius: KinetixTheme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  activePlanStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#059669',
   },
   scheduleHeaderRow: {
     flexDirection: 'row',
@@ -431,13 +1337,101 @@ const styles = StyleSheet.create({
     color: KinetixTheme.colors.textMuted,
     letterSpacing: 0.5,
   },
+  restDayCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: KinetixTheme.borderRadius.xl,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    marginBottom: 20,
+    ...KinetixTheme.shadows.card,
+  },
+  restDayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  restDayIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restDayTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#065F46',
+  },
+  restDaySub: {
+    fontSize: 12,
+    color: '#047857',
+    fontWeight: '500',
+    marginTop: 1,
+  },
+  restDayBody: {
+    fontSize: 12,
+    color: '#334155',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  trainAheadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: KinetixTheme.colors.primaryLight,
+    paddingVertical: 10,
+    borderRadius: KinetixTheme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  trainAheadBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: KinetixTheme.colors.primary,
+  },
+  restDayCardCompact: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: KinetixTheme.borderRadius.lg,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    marginBottom: 16,
+  },
+  restDayHeaderCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  restDayIconBadgeCompact: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restDayTitleCompact: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#065F46',
+  },
+  restDaySubCompact: {
+    fontSize: 11,
+    color: '#047857',
+    fontWeight: '500',
+    marginTop: 1,
+  },
   trackCard: {
     backgroundColor: KinetixTheme.colors.surface,
     borderRadius: KinetixTheme.borderRadius.xl,
     padding: 16,
     borderWidth: 1,
     borderColor: KinetixTheme.colors.border,
-    marginBottom: 14,
+    marginBottom: 16,
     ...KinetixTheme.shadows.card,
   },
   trackTopBar: {
@@ -579,6 +1573,13 @@ const styles = StyleSheet.create({
     color: KinetixTheme.colors.textMuted,
     marginTop: 1,
   },
+  moreExercisesText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: KinetixTheme.colors.textMuted,
+    textAlign: 'center',
+    paddingVertical: 2,
+  },
   startWorkoutButton: {
     backgroundColor: KinetixTheme.colors.primary,
     borderRadius: KinetixTheme.borderRadius.xl,
@@ -587,24 +1588,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 4,
+    marginTop: 14,
     ...KinetixTheme.shadows.primaryGlow,
   },
   ctaLeftContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
+    minWidth: 0,
   },
   ctaPlayCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   ctaTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: -0.2,
@@ -614,5 +1617,126 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#DBEAFE',
     marginTop: 1,
+  },
+  upcomingSection: {
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  upcomingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  upcomingTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  upcomingSectionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: KinetixTheme.colors.text,
+    letterSpacing: -0.2,
+  },
+  upcomingCountBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: KinetixTheme.colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  upcomingItemCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: KinetixTheme.borderRadius.lg,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 8,
+    ...KinetixTheme.shadows.card,
+  },
+  upcomingDayBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginRight: 10,
+    minWidth: 54,
+    alignItems: 'center',
+  },
+  upcomingDayText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: KinetixTheme.colors.textSecondary,
+    letterSpacing: 0.4,
+  },
+  upcomingInfoCol: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
+  },
+  trackPillSmall: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  trackPillSmallText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  upcomingTitleText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: KinetixTheme.colors.text,
+  },
+  upcomingMetaText: {
+    fontSize: 11,
+    color: KinetixTheme.colors.textMuted,
+    marginTop: 2,
+  },
+  upcomingPlayBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: KinetixTheme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyPlanCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: KinetixTheme.borderRadius.xl,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: KinetixTheme.colors.border,
+    marginBottom: 16,
+  },
+  emptyPlanTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: KinetixTheme.colors.text,
+    marginTop: 10,
+  },
+  emptyPlanSubtitle: {
+    fontSize: 12,
+    color: KinetixTheme.colors.textMuted,
+    textAlign: 'center',
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  emptyPlanChangeBtn: {
+    marginTop: 14,
+    backgroundColor: KinetixTheme.colors.primary,
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: KinetixTheme.borderRadius.md,
+  },
+  emptyPlanChangeBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

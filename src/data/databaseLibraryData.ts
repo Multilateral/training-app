@@ -30,6 +30,23 @@ export interface DatabaseWorksessionCard {
   }[];
 }
 
+export interface DatabasePlanPhase {
+  id: string;
+  phase_order: number;
+  title: string;
+  description?: string;
+  required_sessions_to_pass?: number;
+  max_allowed_pain_score?: number;
+  worksessions: {
+    dayName: string;
+    worksessionId: string;
+    worksessionName: string;
+    modality?: string;
+    exerciseCount: number;
+    worksession?: DatabaseWorksessionCard | null;
+  }[];
+}
+
 export interface DatabasePlan {
   id: string;
   name: string;
@@ -37,6 +54,7 @@ export interface DatabasePlan {
   goal_category: string;
   description?: string;
   is_standard_template: boolean;
+  phases?: DatabasePlanPhase[];
   worksessions: {
     dayName: string;
     worksessionId: string;

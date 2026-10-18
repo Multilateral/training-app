@@ -9,16 +9,22 @@ import {
   Modal,
   ActivityIndicator,
   Platform,
+  Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { KinetixTheme } from '../constants/theme';
 import KinetixHeader from './KinetixHeader';
 import KinetixBottomNav from './KinetixBottomNav';
 import PlanBuilder from './PlanBuilder';
 import ExerciseVideoModal from './ExerciseVideoModal';
+import ExerciseEditorModal from './ExerciseEditorModal';
+import { getDeletedPlanIds } from '../services/planPersistence';
+import { enrollUserInProgram } from '../services/rehabProgressionService';
 import { TrainingContext, supabase } from '../context/TrainingContext';
+
+const ADMIN_EMAILS = ['condrea.vlad@gmail.com', 'condrea.vlad@icloud.com'];
 import {
   getExerciseInstructions,
   getExerciseDescription,
@@ -33,6 +39,7 @@ import {
   DATABASE_PLANS,
   DatabaseWorksessionCard,
   DatabasePlan,
+  DatabasePlanPhase,
 } from '../data/databaseLibraryData';
 
 export interface DatabaseExercise {
@@ -55,7 +62,8 @@ type TrackMode = 'workout' | 'rehab' | 'exercises' | 'edit';
 
 export default function KinetixLibrary() {
   const router = useRouter();
-  const { setActiveSessionMetadata, session } = useContext(TrainingContext) || {};
+  const { setActiveSessionMetadata, session, workspaces, updateWorkspaces } =
+    useContext(TrainingContext) || {};
   const [selectedTrack, setSelectedTrack] = useState<TrackMode>('workout');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<string>('all');
@@ -64,13 +72,304 @@ export default function KinetixLibrary() {
   // Worksessions & Plans from database (initialized with full database export)
   const [worksessions, setWorksessions] = useState<DatabaseWorksessionCard[]>(DATABASE_WORKSESSIONS);
   const [plans, setPlans] = useState<DatabasePlan[]>(DATABASE_PLANS);
+  const [deletedPlanIds, setDeletedPlanIds] = useState<string[]>([]);
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
+  const [activeWorkoutPlanId, setActiveWorkoutPlanId] = useState<string | null>(null);
+  const [activeRehabPlanId, setActiveRehabPlanId] = useState<string | null>(null);
+
+  const syncDeletedPlans = async () => {
+    try {
+      const ids = await getDeletedPlanIds();
+      setDeletedPlanIds(ids);
+      setPlans((prev) => prev.filter((p) => !ids.includes(p.id)));
+    } catch (e) {
+      console.warn('[KinetixLibrary] Error syncing deleted plans:', e);
+    }
+  };
+
+  // Sync active plan IDs from storage and workspaces
+  const syncActivePlans = async () => {
+    try {
+      const [storedWorkout, storedLegacy, storedRehab] = await Promise.all([
+        AsyncStorage.getItem('@active_workout_plan_id'),
+        AsyncStorage.getItem('@active_plan_id'),
+        AsyncStorage.getItem('@active_rehab_plan_id'),
+      ]);
+
+      // 1. Sync Workout Plan
+      const workoutCandidate =
+        workspaces?.activeWorkoutPlanId ||
+        workspaces?.defaultPlanId ||
+        workspaces?.activePlanId ||
+        storedWorkout ||
+        storedLegacy;
+
+      if (workoutCandidate) {
+        setActiveWorkoutPlanId(workoutCandidate);
+      } else {
+        const firstWorkout = DATABASE_PLANS.find(
+          (p) => !p.name.toLowerCase().includes('rehab') && !p.name.toLowerCase().includes('recovery')
+        );
+        if (firstWorkout) setActiveWorkoutPlanId(firstWorkout.id);
+      }
+
+      // 2. Sync Rehab Plan / Protocol
+      const rehabCandidate = workspaces?.activeRehabPlanId || storedRehab;
+      if (rehabCandidate) {
+        setActiveRehabPlanId(rehabCandidate);
+      } else {
+        const firstRehabWs = DATABASE_WORKSESSIONS.find((w) => w.type === 'rehab');
+        if (firstRehabWs) {
+          setActiveRehabPlanId(firstRehabWs.id);
+        } else {
+          const firstRehabPlan = DATABASE_PLANS.find(
+            (p) => p.name.toLowerCase().includes('rehab') || p.name.toLowerCase().includes('recovery')
+          );
+          if (firstRehabPlan) setActiveRehabPlanId(firstRehabPlan.id);
+        }
+      }
+    } catch (e) {
+      console.error('[KinetixLibrary] Error syncing active plans:', e);
+    }
+  };
+
+  useEffect(() => {
+    syncActivePlans();
+    syncDeletedPlans();
+  }, [
+    selectedTrack,
+    workspaces?.activeWorkoutPlanId,
+    workspaces?.defaultPlanId,
+    workspaces?.activePlanId,
+    workspaces?.activeRehabPlanId,
+  ]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      syncActivePlans();
+      syncDeletedPlans();
+    }, [
+      workspaces?.activeWorkoutPlanId,
+      workspaces?.defaultPlanId,
+      workspaces?.activePlanId,
+      workspaces?.activeRehabPlanId,
+    ])
+  );
+
+  const handleSetActiveWorkout = async (planOrWs: DatabasePlan | DatabaseWorksessionCard | string) => {
+    const planId = typeof planOrWs === 'string' ? planOrWs : planOrWs.id;
+    const planName =
+      typeof planOrWs === 'string'
+        ? plans.find((p) => p.id === planOrWs)?.name || worksessions.find((w) => w.id === planOrWs)?.title || 'Active Workout'
+        : 'name' in planOrWs
+        ? planOrWs.name
+        : planOrWs.title;
+
+    setActiveWorkoutPlanId(planId);
+
+    try {
+      await AsyncStorage.setItem('@active_workout_plan_id', planId);
+      await AsyncStorage.setItem('@active_plan_id', planId);
+      if (updateWorkspaces) {
+        await updateWorkspaces({
+          ...(workspaces || {}),
+          activeWorkoutPlanId: planId,
+          defaultPlanId: planId,
+          activePlanId: planId,
+          activePlanName: planName,
+        });
+      }
+    } catch (e) {
+      console.error('[KinetixLibrary] Failed to set active workout plan:', e);
+    }
+  };
+
+  const handleSetActiveRehab = async (planOrWs: DatabasePlan | DatabaseWorksessionCard | string) => {
+    const planId = typeof planOrWs === 'string' ? planOrWs : planOrWs.id;
+    const planName =
+      typeof planOrWs === 'string'
+        ? plans.find((p) => p.id === planOrWs)?.name || worksessions.find((w) => w.id === planOrWs)?.title || 'Active Rehab'
+        : 'name' in planOrWs
+        ? planOrWs.name
+        : planOrWs.title;
+
+    setActiveRehabPlanId(planId);
+
+    try {
+      await AsyncStorage.setItem('@active_rehab_plan_id', planId);
+      if (updateWorkspaces) {
+        await updateWorkspaces({
+          ...(workspaces || {}),
+          activeRehabPlanId: planId,
+          activeRehabPlanName: planName,
+        });
+      }
+
+      // If this is a multi-phase rehab program, enroll user in progression tracking
+      const targetPlan = typeof planOrWs === 'string' ? plans.find((p) => p.id === planOrWs) : ('phases' in planOrWs ? planOrWs : null);
+      if (targetPlan && targetPlan.phases && targetPlan.phases.length > 0) {
+        await enrollUserInProgram(planId, session?.user?.id);
+      }
+    } catch (e) {
+      console.error('[KinetixLibrary] Failed to set active rehab:', e);
+    }
+  };
 
   // Exercises from Database
   const [dbExercises, setDbExercises] = useState<DatabaseExercise[]>([]);
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
   const [expandedExerciseId, setExpandedExerciseId] = useState<string | null>(null);
   const [selectedVideoExercise, setSelectedVideoExercise] = useState<DatabaseExercise | null>(null);
+
+  // Exercise Create & Edit Modal State
+  const [isExerciseEditorVisible, setIsExerciseEditorVisible] = useState(false);
+  const [exerciseToEdit, setExerciseToEdit] = useState<DatabaseExercise | null>(null);
+  const [exerciseActionMenuTarget, setExerciseActionMenuTarget] = useState<DatabaseExercise | null>(null);
+
+  const userEmail = session?.user?.email?.toLowerCase();
+  const isAdmin = !!userEmail && ADMIN_EMAILS.includes(userEmail);
+
+  const handleOpenCreateExercise = () => {
+    setExerciseToEdit(null);
+    setIsExerciseEditorVisible(true);
+  };
+
+  const handleOpenEditExercise = (exercise: DatabaseExercise) => {
+    setExerciseToEdit(exercise);
+    setIsExerciseEditorVisible(true);
+  };
+
+  const handleSaveExercise = async (payload: Partial<DatabaseExercise>): Promise<boolean> => {
+    try {
+      if (payload.id) {
+        // Update existing exercise
+        const { data, error } = await supabase
+          .from('exercises')
+          .update({
+            name: payload.name,
+            category: payload.category,
+            muscle_group: payload.muscle_group,
+            equipment: payload.equipment,
+            tracking_type: payload.tracking_type,
+            difficulty: payload.difficulty,
+            mechanics: payload.mechanics,
+            instructions: payload.instructions,
+            description: payload.description,
+          })
+          .eq('id', payload.id)
+          .select()
+          .maybeSingle();
+
+        if (error) {
+          console.warn('[KinetixLibrary] Update exercise warning:', error.message);
+        }
+
+        const updated: DatabaseExercise = (data as DatabaseExercise) || ({
+          ...(dbExercises.find((e) => e.id === payload.id) || {}),
+          ...payload,
+        } as DatabaseExercise);
+
+        setDbExercises((prev) =>
+          prev.map((ex) => (ex.id === payload.id ? updated : ex))
+        );
+
+        if (Platform.OS !== 'web') {
+          const updatedList = dbExercises.map((ex) =>
+            ex.id === payload.id ? updated : ex
+          );
+          await AsyncStorage.setItem('@cached_db_exercises', JSON.stringify(updatedList)).catch(() => {});
+        }
+
+        Alert.alert('Exercise Updated', `"${payload.name}" has been updated.`);
+        return true;
+      } else {
+        // Create new exercise
+        const newRecord = {
+          name: payload.name?.trim() || 'Custom Exercise',
+          category: payload.category || 'Strength',
+          muscle_group: payload.muscle_group || 'General',
+          equipment: payload.equipment || 'Bodyweight',
+          tracking_type: payload.tracking_type || 'reps',
+          difficulty: payload.difficulty || 'Intermediate',
+          mechanics: payload.mechanics || 'Compound',
+          instructions: payload.instructions || '',
+          description: payload.description || '',
+          user_id: session?.user?.id || null,
+          is_default: isAdmin,
+        };
+
+        const { data, error } = await supabase
+          .from('exercises')
+          .insert([newRecord])
+          .select()
+          .maybeSingle();
+
+        let created: DatabaseExercise;
+        if (error || !data) {
+          console.warn('[KinetixLibrary] Insert exercise warning:', error?.message);
+          created = {
+            id: `custom-ex-${Date.now()}`,
+            ...newRecord,
+          };
+        } else {
+          created = data as DatabaseExercise;
+        }
+
+        setDbExercises((prev) => [created, ...prev]);
+
+        if (Platform.OS !== 'web') {
+          const updatedList = [created, ...dbExercises];
+          await AsyncStorage.setItem('@cached_db_exercises', JSON.stringify(updatedList)).catch(() => {});
+        }
+
+        Alert.alert('Exercise Created! 🎉', `"${payload.name}" has been added to your library.`);
+        return true;
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Could not save exercise.');
+      return false;
+    }
+  };
+
+  const handleDeleteExercise = async (exercise: DatabaseExercise): Promise<boolean> => {
+    if (exercise.is_default && !isAdmin) {
+      Alert.alert(
+        'Protected Exercise',
+        'Standard library exercises are protected and cannot be deleted. You can create your own custom exercises.'
+      );
+      return false;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('exercises')
+        .delete()
+        .eq('id', exercise.id);
+
+      if (error) {
+        if (error.code === '23503' || error.message.includes('foreign key')) {
+          Alert.alert(
+            'Cannot Delete Exercise',
+            `"${exercise.name}" is currently used in existing worksessions or plans. Please remove it from those sessions before deleting.`
+          );
+          return false;
+        }
+      }
+
+      setDbExercises((prev) => prev.filter((e) => e.id !== exercise.id));
+
+      if (Platform.OS !== 'web') {
+        const updatedList = dbExercises.filter((e) => e.id !== exercise.id);
+        await AsyncStorage.setItem('@cached_db_exercises', JSON.stringify(updatedList)).catch(() => {});
+      }
+
+      Alert.alert('Exercise Deleted', `"${exercise.name}" was removed from the library.`);
+      return true;
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to delete exercise.');
+      return false;
+    }
+  };
 
   // Fetch exercises and any newly updated worksessions/plans from Supabase on mount
   useEffect(() => {
@@ -176,6 +475,7 @@ export default function KinetixLibrary() {
         }
 
         // 3. Fetch live training plans if authenticated
+        let mappedUserPlans: DatabasePlan[] = [];
         try {
           const { data: userPlans, error: planErr } = await supabase
             .from('training_plans')
@@ -183,15 +483,70 @@ export default function KinetixLibrary() {
               id, name, schedule_type, goal_category, description, is_standard_template,
               plan_worksessions (
                 day_name, worksession_id,
-                worksessions (id, name, modality, description)
+                worksessions (
+                  id, name, modality, description,
+                  worksession_exercises (
+                    id, target_sets, target_reps, tracking_type, target_time, notes,
+                    exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics)
+                  )
+                )
               )
             `)
             .order('created_at', { ascending: false });
 
-          if (!planErr && userPlans && isMounted) {
-            const mappedUserPlans: DatabasePlan[] = userPlans.map((p: any) => {
+          if (!planErr && userPlans) {
+            mappedUserPlans = userPlans.map((p: any) => {
               const existing = DATABASE_PLANS.find((dp) => dp.id === p.id);
               if (existing) return existing;
+
+              const isRehab =
+                (p.name || '').toLowerCase().includes('rehab') ||
+                (p.name || '').toLowerCase().includes('recovery') ||
+                (p.goal_category || '').toLowerCase().includes('rehab');
+
+              const sessions = (p.plan_worksessions || []).map((pw: any) => {
+                const ws = pw.worksessions;
+                const exercises = (ws?.worksession_exercises || []).map((we: any) => ({
+                  name: we.exercises?.name || 'Exercise',
+                  cue: we.notes || we.exercises?.instructions || 'Controlled execution.',
+                  sets: we.target_sets || 3,
+                  reps: we.tracking_type === 'time' ? `${we.target_time || 45}s` : String(we.target_reps || 10),
+                  weight: 'Standard',
+                  restSeconds: 60,
+                  tracking_type: we.tracking_type || 'reps',
+                  equipment: we.exercises?.equipment || 'Bodyweight',
+                  muscle_group: we.exercises?.muscle_group || 'General',
+                  difficulty: we.exercises?.difficulty || 'Intermediate',
+                  mechanics: we.exercises?.mechanics || 'Compound',
+                  description: we.exercises?.description || null,
+                }));
+
+                const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
+                const fullWs: DatabaseWorksessionCard = {
+                  id: ws?.id || pw.worksession_id,
+                  type: isRehab ? 'rehab' : 'workout',
+                  category: ws?.modality || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
+                  title: ws?.name || 'Session',
+                  filterTag: isRehab ? 'knee' : 'core',
+                  description: ws?.description || '',
+                  metrics: {
+                    duration: `${Math.max(15, exercises.length * 8)} min`,
+                    sets: `${totalSets} Sets`,
+                    reps: exercises[0] ? String(exercises[0].reps) : '8-12',
+                    load: isRehab ? 'Light' : 'Moderate',
+                  },
+                  exercises,
+                };
+
+                return {
+                  dayName: pw.day_name || 'Day',
+                  worksessionId: pw.worksession_id,
+                  worksessionName: ws?.name || 'Session',
+                  modality: ws?.modality || 'General',
+                  exerciseCount: exercises.length || 3,
+                  worksession: fullWs,
+                };
+              });
 
               return {
                 id: p.id,
@@ -200,23 +555,153 @@ export default function KinetixLibrary() {
                 goal_category: p.goal_category || 'General',
                 description: p.description || '',
                 is_standard_template: p.is_standard_template || false,
-                worksessions: (p.plan_worksessions || []).map((pw: any) => ({
-                  dayName: pw.day_name || 'Day',
-                  worksessionId: pw.worksession_id,
-                  worksessionName: pw.worksessions?.name || 'Session',
-                  modality: pw.worksessions?.modality || 'General',
-                  exerciseCount: 3,
-                  worksession: null,
-                })),
+                worksessions: sessions,
               };
             });
-
-            const existingPlanIds = new Set(mappedUserPlans.map((p) => p.id));
-            const mergedPlans = [...mappedUserPlans, ...DATABASE_PLANS.filter((p) => !existingPlanIds.has(p.id))];
-            setPlans(mergedPlans);
           }
         } catch (pe) {
           console.error('[KinetixLibrary] Error fetching user training plans:', pe);
+        }
+
+        // 4. Fetch live rehab programs with phases and worksessions
+        let mappedRehabPrograms: DatabasePlan[] = [];
+        try {
+          const { data: rehabData, error: rehabErr } = await supabase
+            .from('rehab_programs')
+            .select(`
+              id, title, description, target_joint, estimated_weeks,
+              program_phases (
+                id, phase_order, title, description, required_sessions_to_pass, max_allowed_pain_score,
+                phase_worksessions (
+                  id, order_index, day_name, worksession_id
+                )
+              )
+            `)
+            .order('created_at', { ascending: false });
+
+          if (!rehabErr && rehabData) {
+            // Collect all unique worksession IDs across all phases
+            const wsIds: string[] = [];
+            rehabData.forEach((rp: any) => {
+              (rp.program_phases || []).forEach((ph: any) => {
+                (ph.phase_worksessions || []).forEach((pw: any) => {
+                  if (pw.worksession_id) wsIds.push(pw.worksession_id);
+                });
+              });
+            });
+
+            // Fetch worksessions in batch if any exist
+            const worksessionMap = new Map<string, any>();
+            if (wsIds.length > 0) {
+              const { data: wsList } = await supabase
+                .from('worksessions')
+                .select(`
+                  id, name, modality, description,
+                  worksession_exercises (
+                    id, target_sets, target_reps, tracking_type, target_time, notes,
+                    exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics)
+                  )
+                `)
+                .in('id', wsIds);
+
+              if (wsList) {
+                wsList.forEach((ws: any) => worksessionMap.set(ws.id, ws));
+              }
+            }
+
+            mappedRehabPrograms = rehabData.map((rp: any) => {
+              const sortedPhases = (rp.program_phases || []).sort(
+                (a: any, b: any) => a.phase_order - b.phase_order
+              );
+
+              const phases: DatabasePlanPhase[] = sortedPhases.map((ph: any) => {
+                const pwList = (ph.phase_worksessions || []).sort(
+                  (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+                );
+
+                const phaseSessions = pwList.map((pw: any, pIdx: number) => {
+                  const ws = worksessionMap.get(pw.worksession_id);
+                  const exercises = (ws?.worksession_exercises || []).map((we: any) => ({
+                    name: we.exercises?.name || 'Exercise',
+                    cue: we.notes || we.exercises?.instructions || 'Controlled execution.',
+                    sets: we.target_sets || 3,
+                    reps: we.tracking_type === 'time' ? `${we.target_time || 45}s` : String(we.target_reps || 10),
+                    weight: 'Standard',
+                    restSeconds: 60,
+                    tracking_type: we.tracking_type || 'reps',
+                    equipment: we.exercises?.equipment || 'Bodyweight',
+                    muscle_group: we.exercises?.muscle_group || 'General',
+                    difficulty: we.exercises?.difficulty || 'Intermediate',
+                    mechanics: we.exercises?.mechanics || 'Compound',
+                    description: we.exercises?.description || null,
+                  }));
+
+                  const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
+                  const fullWs: DatabaseWorksessionCard = {
+                    id: ws?.id || pw.worksession_id,
+                    type: 'rehab',
+                    category: ws?.modality || 'Clinical Rehab',
+                    title: ws?.name || `Phase ${ph.phase_order} Session ${pIdx + 1}`,
+                    filterTag: 'knee',
+                    description: ws?.description || '',
+                    metrics: {
+                      duration: `${Math.max(15, exercises.length * 8)} min`,
+                      sets: `${totalSets} Sets`,
+                      reps: exercises[0] ? String(exercises[0].reps) : '8-12',
+                      load: 'Light',
+                    },
+                    exercises,
+                  };
+
+                  return {
+                    dayName: pw.day_name || `Phase ${ph.phase_order} - Session ${pIdx + 1}`,
+                    worksessionId: ws?.id || pw.worksession_id,
+                    worksessionName: ws?.name || 'Rehab Session',
+                    modality: ws?.modality || 'Clinical Rehab',
+                    exerciseCount: exercises.length || 3,
+                    worksession: fullWs,
+                  };
+                });
+
+                return {
+                  id: ph.id,
+                  phase_order: ph.phase_order,
+                  title: ph.title,
+                  description: ph.description || '',
+                  required_sessions_to_pass: ph.required_sessions_to_pass,
+                  max_allowed_pain_score: Number(ph.max_allowed_pain_score),
+                  worksessions: phaseSessions,
+                };
+              });
+
+              const allWorksessions = phases.flatMap((ph) => ph.worksessions);
+
+              return {
+                id: rp.id,
+                name: rp.title,
+                schedule_type: 'criteria_progression',
+                goal_category: rp.target_joint ? `Rehab (${rp.target_joint})` : 'Clinical Rehab',
+                description: rp.description || '',
+                is_standard_template: false,
+                phases,
+                worksessions: allWorksessions,
+              };
+            });
+          }
+        } catch (rErr) {
+          console.error('[KinetixLibrary] Error fetching user rehab programs:', rErr);
+        }
+
+        if (isMounted) {
+          const allFetched = [...mappedRehabPrograms, ...mappedUserPlans];
+          const deletedIds = await getDeletedPlanIds();
+          setDeletedPlanIds(deletedIds);
+          const existingPlanIds = new Set(allFetched.map((p) => p.id));
+          const mergedPlans = [
+            ...allFetched,
+            ...DATABASE_PLANS.filter((p) => !existingPlanIds.has(p.id)),
+          ].filter((p) => !deletedIds.includes(p.id));
+          setPlans(mergedPlans);
         }
       }
     };
@@ -283,6 +768,8 @@ export default function KinetixLibrary() {
 
   // Filter plans based on track
   const filteredPlans = plans.filter((plan) => {
+    if (deletedPlanIds.includes(plan.id)) return false;
+
     const isRehabPlan =
       plan.name.toLowerCase().includes('rehab') ||
       plan.name.toLowerCase().includes('recovery') ||
@@ -740,24 +1227,38 @@ export default function KinetixLibrary() {
             {(activeFilter === 'all' || activeFilter === 'plans') && filteredPlans.length > 0 && (
               <View style={styles.plansSectionContainer}>
                 <View style={styles.sectionHeaderRow}>
-                  <Ionicons
-                    name="layers-outline"
-                    size={16}
-                    color={selectedTrack === 'rehab' ? KinetixTheme.colors.secondary : '#7C3AED'}
-                  />
-                  <Text style={styles.sectionHeaderTitle}>
-                    {selectedTrack === 'rehab' ? 'REHABILITATION & RECOVERY PROGRAMS' : 'TRAINING & WORKOUT PROGRAMS'} ({filteredPlans.length})
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                    <Ionicons
+                      name="layers-outline"
+                      size={16}
+                      color={selectedTrack === 'rehab' ? KinetixTheme.colors.secondary : '#7C3AED'}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.sectionHeaderTitle}>
+                        {selectedTrack === 'rehab' ? 'REHABILITATION & RECOVERY PROGRAMS' : 'TRAINING & WORKOUT PROGRAMS'} ({filteredPlans.length})
+                      </Text>
+                      <Text style={{ fontSize: 11, color: KinetixTheme.colors.textMuted, marginTop: 1 }}>
+                        {selectedTrack === 'rehab'
+                          ? 'Multi-phase clinical protocols with criteria progression gates'
+                          : 'Structured multi-day training programs & weekly splits'}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
 
                 {filteredPlans.map((plan) => {
                   const isExpanded = expandedCardId === plan.id;
-                  const isRehab = plan.name.toLowerCase().includes('rehab') || plan.name.toLowerCase().includes('recovery');
+                  const isRehab = plan.name.toLowerCase().includes('rehab') || plan.name.toLowerCase().includes('recovery') || plan.goal_category?.toLowerCase().includes('rehab');
                   const themeColor = isRehab ? KinetixTheme.colors.secondary : '#7C3AED';
                   const themeLight = isRehab ? KinetixTheme.colors.secondaryLight : '#F5F3FF';
+                  const hasPhases = Boolean(plan.phases && plan.phases.length > 0);
+
+                  const isActivePlan = isRehab
+                    ? plan.id === activeRehabPlanId || workspaces?.activeRehabPlanId === plan.id
+                    : plan.id === activeWorkoutPlanId || workspaces?.activeWorkoutPlanId === plan.id || workspaces?.defaultPlanId === plan.id || workspaces?.activePlanId === plan.id;
 
                   return (
-                    <View key={plan.id} style={[styles.card, styles.planCardBorder]}>
+                    <View key={plan.id} style={[styles.card, styles.planCardBorder, isActivePlan && { borderColor: themeColor }]}>
                       <TouchableOpacity
                         onPress={() => toggleCardExpand(plan.id)}
                         activeOpacity={0.8}
@@ -765,9 +1266,21 @@ export default function KinetixLibrary() {
                       >
                         <View style={styles.cardTitleCol}>
                           <View style={styles.cardBadgeRow}>
+                            {isActivePlan && (
+                              <View style={[styles.typeBadge, { backgroundColor: isRehab ? '#FFF1F2' : '#ECFDF5', borderColor: isRehab ? '#FECDD3' : '#A7F3D0', borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                                <Ionicons name="checkmark-circle" size={11} color={themeColor} />
+                                <Text style={{ color: themeColor, fontSize: 10, fontWeight: '800' }}>
+                                  {isRehab ? 'ACTIVE REHAB ON DASHBOARD' : 'ACTIVE ON DASHBOARD'}
+                                </Text>
+                              </View>
+                            )}
                             <View style={[styles.typeBadge, { backgroundColor: themeLight }]}>
                               <Text style={[styles.typeBadgeText, { color: themeColor }]}>
-                                {plan.schedule_type === 'anchored' ? 'ANCHORED PLAN' : 'TRAINING PLAN'}
+                                {hasPhases
+                                  ? `${plan.phases!.length} PHASES • CRITERIA GATED`
+                                  : plan.schedule_type === 'anchored'
+                                  ? 'ANCHORED PLAN'
+                                  : 'TRAINING PLAN'}
                               </Text>
                             </View>
                             <Text style={styles.cardCategory}>{plan.goal_category || 'Goal Program'}</Text>
@@ -790,61 +1303,233 @@ export default function KinetixLibrary() {
                       {/* Plan Summary Row */}
                       <View style={styles.metricsRow}>
                         <View style={styles.metricCol}>
-                          <Text style={styles.metricLabel}>Sessions</Text>
-                          <Text style={styles.metricVal}>{plan.worksessions.length} Days</Text>
-                        </View>
-                        <View style={styles.metricCol}>
-                          <Text style={styles.metricLabel}>Schedule</Text>
+                          <Text style={styles.metricLabel}>{hasPhases ? 'Phases' : 'Sessions'}</Text>
                           <Text style={styles.metricVal}>
-                            {plan.schedule_type === 'anchored' ? 'Weekly' : 'Flexible'}
+                            {hasPhases ? `${plan.phases!.length} Phases` : `${plan.worksessions.length} Days`}
                           </Text>
                         </View>
                         <View style={styles.metricCol}>
-                          <Text style={styles.metricLabel}>Goal</Text>
+                          <Text style={styles.metricLabel}>{hasPhases ? 'Sessions' : 'Schedule'}</Text>
+                          <Text style={styles.metricVal}>
+                            {hasPhases
+                              ? `${plan.worksessions.length} Total`
+                              : plan.schedule_type === 'anchored'
+                              ? 'Weekly'
+                              : 'Flexible'}
+                          </Text>
+                        </View>
+                        <View style={styles.metricCol}>
+                          <Text style={styles.metricLabel}>{hasPhases ? 'Progression' : 'Goal'}</Text>
                           <Text style={[styles.metricVal, { color: themeColor }]} numberOfLines={1}>
-                            {plan.goal_category || 'Athlete'}
+                            {hasPhases ? 'Pain Gated' : plan.goal_category || 'Athlete'}
                           </Text>
                         </View>
                       </View>
 
-                      {/* Plan Days / Worksessions List */}
+                      {/* Active Selection Action Row (Always visible directly on the card) */}
+                      <View style={styles.planCardActionRow}>
+                        {isActivePlan ? (
+                          <View style={[styles.planActiveIndicatorBar, isRehab && { backgroundColor: '#FFF1F2', borderColor: '#FECDD3' }]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="checkmark-circle" size={16} color={themeColor} />
+                              <Text style={[styles.planActiveIndicatorText, isRehab && { color: themeColor }]}>
+                                {isRehab ? 'Active Rehab Plan on Dashboard' : 'Active Workout Plan on Dashboard'}
+                              </Text>
+                            </View>
+                            <View style={[styles.planActivePill, isRehab && { backgroundColor: themeColor }]}>
+                              <Text style={styles.planActivePillText}>ACTIVE</Text>
+                            </View>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.planSetActiveBtn}
+                            onPress={() => isRehab ? handleSetActiveRehab(plan) : handleSetActiveWorkout(plan)}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="radio-button-off-outline" size={16} color={themeColor} />
+                            <Text style={styles.planSetActiveBtnText}>
+                              {isRehab ? 'Set as Active Rehab Plan' : 'Set as Active Workout Plan'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      {/* Plan Days / Worksessions List (or Phases if present) */}
                       {isExpanded && (
                         <View style={styles.expandedDrawer}>
-                          <View style={styles.drawerHeaderRow}>
-                            <Ionicons name="calendar-outline" size={14} color={KinetixTheme.colors.textMuted} />
-                            <Text style={styles.drawerHeaderTitle}>
-                              PLAN SESSIONS & WORKOUTS
-                            </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                            <View style={styles.drawerHeaderRow}>
+                              <Ionicons
+                                name={hasPhases ? 'git-network-outline' : 'calendar-outline'}
+                                size={14}
+                                color={KinetixTheme.colors.textMuted}
+                              />
+                              <Text style={styles.drawerHeaderTitle}>
+                                {hasPhases ? `PROGRAM PHASES & WORKSESSIONS (${plan.phases!.length} PHASES)` : 'PLAN SESSIONS & WORKOUTS'}
+                              </Text>
+                            </View>
+                            {!isActivePlan ? (
+                              <TouchableOpacity
+                                style={[styles.drawerSetActiveBtn, isRehab && { backgroundColor: KinetixTheme.colors.secondaryLight }]}
+                                onPress={() => isRehab ? handleSetActiveRehab(plan) : handleSetActiveWorkout(plan)}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="checkmark-circle-outline" size={13} color={themeColor} />
+                                <Text style={[styles.drawerSetActiveBtnText, isRehab && { color: themeColor }]}>
+                                  Set Active
+                                </Text>
+                              </TouchableOpacity>
+                            ) : (
+                              <View style={styles.drawerActiveStatusRow}>
+                                <Ionicons name="checkmark-circle" size={14} color={themeColor} />
+                                <Text style={[styles.drawerActiveStatusText, isRehab && { color: themeColor }]}>
+                                  Active on Dashboard
+                                </Text>
+                              </View>
+                            )}
                           </View>
 
-                          {plan.worksessions.map((sessionItem, sIdx) => {
-                            const wsCard =
-                              sessionItem.worksession ||
-                              worksessions.find((w) => w.id === sessionItem.worksessionId) ||
-                              null;
-                            return (
-                              <View key={sIdx} style={styles.planSessionRow}>
-                                <View style={{ flex: 1, paddingRight: 8 }}>
-                                  <Text style={styles.planSessionDayText}>{sessionItem.dayName}</Text>
-                                  <Text style={styles.planSessionNameText}>{sessionItem.worksessionName}</Text>
-                                  <Text style={styles.planSessionSubText}>
-                                    {sessionItem.modality || 'Strength'} • {sessionItem.exerciseCount} exercises
-                                  </Text>
-                                </View>
+                          {/* Phased Program Breakdown */}
+                          {hasPhases ? (
+                            <View style={{ gap: 10 }}>
+                              {plan.phases!.map((phase) => (
+                                <View
+                                  key={phase.id}
+                                  style={{
+                                    backgroundColor: '#FFFFFF',
+                                    borderRadius: 10,
+                                    padding: 12,
+                                    borderWidth: 1,
+                                    borderColor: '#E2E8F0',
+                                  }}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                                      <View style={{ backgroundColor: themeLight, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '800', color: themeColor }}>
+                                          PHASE {phase.phase_order}
+                                        </Text>
+                                      </View>
+                                      <Text style={{ fontSize: 13, fontWeight: '700', color: KinetixTheme.colors.text, flex: 1 }} numberOfLines={1}>
+                                        {phase.title}
+                                      </Text>
+                                    </View>
+                                  </View>
 
-                                {wsCard ? (
-                                  <TouchableOpacity
-                                    style={[styles.smallPlayBtn, { backgroundColor: themeColor }]}
-                                    onPress={() => startWorksession(wsCard, plan.name)}
-                                    activeOpacity={0.7}
-                                  >
-                                    <Ionicons name="play" size={14} color="#FFFFFF" />
-                                    <Text style={styles.smallPlayBtnText}>Start</Text>
-                                  </TouchableOpacity>
-                                ) : null}
-                              </View>
-                            );
-                          })}
+                                  {(phase.required_sessions_to_pass || phase.max_allowed_pain_score !== undefined) && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, marginBottom: 8 }}>
+                                      <Text style={{ fontSize: 11, color: KinetixTheme.colors.textMuted, fontWeight: '600' }}>
+                                        🎯 {phase.required_sessions_to_pass || 6} sessions to pass
+                                      </Text>
+                                      <Text style={{ fontSize: 11, color: '#CBD5E1' }}>•</Text>
+                                      <Text style={{ fontSize: 11, color: KinetixTheme.colors.textMuted, fontWeight: '600' }}>
+                                        🛡️ Max Pain ≤ {phase.max_allowed_pain_score ?? 4.0}
+                                      </Text>
+                                    </View>
+                                  )}
+
+                                  {phase.worksessions && phase.worksessions.length > 0 ? (
+                                    phase.worksessions.map((sessionItem, sIdx) => {
+                                      const wsCard =
+                                        sessionItem.worksession ||
+                                        worksessions.find((w) => w.id === sessionItem.worksessionId) ||
+                                        null;
+                                      return (
+                                        <View
+                                          key={sIdx}
+                                          style={[
+                                            styles.planSessionRow,
+                                            { marginTop: 6 },
+                                          ]}
+                                        >
+                                          <View style={{ flex: 1, paddingRight: 8 }}>
+                                            <Text style={[styles.planSessionDayText, { color: themeColor }]}>
+                                              {sessionItem.dayName}
+                                            </Text>
+                                            <Text style={styles.planSessionNameText}>{sessionItem.worksessionName}</Text>
+                                            <Text style={styles.planSessionSubText}>
+                                              {sessionItem.modality || 'Clinical Rehab'} • {sessionItem.exerciseCount} exercises
+                                            </Text>
+                                          </View>
+                                          {wsCard ? (
+                                            <TouchableOpacity
+                                              style={[styles.smallPlayBtn, { backgroundColor: themeColor }]}
+                                              onPress={() => startWorksession(wsCard, `${plan.name} (${phase.title})`)}
+                                              activeOpacity={0.7}
+                                            >
+                                              <Ionicons name="play" size={14} color="#FFFFFF" />
+                                              <Text style={styles.smallPlayBtnText}>Start</Text>
+                                            </TouchableOpacity>
+                                          ) : null}
+                                        </View>
+                                      );
+                                    })
+                                  ) : (
+                                    <Text style={{ fontSize: 12, color: KinetixTheme.colors.textMuted, fontStyle: 'italic', marginTop: 4 }}>
+                                      No worksessions configured for this phase yet.
+                                    </Text>
+                                  )}
+                                </View>
+                              ))}
+
+                              {/* Action button to open criteria progression dashboard */}
+                              {isRehab && (
+                                <TouchableOpacity
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 6,
+                                    backgroundColor: '#FFF1F2',
+                                    borderWidth: 1,
+                                    borderColor: '#FECDD3',
+                                    paddingVertical: 10,
+                                    borderRadius: 8,
+                                    marginTop: 6,
+                                  }}
+                                  onPress={() => router.push('/rehab-program')}
+                                  activeOpacity={0.8}
+                                >
+                                  <Ionicons name="shield-checkmark" size={16} color={themeColor} />
+                                  <Text style={{ color: themeColor, fontSize: 12, fontWeight: '800' }}>
+                                    Open Criteria Progression Roadmap
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          ) : (
+                            /* Flat plan worksessions list for unphased training plans */
+                            plan.worksessions.map((sessionItem, sIdx) => {
+                              const wsCard =
+                                sessionItem.worksession ||
+                                worksessions.find((w) => w.id === sessionItem.worksessionId) ||
+                                null;
+                              return (
+                                <View key={sIdx} style={styles.planSessionRow}>
+                                  <View style={{ flex: 1, paddingRight: 8 }}>
+                                    <Text style={[styles.planSessionDayText, isRehab && { color: themeColor }]}>
+                                      {sessionItem.dayName}
+                                    </Text>
+                                    <Text style={styles.planSessionNameText}>{sessionItem.worksessionName}</Text>
+                                    <Text style={styles.planSessionSubText}>
+                                      {sessionItem.modality || 'Strength'} • {sessionItem.exerciseCount} exercises
+                                    </Text>
+                                  </View>
+
+                                  {wsCard ? (
+                                    <TouchableOpacity
+                                      style={[styles.smallPlayBtn, { backgroundColor: themeColor }]}
+                                      onPress={() => startWorksession(wsCard, plan.name)}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Ionicons name="play" size={14} color="#FFFFFF" />
+                                      <Text style={styles.smallPlayBtnText}>Start</Text>
+                                    </TouchableOpacity>
+                                  ) : null}
+                                </View>
+                              );
+                            })
+                          )}
                         </View>
                       )}
                     </View>
@@ -857,14 +1542,23 @@ export default function KinetixLibrary() {
             {activeFilter !== 'plans' && filteredWorksessions.length > 0 && (
               <View style={[styles.plansSectionContainer, { marginTop: (activeFilter === 'all' && filteredPlans.length > 0) ? 14 : 4 }]}>
                 <View style={styles.sectionHeaderRow}>
-                  <Ionicons
-                    name={selectedTrack === 'rehab' ? 'medkit-outline' : 'barbell-outline'}
-                    size={16}
-                    color={selectedTrack === 'rehab' ? KinetixTheme.colors.secondary : KinetixTheme.colors.primary}
-                  />
-                  <Text style={styles.sectionHeaderTitle}>
-                    {selectedTrack === 'rehab' ? 'INDIVIDUAL REHAB PROTOCOLS' : 'INDIVIDUAL WORKSESSIONS'} ({filteredWorksessions.length})
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                    <Ionicons
+                      name={selectedTrack === 'rehab' ? 'medkit-outline' : 'barbell-outline'}
+                      size={16}
+                      color={selectedTrack === 'rehab' ? KinetixTheme.colors.secondary : KinetixTheme.colors.primary}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.sectionHeaderTitle}>
+                        {selectedTrack === 'rehab' ? 'INDIVIDUAL REHAB PROTOCOLS' : 'INDIVIDUAL WORKSESSIONS'} ({filteredWorksessions.length})
+                      </Text>
+                      <Text style={{ fontSize: 11, color: KinetixTheme.colors.textMuted, marginTop: 1 }}>
+                        {selectedTrack === 'rehab'
+                          ? 'Single, standalone rehab protocols directly from the database'
+                          : 'Single, standalone worksessions directly from the database'}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
 
                 {filteredWorksessions.map((ws) => {
@@ -873,8 +1567,12 @@ export default function KinetixLibrary() {
                   const themeLight = isRehab ? KinetixTheme.colors.secondaryLight : KinetixTheme.colors.primaryLight;
                   const isExpanded = expandedCardId === ws.id;
 
+                  const isActiveWs = isRehab
+                    ? ws.id === activeRehabPlanId || workspaces?.activeRehabPlanId === ws.id
+                    : ws.id === activeWorkoutPlanId || workspaces?.activeWorkoutPlanId === ws.id;
+
                   return (
-                    <View key={ws.id} style={styles.card}>
+                    <View key={ws.id} style={[styles.card, isActiveWs && { borderColor: themeColor, borderWidth: 1.5 }]}>
                       <TouchableOpacity
                         onPress={() => toggleCardExpand(ws.id)}
                         activeOpacity={0.8}
@@ -882,6 +1580,14 @@ export default function KinetixLibrary() {
                       >
                         <View style={styles.cardTitleCol}>
                           <View style={styles.cardBadgeRow}>
+                            {isActiveWs && (
+                              <View style={[styles.typeBadge, { backgroundColor: isRehab ? '#FFF1F2' : '#ECFDF5', borderColor: isRehab ? '#FECDD3' : '#A7F3D0', borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                                <Ionicons name="checkmark-circle" size={11} color={themeColor} />
+                                <Text style={{ color: themeColor, fontSize: 10, fontWeight: '800' }}>
+                                  {isRehab ? 'ACTIVE REHAB' : 'ACTIVE ON DASHBOARD'}
+                                </Text>
+                              </View>
+                            )}
                             <View style={[styles.typeBadge, { backgroundColor: themeLight }]}>
                               <Text style={[styles.typeBadgeText, { color: themeColor }]}>
                                 {ws.type}
@@ -932,14 +1638,63 @@ export default function KinetixLibrary() {
                         </View>
                       </View>
 
+                      {/* Active Selection Action Row for Worksessions / Protocols */}
+                      <View style={styles.planCardActionRow}>
+                        {isActiveWs ? (
+                          <View style={[styles.planActiveIndicatorBar, isRehab && { backgroundColor: '#FFF1F2', borderColor: '#FECDD3' }]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="checkmark-circle" size={16} color={themeColor} />
+                              <Text style={[styles.planActiveIndicatorText, isRehab && { color: themeColor }]}>
+                                {isRehab ? 'Active Rehab Protocol on Dashboard' : 'Active Workout on Dashboard'}
+                              </Text>
+                            </View>
+                            <View style={[styles.planActivePill, isRehab && { backgroundColor: themeColor }]}>
+                              <Text style={styles.planActivePillText}>ACTIVE</Text>
+                            </View>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.planSetActiveBtn}
+                            onPress={() => isRehab ? handleSetActiveRehab(ws) : handleSetActiveWorkout(ws)}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="radio-button-off-outline" size={16} color={themeColor} />
+                            <Text style={styles.planSetActiveBtnText}>
+                              {isRehab ? 'Set as Active Rehab Protocol' : 'Set as Active Workout'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
                       {/* Exercises Drawer (Tap card to expand) */}
                       {isExpanded && ws.exercises && ws.exercises.length > 0 && (
                         <View style={styles.expandedDrawer}>
-                          <View style={styles.drawerHeaderRow}>
-                            <Ionicons name="list" size={14} color={KinetixTheme.colors.textMuted} />
-                            <Text style={styles.drawerHeaderTitle}>
-                              EXERCISE SEQUENCE ({ws.exercises.length} MOVES)
-                            </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <View style={styles.drawerHeaderRow}>
+                              <Ionicons name="list" size={14} color={KinetixTheme.colors.textMuted} />
+                              <Text style={styles.drawerHeaderTitle}>
+                                EXERCISE SEQUENCE ({ws.exercises.length} MOVES)
+                              </Text>
+                            </View>
+                            {!isActiveWs ? (
+                              <TouchableOpacity
+                                style={[styles.drawerSetActiveBtn, isRehab && { backgroundColor: KinetixTheme.colors.secondaryLight }]}
+                                onPress={() => isRehab ? handleSetActiveRehab(ws) : handleSetActiveWorkout(ws)}
+                                activeOpacity={0.7}
+                              >
+                                <Ionicons name="checkmark-circle-outline" size={13} color={themeColor} />
+                                <Text style={[styles.drawerSetActiveBtnText, isRehab && { color: themeColor }]}>
+                                  {isRehab ? 'Set Active Rehab' : 'Set Active'}
+                                </Text>
+                              </TouchableOpacity>
+                            ) : (
+                              <View style={styles.drawerActiveStatusRow}>
+                                <Ionicons name="checkmark-circle" size={14} color={themeColor} />
+                                <Text style={[styles.drawerActiveStatusText, isRehab && { color: themeColor }]}>
+                                  {isRehab ? 'Active Rehab' : 'Active'}
+                                </Text>
+                              </View>
+                            )}
                           </View>
 
                           {ws.exercises.map((ex, idx) => (
@@ -1002,13 +1757,43 @@ export default function KinetixLibrary() {
         {selectedTrack === 'exercises' && (
           <View style={styles.cardsList}>
             <View style={styles.resultsHeaderRow}>
-              <Text style={styles.resultsCountText}>
-                Showing <Text style={{ fontWeight: '800', color: KinetixTheme.colors.text }}>{filteredExercises.length}</Text> of {dbExercises.length} database exercises
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.resultsCountText}>
+                  Showing <Text style={{ fontWeight: '800', color: KinetixTheme.colors.text }}>{filteredExercises.length}</Text> of {dbExercises.length} database exercises
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.newExerciseHeaderBtn}
+                onPress={handleOpenCreateExercise}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="add" size={15} color="#FFFFFF" />
+                <Text style={styles.newExerciseHeaderBtnText}>+ New Exercise</Text>
+              </TouchableOpacity>
               {isLoadingExercises && (
-                <ActivityIndicator size="small" color={KinetixTheme.colors.primary} />
+                <ActivityIndicator size="small" color={KinetixTheme.colors.primary} style={{ marginLeft: 6 }} />
               )}
             </View>
+
+            {/* Quick Create Exercise Hero Banner */}
+            <TouchableOpacity
+              style={styles.quickCreateExerciseCard}
+              onPress={handleOpenCreateExercise}
+              activeOpacity={0.85}
+            >
+              <View style={styles.quickCreateIconWrap}>
+                <Ionicons name="add" size={20} color="#2563EB" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.quickCreateTitle}>Create Custom Exercise</Text>
+                <Text style={styles.quickCreateSub}>
+                  Quickly add new movements with cues & tracking without building a plan
+                </Text>
+              </View>
+              <View style={styles.quickCreateArrowBadge}>
+                <Ionicons name="arrow-forward" size={14} color="#2563EB" />
+              </View>
+            </TouchableOpacity>
 
             {filteredExercises.map((exercise) => {
               const isExpanded = expandedExerciseId === exercise.id;
@@ -1090,13 +1875,23 @@ export default function KinetixLibrary() {
                     </View>
 
                     <View style={styles.exerciseActionCol}>
-                      <TouchableOpacity
-                        style={styles.quickPlayBtn}
-                        onPress={() => startSingleExercise(exercise)}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons name="play" size={16} color="#FFFFFF" />
-                      </TouchableOpacity>
+                      <View style={styles.exerciseButtonsRow}>
+                        <TouchableOpacity
+                          style={styles.quickPlayBtn}
+                          onPress={() => startSingleExercise(exercise)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="play" size={15} color="#FFFFFF" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.quickOptionsBtn}
+                          onPress={() => setExerciseActionMenuTarget(exercise)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="ellipsis-vertical" size={15} color="#475569" />
+                        </TouchableOpacity>
+                      </View>
 
                       <Ionicons
                         name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -1178,6 +1973,23 @@ export default function KinetixLibrary() {
                             <Text style={styles.secondaryActionBtnText}>Watch Demo</Text>
                           </TouchableOpacity>
                         ) : null}
+
+                        <TouchableOpacity
+                          style={styles.drawerEditBtn}
+                          onPress={() => handleOpenEditExercise(exercise)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="create-outline" size={16} color="#2563EB" />
+                          <Text style={styles.drawerEditBtnText}>Edit</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.drawerDeleteBtn}
+                          onPress={() => handleDeleteExercise(exercise)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                        </TouchableOpacity>
                       </View>
                     </View>
                   )}
@@ -1210,7 +2022,15 @@ export default function KinetixLibrary() {
         {/* ========================================================= */}
         {selectedTrack === 'edit' && (
           <View style={{ flex: 1, marginTop: 4 }}>
-            <PlanBuilder isEmbedded={true} />
+            <PlanBuilder
+              isEmbedded={true}
+              defaultPlanId={activeWorkoutPlanId}
+              onSetDefaultPlan={handleSetActiveWorkout}
+              onPlanDeleted={(deletedId) => {
+                setDeletedPlanIds((prev) => [...prev, deletedId]);
+                setPlans((prev) => prev.filter((p) => p.id !== deletedId));
+              }}
+            />
           </View>
         )}
 
@@ -1243,9 +2063,99 @@ export default function KinetixLibrary() {
               <Ionicons name="close" size={22} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
-          <PlanBuilder onSetDefaultPlan={() => {}} defaultPlanId={null} />
+          <PlanBuilder
+            onSetDefaultPlan={handleSetActiveWorkout}
+            defaultPlanId={activeWorkoutPlanId}
+            onPlanDeleted={(deletedId) => {
+              setDeletedPlanIds((prev) => [...prev, deletedId]);
+              setPlans((prev) => prev.filter((p) => p.id !== deletedId));
+            }}
+          />
         </View>
       </Modal>
+
+      {/* Exercise Create & Edit Modal */}
+      <ExerciseEditorModal
+        visible={isExerciseEditorVisible}
+        onClose={() => setIsExerciseEditorVisible(false)}
+        exercise={exerciseToEdit}
+        onSave={handleSaveExercise}
+        onDelete={handleDeleteExercise}
+        isAdmin={isAdmin}
+      />
+
+      {/* Exercise Options Action Menu Modal */}
+      {exerciseActionMenuTarget && (
+        <Modal
+          visible={!!exerciseActionMenuTarget}
+          animationType="fade"
+          transparent={true}
+          onRequestClose={() => setExerciseActionMenuTarget(null)}
+        >
+          <TouchableOpacity
+            style={styles.actionMenuOverlay}
+            activeOpacity={1}
+            onPress={() => setExerciseActionMenuTarget(null)}
+          >
+            <View style={styles.actionMenuCard}>
+              <View style={styles.actionMenuHeader}>
+                <Text style={styles.actionMenuTitle} numberOfLines={1}>
+                  {exerciseActionMenuTarget.name}
+                </Text>
+                <Text style={styles.actionMenuSubtitle}>
+                  {exerciseActionMenuTarget.category} • {exerciseActionMenuTarget.equipment || 'Bodyweight'}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.actionMenuItem}
+                onPress={() => {
+                  const target = exerciseActionMenuTarget;
+                  setExerciseActionMenuTarget(null);
+                  handleOpenEditExercise(target);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionMenuIconCircle, { backgroundColor: '#EFF6FF' }]}>
+                  <Ionicons name="create-outline" size={18} color="#2563EB" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.actionMenuItemTitle}>Edit Exercise</Text>
+                  <Text style={styles.actionMenuItemSub}>Modify parameters, tracking, or cues</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionMenuItem}
+                onPress={() => {
+                  const target = exerciseActionMenuTarget;
+                  setExerciseActionMenuTarget(null);
+                  handleDeleteExercise(target);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionMenuIconCircle, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.actionMenuItemTitle, { color: '#EF4444' }]}>Delete Exercise</Text>
+                  <Text style={styles.actionMenuItemSub}>Permanently remove from library</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionMenuCancelBtn}
+                onPress={() => setExerciseActionMenuTarget(null)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.actionMenuCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
 
       {/* Bottom Navigation */}
       <KinetixBottomNav activeTab="workouts" />
@@ -1552,6 +2462,78 @@ const styles = StyleSheet.create({
   planCardBorder: {
     borderLeftWidth: 4,
     borderLeftColor: '#7C3AED',
+  },
+  planCardActionRow: {
+    marginTop: 12,
+  },
+  planActiveIndicatorBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: KinetixTheme.borderRadius.md,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+  },
+  planActiveIndicatorText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  planActivePill: {
+    backgroundColor: '#059669',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  planActivePillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  planSetActiveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: KinetixTheme.borderRadius.md,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+  },
+  planSetActiveBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: KinetixTheme.colors.text,
+  },
+  drawerSetActiveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: KinetixTheme.colors.primaryLight,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  drawerSetActiveBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: KinetixTheme.colors.primary,
+  },
+  drawerActiveStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  drawerActiveStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
   },
   planSessionRow: {
     flexDirection: 'row',
@@ -1924,5 +2906,172 @@ const styles = StyleSheet.create({
   },
   closeModalBtn: {
     padding: 4,
+  },
+
+  /* Exercise Actions & Creation Styles */
+  newExerciseHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  newExerciseHeaderBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  quickCreateExerciseCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
+    marginBottom: 12,
+  },
+  quickCreateIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickCreateTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1E3A8A',
+  },
+  quickCreateSub: {
+    fontSize: 11,
+    color: '#3B82F6',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  quickCreateArrowBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  exerciseButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  quickOptionsBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: KinetixTheme.borderRadius.md,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  drawerEditBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  drawerDeleteBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 40,
+    height: 40,
+    borderRadius: KinetixTheme.borderRadius.md,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+
+  /* Action Menu Modal */
+  actionMenuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    justifyContent: 'flex-end',
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+  },
+  actionMenuCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 16,
+    gap: 8,
+    ...KinetixTheme.shadows.card,
+  },
+  actionMenuHeader: {
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  actionMenuTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: KinetixTheme.colors.text,
+  },
+  actionMenuSubtitle: {
+    fontSize: 12,
+    color: KinetixTheme.colors.textMuted,
+    marginTop: 2,
+  },
+  actionMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
+  actionMenuIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionMenuItemTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: KinetixTheme.colors.text,
+  },
+  actionMenuItemSub: {
+    fontSize: 11,
+    color: KinetixTheme.colors.textMuted,
+    marginTop: 1,
+  },
+  actionMenuCancelBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 4,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+  },
+  actionMenuCancelText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
   },
 });

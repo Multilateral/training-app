@@ -5,6 +5,8 @@ import { supabase } from '../context/TrainingContext';
 import { View, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+
 export default function Layout() {
   const [session, setSession] = useState<any>(null);
   const [isReady, setIsReady] = useState(false);
@@ -42,17 +44,21 @@ export default function Layout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <TrainingProvider session={session}>
-        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-          <Stack.Screen name="index" options={{ title: 'Today' }} />
-          <Stack.Screen name="plans" options={{ title: 'Workouts' }} />
-          <Stack.Screen name="history" options={{ title: 'Progress' }} />
-          <Stack.Screen name="active-workout" options={{ title: 'Active Workout' }} />
-          <Stack.Screen name="settings" options={{ title: 'Settings', headerShown: true }} />
-          <Stack.Screen name="auth" options={{ headerShown: false, animation: 'none' }} />
-        </Stack>
-      </TrainingProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <TrainingProvider session={session}>
+          <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+            <Stack.Screen name="index" options={{ title: 'Today' }} />
+            <Stack.Screen name="plans" options={{ title: 'Workouts' }} />
+            <Stack.Screen name="history" options={{ title: 'Progress' }} />
+            <Stack.Screen name="active-workout" options={{ title: 'Active Workout' }} />
+            <Stack.Screen name="rehab-program" options={{ title: 'Rehab Progression' }} />
+            <Stack.Screen name="program-builder" options={{ title: 'Program Builder' }} />
+            <Stack.Screen name="settings" options={{ title: 'Settings', headerShown: true }} />
+            <Stack.Screen name="auth" options={{ headerShown: false, animation: 'none' }} />
+          </Stack>
+        </TrainingProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

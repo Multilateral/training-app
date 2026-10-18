@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useKeepAwake } from 'expo-keep-awake';
 import { KinetixTheme } from '../constants/theme';
 import ExerciseVideoModal from './ExerciseVideoModal';
 import KinetixBottomNav from './KinetixBottomNav';
@@ -21,6 +22,8 @@ import KinetixHeader from './KinetixHeader';
 import { TrainingContext } from '../context/TrainingContext';
 import { DATABASE_WORKSESSIONS } from '../data/databaseLibraryData';
 import { getExerciseTrackingType } from '../data/recoveryMetadata';
+import { useWorkoutPlayer, PlayerExercise } from '../hooks/useWorkoutPlayer';
+import GuidedCounterCard from './active-workout/GuidedCounterCard';
 
 interface ExerciseData {
   id?: string;
@@ -109,6 +112,11 @@ export default function KinetixActiveWorkout({
   const hasActiveSession = Boolean(
     activeSessionMetadata?.isActive || worksession?.exercises?.length
   );
+
+  useKeepAwake();
+
+  // Dual-Mode Training State (Manual mode by default)
+  const [isGuidedMode, setIsGuidedMode] = useState<boolean>(false);
 
   // Active workout states
   const [currentSessionName, setCurrentSessionName] = useState<string>(
@@ -308,30 +316,7 @@ export default function KinetixActiveWorkout({
     setTotalRestTarget((prev) => Math.max(prev, restSecondsLeft + seconds));
   };
 
-  // Active Rest countdown interval
-  useEffect(() => {
-    let interval: any = null;
-    if (isResting && restSecondsLeft > 0 && !isPaused) {
-      interval = setInterval(() => {
-        setRestSecondsLeft((prev) => {
-          if (prev <= 1) {
-            setIsResting(false);
-            triggerToast({
-              type: 'set_completed',
-              title: 'Rest Finished! ⚡',
-              subtitle: `Ready for Set ${currentSet} of ${currentEx?.name || 'Exercise'}`,
-              badgeText: 'TIME TO LIFT',
-            });
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isResting, restSecondsLeft, isPaused, currentSet, currentEx?.name]);
+
 
   // Formatting helpers for workout duration and timestamps
   const formatWorkoutDuration = (totalSeconds: number) => {
@@ -382,22 +367,7 @@ export default function KinetixActiveWorkout({
     }
   }, [hasActiveSession, currentSessionName, currentExIndex, currentSet, currentDockLoad, currentEx?.name, workoutStartTime]);
 
-  // Timer effect
-  useEffect(() => {
-    let interval: any = null;
-    if (timerRunning && !isPaused && holdSeconds > 0) {
-      interval = setInterval(() => {
-        setHoldSeconds((prev) => {
-          if (prev <= 1) {
-            setTimerRunning(false);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [timerRunning, isPaused, holdSeconds]);
+
 
   // Auto-adapt tracking metrics whenever current exercise changes
   useEffect(() => {
@@ -569,9 +539,115 @@ export default function KinetixActiveWorkout({
     }
   };
 
+  // Guided Training State Machine Hook
+  const player = useWorkoutPlayer({
+    exercises: currentExercises as PlayerExercise[],
+    leadInDurationSeconds: 5,
+    initialExerciseIndex: currentExIndex,
+    initialSetIndex: Math.max(0, currentSet - 1),
+    onSetCompleted: (log) => {
+      const completedSetNum = log.setNumber;
+      const totalSetsForEx = currentEx?.totalSets || 4;
+
+      triggerToast({
+        type: 'set_completed',
+        title: `Set ${completedSetNum} Logged! ✓`,
+        subtitle: `Next: Set ${Math.min(totalSetsForEx, completedSetNum + 1)} of ${totalSetsForEx} · ${currentEx?.restSeconds || 60}s Rest`,
+        badgeText: `SET ${completedSetNum}/${totalSetsForEx}`,
+      });
+    },
+    onWorkoutCompleted: () => {
+      triggerFinish();
+    },
+  });
+
+  // Bi-directional synchronization: Guided Player -> Active Workout Screen
+  useEffect(() => {
+    if (isGuidedMode) {
+      if (player.currentExerciseIndex !== currentExIndex) {
+        setCurrentExIndex(player.currentExerciseIndex);
+      }
+      if (player.currentSet !== currentSet) {
+        setCurrentSet(player.currentSet);
+      }
+    }
+  }, [isGuidedMode, player.currentExerciseIndex, player.currentSet]);
+
+  // Active Rest countdown interval for manual workout mode
+  useEffect(() => {
+    let interval: any = null;
+    if (isResting && restSecondsLeft > 0 && !isPaused) {
+      interval = setInterval(() => {
+        setRestSecondsLeft((prev) => {
+          if (prev <= 1) {
+            setIsResting(false);
+            player.triggerHaptic('heavy');
+            player.playSound('chime');
+            triggerToast({
+              type: 'set_completed',
+              title: 'Rest Finished! ⚡',
+              subtitle: `Ready for Set ${currentSet} of ${currentEx?.name || 'Exercise'}`,
+              badgeText: 'TIME TO LIFT',
+            });
+            return 0;
+          }
+          if (prev <= 4 && prev > 1) {
+            player.triggerHaptic('light');
+            player.playSound('pip');
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isResting, restSecondsLeft, isPaused, currentSet, currentEx?.name, player]);
+
+  // Manual mode isometric hold countdown timer interval with auditory and tactile cues
+  useEffect(() => {
+    let interval: any = null;
+    if (timerRunning && !isPaused && holdSeconds > 0) {
+      interval = setInterval(() => {
+        setHoldSeconds((prev) => {
+          if (prev <= 1) {
+            setTimerRunning(false);
+            player.triggerHaptic('success');
+            player.playSound('chime');
+            return 0;
+          }
+          if (prev <= 4 && prev > 1) {
+            player.triggerHaptic('light');
+            player.playSound('pip');
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [timerRunning, isPaused, holdSeconds, player]);
+
+  const handleToggleMode = (enableGuided: boolean) => {
+    if (enableGuided) {
+      player.syncPosition(currentExIndex, Math.max(0, currentSet - 1));
+      setIsGuidedMode(true);
+    } else {
+      if (player.isActive) {
+        player.pause();
+      }
+      setIsGuidedMode(false);
+    }
+  };
+
   const handleCompleteSet = () => {
     const totalSetsForEx = currentEx?.totalSets || 4;
     const restDuration = currentEx?.restSeconds || 60;
+
+    // Audible and tactile feedback on set completion
+    player.triggerHaptic('success');
+    player.playSound('chime');
 
     if (currentSet < totalSetsForEx) {
       const completedSetNum = currentSet;
@@ -1033,8 +1109,78 @@ export default function KinetixActiveWorkout({
           </TouchableOpacity>
         </View>
 
-        {/* Adaptive Counter Display Card - Switches automatically based on current exercise type */}
-        <View style={styles.counterCard}>
+        {/* Mode Switcher Pill: Manual Log vs Guided Trainer */}
+        <View style={styles.modeToggleRow}>
+          <View style={styles.modeSegmentedContainer}>
+            <TouchableOpacity
+              style={[styles.modeTab, !isGuidedMode && styles.modeTabActive]}
+              onPress={() => handleToggleMode(false)}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="create-outline"
+                size={14}
+                color={!isGuidedMode ? '#FFFFFF' : KinetixTheme.colors.textSecondary}
+              />
+              <Text style={[styles.modeTabText, !isGuidedMode && styles.modeTabTextActive]}>
+                Manual Log
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modeTab, isGuidedMode && styles.modeTabActiveGuided]}
+              onPress={() => handleToggleMode(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="play"
+                size={13}
+                color={isGuidedMode ? '#FFFFFF' : KinetixTheme.colors.primary}
+              />
+              <Text style={[styles.modeTabText, isGuidedMode && styles.modeTabTextActive]}>
+                Guided Trainer
+              </Text>
+              <View style={styles.guidedLiveBadge}>
+                <Text style={styles.guidedLiveBadgeText}>AUTO</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Dynamic Training Counter: Guided vs Adaptive Manual Counter */}
+        {isGuidedMode ? (
+          <GuidedCounterCard
+            state={player.state}
+            isPaused={player.isPaused}
+            currentExercise={player.currentExercise}
+            currentSet={player.currentSet}
+            totalSets={player.totalSets}
+            currentExerciseIndex={player.currentExerciseIndex}
+            totalExercises={player.totalExercises}
+            trackingType={player.trackingType}
+            secondsRemaining={player.secondsRemaining}
+            progress={player.progress}
+            targetReps={player.targetReps}
+            targetWeight={player.targetWeight}
+            targetDurationSeconds={player.targetDurationSeconds}
+            targetRestSeconds={player.targetRestSeconds}
+            actualReps={player.actualReps}
+            setActualReps={player.setActualReps}
+            actualWeight={player.actualWeight}
+            setActualWeight={player.setActualWeight}
+            isAudioMuted={player.isAudioMuted}
+            setIsAudioMuted={player.setIsAudioMuted}
+            startGuidedSet={player.startGuidedSet}
+            pause={player.pause}
+            resume={player.resume}
+            skipLeadIn={player.skipLeadIn}
+            completeWorkSet={player.completeWorkSet}
+            skipRest={player.skipRest}
+            addRestSeconds={player.addRestSeconds}
+            onOpenTargetModal={handleOpenTargetModal}
+          />
+        ) : (
+          <View style={styles.counterCard}>
           {/* View 1: Duration / Isometric View */}
           {activeMode === 'duration' && (
             <View style={styles.durationView}>
@@ -1062,7 +1208,7 @@ export default function KinetixActiveWorkout({
                 onPress={() => setTimerRunning(!timerRunning)}
                 activeOpacity={0.8}
               >
-                <Text style={styles.clockDigits}>{formatTimer(holdSeconds)}</Text>
+                <Text style={styles.clockDigits} numberOfLines={1}>{formatTimer(holdSeconds)}</Text>
                 <Text style={styles.clockSecLabel}>SEC</Text>
                 <Text style={styles.clockSubText}>{currentEx?.name} Isometric Hold</Text>
                 <View style={styles.clockProgressBar}>
@@ -1227,6 +1373,7 @@ export default function KinetixActiveWorkout({
             </View>
           )}
         </View>
+        )}
 
         {/* Essential Athlete Metrics Dock */}
         <View style={styles.metricsDock}>
@@ -1260,43 +1407,78 @@ export default function KinetixActiveWorkout({
 
         {/* Action Control Dock */}
         <View style={styles.actionDock}>
-          <TouchableOpacity
-            style={styles.mainActionBtn}
-            onPress={handleCompleteSet}
-            activeOpacity={0.88}
-          >
-            <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
-            <Text style={styles.mainActionBtnText}>Complete Set</Text>
-          </TouchableOpacity>
+          {!isGuidedMode ? (
+            <>
+              <TouchableOpacity
+                style={styles.mainActionBtn}
+                onPress={handleCompleteSet}
+                activeOpacity={0.88}
+              >
+                <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
+                <Text style={styles.mainActionBtnText}>Complete Set</Text>
+              </TouchableOpacity>
 
-          <View style={styles.subActionRow}>
-            <TouchableOpacity
-              style={styles.subActionBtn}
-              onPress={() => setIsPaused(!isPaused)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name={isPaused ? 'play' : 'pause'} size={18} color={KinetixTheme.colors.text} />
-              <Text style={styles.subActionBtnText}>{isPaused ? 'Resume' : 'Pause'}</Text>
-            </TouchableOpacity>
+              <View style={styles.subActionRow}>
+                <TouchableOpacity
+                  style={styles.subActionBtn}
+                  onPress={() => setIsPaused(!isPaused)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name={isPaused ? 'play' : 'pause'} size={18} color={KinetixTheme.colors.text} />
+                  <Text style={styles.subActionBtnText}>{isPaused ? 'Resume' : 'Pause'}</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.subActionBtn}
-              onPress={handleSkipSet}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="play-skip-forward" size={18} color={KinetixTheme.colors.text} />
-              <Text style={styles.subActionBtnText}>Skip Set</Text>
-            </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.subActionBtn}
+                  onPress={handleSkipSet}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="play-skip-forward" size={18} color={KinetixTheme.colors.text} />
+                  <Text style={styles.subActionBtnText}>Skip Set</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.subActionBtn, styles.finishActionBtn]}
-              onPress={triggerFinish}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="flag-outline" size={18} color={KinetixTheme.colors.primary} />
-              <Text style={[styles.subActionBtnText, { color: KinetixTheme.colors.primary, fontWeight: '700' }]}>Finish</Text>
-            </TouchableOpacity>
-          </View>
+                <TouchableOpacity
+                  style={[styles.subActionBtn, styles.finishActionBtn]}
+                  onPress={triggerFinish}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="flag-outline" size={18} color={KinetixTheme.colors.primary} />
+                  <Text style={[styles.subActionBtnText, { color: KinetixTheme.colors.primary, fontWeight: '700' }]}>Finish</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <View style={styles.subActionRow}>
+              <TouchableOpacity
+                style={styles.subActionBtn}
+                onPress={player.isPaused ? player.resume : player.pause}
+                activeOpacity={0.7}
+              >
+                <Ionicons name={player.isPaused ? 'play' : 'pause'} size={18} color={KinetixTheme.colors.text} />
+                <Text style={styles.subActionBtnText}>{player.isPaused ? 'Resume' : 'Pause'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.subActionBtn}
+                onPress={() => {
+                  player.nextExercise();
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="play-skip-forward" size={18} color={KinetixTheme.colors.text} />
+                <Text style={styles.subActionBtnText}>Next Ex</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.subActionBtn, styles.finishActionBtn]}
+                onPress={triggerFinish}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="flag-outline" size={18} color={KinetixTheme.colors.primary} />
+                <Text style={[styles.subActionBtnText, { color: KinetixTheme.colors.primary, fontWeight: '700' }]}>Finish</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Workout Sequence List */}
@@ -2329,6 +2511,66 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...KinetixTheme.shadows.card,
   },
+  modeToggleRow: {
+    marginBottom: 14,
+    width: '100%',
+  },
+  modeSegmentedContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 24,
+    padding: 3,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    width: '100%',
+  },
+  modeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    gap: 6,
+  },
+  modeTabActive: {
+    backgroundColor: KinetixTheme.colors.text,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  modeTabActiveGuided: {
+    backgroundColor: KinetixTheme.colors.primary,
+    shadowColor: KinetixTheme.colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  modeTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: KinetixTheme.colors.textSecondary,
+  },
+  modeTabTextActive: {
+    color: '#FFFFFF',
+  },
+  guidedLiveBadge: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    marginLeft: 2,
+  },
+  guidedLiveBadgeText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
   counterCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: KinetixTheme.borderRadius.xl,
@@ -2382,7 +2624,10 @@ const styles = StyleSheet.create({
     fontSize: 48,
     fontWeight: '900',
     color: KinetixTheme.colors.text,
-    letterSpacing: -1,
+    fontVariant: ['tabular-nums'],
+    textAlign: 'center',
+    includeFontPadding: false,
+    letterSpacing: 0.5,
   },
   clockSecLabel: {
     fontSize: 11,
