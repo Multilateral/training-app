@@ -38,13 +38,11 @@
           "imageWidth": 76
         }
       ],
-      "expo-notifications",
       "expo-video",
       "expo-audio",
       "expo-asset",
       "expo-image",
       "expo-web-browser",
-      "expo-pedometer",
       "expo-sharing",
       "expo-secure-store"
     ],
