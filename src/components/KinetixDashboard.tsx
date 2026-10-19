@@ -82,7 +82,25 @@ export default function KinetixDashboard() {
   const [selectedWorkoutPlanId, setSelectedWorkoutPlanId] = useState<string | null>(null);
   const [selectedRehabId, setSelectedRehabId] = useState<string | null>(null);
 
-  const athleteName = session?.user?.user_metadata?.full_name || 'Alex';
+  const athleteName = useMemo(() => {
+    const rawName =
+      session?.user?.user_metadata?.full_name ||
+      session?.user?.user_metadata?.name ||
+      session?.user?.user_metadata?.username;
+
+    if (rawName && typeof rawName === 'string' && rawName.trim()) {
+      return rawName.trim().split(' ')[0];
+    }
+
+    if (session?.user?.email) {
+      const emailPrefix = session.user.email.split('@')[0];
+      const clean = emailPrefix.split(/[._-]/)[0];
+      return clean.charAt(0).toUpperCase() + clean.slice(1);
+    }
+
+    return 'Athlete';
+  }, [session?.user]);
+
   const todayDate = new Date();
   const todayFormatted = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
@@ -90,6 +108,13 @@ export default function KinetixDashboard() {
     day: 'numeric',
   }).format(todayDate);
   const todayDayName = todayDate.toLocaleDateString('en-US', { weekday: 'long' });
+
+  const greetingTimeOfDay = useMemo(() => {
+    const hour = todayDate.getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  }, [todayDate]);
 
   // 1. Sync active workout plan and active rehab plan IDs
   const syncActivePlans = async () => {
@@ -863,7 +888,7 @@ export default function KinetixDashboard() {
       >
         {/* Athlete Greeting & Live Date */}
         <View style={styles.greetingSection}>
-          <Text style={styles.greetingSub}>Good morning, {athleteName}</Text>
+          <Text style={styles.greetingSub}>{greetingTimeOfDay}, {athleteName}</Text>
           <Text style={styles.greetingDate}>{todayFormatted}</Text>
         </View>
 
