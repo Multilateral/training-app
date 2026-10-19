@@ -17,7 +17,7 @@ import {
 
 export default function ActiveWorkoutScreen() {
   const router = useRouter();
-  const { logWorkout, session } = useContext(TrainingContext) || {};
+  const { logWorkout, session, activeSessionMetadata } = useContext(TrainingContext) || {};
   const { sessionId, plan, worksession } = useLocalSearchParams();
 
   const [showPainModal, setShowPainModal] = useState<boolean>(false);
@@ -40,6 +40,14 @@ export default function ActiveWorkoutScreen() {
     if (typeof worksession === 'string') parsedWorksession = JSON.parse(worksession);
   } catch (e) {
     console.error('Failed to parse params', e);
+  }
+
+  // Restore worksession & plan from activeSessionMetadata when returning to screen without route params
+  if (!parsedWorksession && activeSessionMetadata?.worksession) {
+    parsedWorksession = activeSessionMetadata.worksession;
+  }
+  if (!parsedPlan && activeSessionMetadata?.plan) {
+    parsedPlan = activeSessionMetadata.plan;
   }
 
   const handleFinish = async (durationMins?: number, summary?: any) => {

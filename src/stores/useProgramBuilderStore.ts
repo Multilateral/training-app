@@ -601,7 +601,7 @@ export const useProgramBuilderStore = create<ProgramBuilderState>((set, get) => 
 
         const worksessions: BuilderWorksession[] = sortedWs.map((pw: any, wIdx: number) => {
           const ws = pw.worksessions || {};
-          const weList = ws.worksession_exercises || [];
+          const weList = [...(ws.worksession_exercises || [])].sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
           const exercises: BuilderExercise[] = weList.map((we: any, eIdx: number) => {
             const ex = we.exercises || {};
             const isHold =
@@ -694,7 +694,7 @@ export const useProgramBuilderStore = create<ProgramBuilderState>((set, get) => 
     const pwList = plan.plan_worksessions || [];
     const worksessions: BuilderWorksession[] = pwList.map((pw: any, wIdx: number) => {
       const ws = pw.worksessions || {};
-      const weList = ws.worksession_exercises || [];
+      const weList = [...(ws.worksession_exercises || [])].sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
       const exercises: BuilderExercise[] = weList.map((we: any, eIdx: number) => {
         const ex = we.exercises || {};
         const isHold =

@@ -488,7 +488,7 @@ export default function KinetixLibrary() {
             .select(`
               id, name, modality, description, created_at,
               worksession_exercises (
-                id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
+                id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
                 exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
               )
             `)
@@ -505,7 +505,10 @@ export default function KinetixLibrary() {
                 (ws.name || '').toLowerCase().includes('recovery') ||
                 (ws.modality || '').toLowerCase().includes('rehab');
 
-              const exercises = (ws.worksession_exercises || []).map(mapDbWorksessionExercise);
+              const exercises = (ws.worksession_exercises || [])
+                .slice()
+                .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                .map(mapDbWorksessionExercise);
 
               const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
               return {
@@ -546,7 +549,7 @@ export default function KinetixLibrary() {
                 worksessions (
                   id, name, modality, description,
                   worksession_exercises (
-                    id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
+                    id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
                     exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
                   )
                 )
@@ -566,7 +569,10 @@ export default function KinetixLibrary() {
 
               const sessions = (p.plan_worksessions || []).map((pw: any) => {
                 const ws = pw.worksessions;
-                const exercises = (ws?.worksession_exercises || []).map(mapDbWorksessionExercise);
+                const exercises = (ws?.worksession_exercises || [])
+                  .slice()
+                  .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                  .map(mapDbWorksessionExercise);
 
                 const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
                 const fullWs: DatabaseWorksessionCard = {
@@ -645,7 +651,7 @@ export default function KinetixLibrary() {
                 .select(`
                   id, name, modality, description,
                   worksession_exercises (
-                    id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
+                    id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
                     exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
                   )
                 `)
@@ -668,7 +674,10 @@ export default function KinetixLibrary() {
 
                 const phaseSessions = pwList.map((pw: any, pIdx: number) => {
                   const ws = worksessionMap.get(pw.worksession_id);
-                  const exercises = (ws?.worksession_exercises || []).map(mapDbWorksessionExercise);
+                  const exercises = (ws?.worksession_exercises || [])
+                    .slice()
+                    .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                    .map(mapDbWorksessionExercise);
 
                   const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
                   const fullWs: DatabaseWorksessionCard = {

@@ -38,6 +38,7 @@ export interface WorksessionExercise {
   worksession_id: string;
   exercise_id: string;
   target_sets: number;
+  order_index?: number | null;
   target_reps?: number | null;
   tracking_type?: TrackingType | string;
   target_time?: number | null;

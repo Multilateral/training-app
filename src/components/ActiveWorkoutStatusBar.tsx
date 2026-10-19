@@ -14,7 +14,7 @@ import { TrainingContext } from '../context/TrainingContext';
 export default function ActiveWorkoutStatusBar() {
   const router = useRouter();
   const pathname = usePathname();
-  const { activeSessionMetadata, setActiveSessionMetadata } = useContext(TrainingContext) || {};
+  const { activeSessionMetadata } = useContext(TrainingContext) || {};
 
   // Pulse animation for the live recording indicator
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -53,9 +53,37 @@ export default function ActiveWorkoutStatusBar() {
     return () => clearInterval(interval);
   }, [startTime]);
 
+  // Rest and Paused states
+  const isResting = Boolean(
+    activeSessionMetadata?.guidedPlayerState === 'RESTING' ||
+    activeSessionMetadata?.manualIsResting
+  );
+  const isPaused = Boolean(
+    activeSessionMetadata?.guidedPlayerState === 'PAUSED' ||
+    activeSessionMetadata?.wasAutoPaused ||
+    activeSessionMetadata?.isPaused
+  );
+  const restEndTime = activeSessionMetadata?.guidedEndTime || activeSessionMetadata?.manualRestEndTime || null;
+
+  const [restSecsRemaining, setRestSecsRemaining] = useState<number>(() => {
+    if (restEndTime && restEndTime > Date.now()) {
+      return Math.ceil((restEndTime - Date.now()) / 1000);
+    }
+    return activeSessionMetadata?.guidedSecondsRemaining || activeSessionMetadata?.manualRestSecondsLeft || 0;
+  });
+
+  useEffect(() => {
+    if (!isResting || !restEndTime) return;
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((restEndTime - Date.now()) / 1000));
+      setRestSecsRemaining(remaining);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isResting, restEndTime]);
+
   const formatDuration = (totalSeconds: number) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
+    const mins = Math.floor(Math.max(0, totalSeconds) / 60);
+    const secs = Math.max(0, totalSeconds) % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -64,48 +92,89 @@ export default function ActiveWorkoutStatusBar() {
     return null;
   }
 
-  const exerciseName = activeSessionMetadata.currentExerciseName || 'Spanish Squat Hold';
-  const currentSet = activeSessionMetadata.currentSet || 3;
+  const exerciseName = activeSessionMetadata.currentExerciseName || 'Active Exercise';
+  const currentSet = activeSessionMetadata.currentSet || 1;
   const totalSets = activeSessionMetadata.totalSets || 4;
-  const worksessionName = activeSessionMetadata.worksessionName || 'Strength & Recovery Sequence';
+  const worksessionName = activeSessionMetadata.worksessionName || 'Workout Routine';
 
   return (
     <View style={styles.outerWrapper}>
       <TouchableOpacity
-        style={styles.statusBarCard}
+        style={[
+          styles.statusBarCard,
+          isPaused && styles.statusBarCardPaused,
+          isResting && styles.statusBarCardResting,
+        ]}
         onPress={() => router.push('/active-workout')}
         activeOpacity={0.92}
       >
         {/* Left: Animated Live Pulsing Indicator & Details */}
         <View style={styles.leftCol}>
           <View style={styles.indicatorWrapper}>
-            <Animated.View style={[styles.pulseCircle, { opacity: pulseAnim }]} />
-            <View style={styles.coreDot} />
+            <Animated.View
+              style={[
+                styles.pulseCircle,
+                { opacity: isPaused ? 0.3 : pulseAnim },
+                isPaused && styles.pulseCirclePaused,
+                isResting && styles.pulseCircleResting,
+              ]}
+            />
+            <View
+              style={[
+                styles.coreDot,
+                isPaused && styles.coreDotPaused,
+                isResting && styles.coreDotResting,
+              ]}
+            />
           </View>
 
           <View style={styles.textContainer}>
             <View style={styles.statusBadgeRow}>
-              <Text style={styles.statusBadgeText}>WORKOUT IN PROGRESS</Text>
+              <Text
+                style={[
+                  styles.statusBadgeText,
+                  isPaused && styles.statusBadgeTextPaused,
+                  isResting && styles.statusBadgeTextResting,
+                ]}
+              >
+                {isResting
+                  ? 'RECOVERY REST'
+                  : isPaused
+                  ? 'WORKOUT PAUSED'
+                  : 'WORKOUT IN PROGRESS'}
+              </Text>
               <Text style={styles.worksessionTitle} numberOfLines={1}>
                 • {worksessionName}
               </Text>
             </View>
             <Text style={styles.exerciseDetailText} numberOfLines={1}>
-              {exerciseName} <Text style={styles.setHighlight}>(Set {currentSet}/{totalSets})</Text>
+              {exerciseName}{' '}
+              <Text style={styles.setHighlight}>
+                (Set {currentSet}/{totalSets})
+              </Text>
             </Text>
           </View>
         </View>
 
-        {/* Right: Live Elapsed Duration & Resume Pill */}
+        {/* Right: Live Rest / Elapsed Duration & Resume Pill */}
         <View style={styles.rightCol}>
-          <View style={styles.elapsedPill}>
-            <Ionicons name="time-outline" size={12} color="#00D09E" style={{ marginRight: 3 }} />
-            <Text style={styles.elapsedText}>{formatDuration(elapsedSecs)}</Text>
-          </View>
+          {isResting ? (
+            <View style={styles.restPill}>
+              <Ionicons name="battery-charging" size={12} color="#10B981" style={{ marginRight: 3 }} />
+              <Text style={styles.restPillText}>{formatDuration(restSecsRemaining)}</Text>
+            </View>
+          ) : (
+            <View style={styles.elapsedPill}>
+              <Ionicons name="time-outline" size={12} color={isPaused ? '#F59E0B' : '#00D09E'} style={{ marginRight: 3 }} />
+              <Text style={[styles.elapsedText, isPaused && { color: '#F59E0B' }]}>
+                {formatDuration(elapsedSecs)}
+              </Text>
+            </View>
+          )}
 
-          <View style={styles.resumeBtn}>
-            <Ionicons name="play" size={13} color="#FFFFFF" style={{ marginRight: 3 }} />
-            <Text style={styles.resumeBtnText}>Resume</Text>
+          <View style={[styles.resumeBtn, isPaused && styles.resumeBtnAmber]}>
+            <Ionicons name={isPaused ? 'play' : 'enter-outline'} size={13} color="#FFFFFF" style={{ marginRight: 3 }} />
+            <Text style={styles.resumeBtnText}>{isPaused ? 'Resume' : 'Active'}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -135,6 +204,16 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 6,
   },
+  statusBarCardPaused: {
+    borderColor: '#78350F',
+    backgroundColor: '#1E1710',
+    shadowColor: '#F59E0B',
+  },
+  statusBarCardResting: {
+    borderColor: '#064E3B',
+    backgroundColor: '#061C14',
+    shadowColor: '#10B981',
+  },
   leftCol: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -156,11 +235,23 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     backgroundColor: 'rgba(16, 185, 129, 0.35)', // Emerald pulse
   },
+  pulseCirclePaused: {
+    backgroundColor: 'rgba(245, 158, 11, 0.35)',
+  },
+  pulseCircleResting: {
+    backgroundColor: 'rgba(16, 185, 129, 0.45)',
+  },
   coreDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: KinetixTheme.colors.secondary, // Emerald solid core
+  },
+  coreDotPaused: {
+    backgroundColor: '#F59E0B',
+  },
+  coreDotResting: {
+    backgroundColor: '#10B981',
   },
   textContainer: {
     flex: 1,
@@ -175,6 +266,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#34D399', // Emerald 400
     letterSpacing: 0.8,
+  },
+  statusBadgeTextPaused: {
+    color: '#FBBF24', // Amber 400
+  },
+  statusBadgeTextResting: {
+    color: '#34D399', // Emerald 400
   },
   worksessionTitle: {
     fontSize: 10,
@@ -212,6 +309,22 @@ const styles = StyleSheet.create({
     color: '#34D399',
     fontVariant: ['tabular-nums'],
   },
+  restPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  restPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#34D399',
+    fontVariant: ['tabular-nums'],
+  },
   resumeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -224,6 +337,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 4,
     elevation: 3,
+  },
+  resumeBtnAmber: {
+    backgroundColor: '#D97706',
+    shadowColor: '#D97706',
   },
   resumeBtnText: {
     color: '#FFFFFF',

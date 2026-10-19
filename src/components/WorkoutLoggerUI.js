@@ -105,7 +105,7 @@ export default function WorkoutLoggerUI() {
             worksessions (
               id, name, modality, description,
               worksession_exercises (
-                id, target_sets, target_reps, tracking_type, target_time, notes,
+                id, order_index, target_sets, target_reps, tracking_type, target_time, notes,
                 exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics)
               )
             )
@@ -117,6 +117,11 @@ export default function WorkoutLoggerUI() {
         data.forEach(p => {
           if (p.plan_worksessions) {
             p.plan_worksessions.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+            p.plan_worksessions.forEach(pw => {
+              if (pw.worksessions?.worksession_exercises) {
+                pw.worksessions.worksession_exercises.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+              }
+            });
           }
         });
         setAvailablePlans(data);
@@ -295,7 +300,7 @@ export default function WorkoutLoggerUI() {
           .select(`
             id, name, modality, description,
             worksession_exercises (
-              id, target_sets, target_reps, tracking_type, target_time, notes,
+              id, order_index, target_sets, target_reps, tracking_type, target_time, notes,
               exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics)
             )
           `)
@@ -303,6 +308,9 @@ export default function WorkoutLoggerUI() {
           .single();
 
         if (wsData) {
+          if (wsData.worksession_exercises) {
+            wsData.worksession_exercises.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+          }
           startActiveSession({ name: 'Recovery & Prehab' }, wsData);
         } else {
           // Fallback: log a quick 5-min prep

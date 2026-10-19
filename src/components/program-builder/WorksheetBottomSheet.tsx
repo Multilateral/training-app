@@ -80,6 +80,7 @@ export default function WorksheetBottomSheet({ userId }: WorksheetBottomSheetPro
             user_id,
             worksession_exercises (
               id,
+              order_index,
               target_sets,
               target_reps,
               target_time,
@@ -100,7 +101,10 @@ export default function WorksheetBottomSheet({ userId }: WorksheetBottomSheetPro
               (ws.name || '').toLowerCase().includes('recovery') ||
               (ws.modality || '').toLowerCase().includes('rehab');
 
-            const exercises = (ws.worksession_exercises || []).map((we: any) => ({
+            const exercises = (ws.worksession_exercises || [])
+              .slice()
+              .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+              .map((we: any) => ({
               name: we.exercises?.name || 'Exercise',
               cue: we.notes || we.exercises?.instructions || 'Controlled execution.',
               sets: we.target_sets || 3,

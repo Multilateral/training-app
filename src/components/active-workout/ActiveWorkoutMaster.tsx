@@ -78,7 +78,10 @@ export default function ActiveWorkoutMaster({
     }
 
     if (worksession?.worksession_exercises && worksession.worksession_exercises.length > 0) {
-      return worksession.worksession_exercises.map((we: any, idx: number) => {
+      return worksession.worksession_exercises
+        .slice()
+        .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+        .map((we: any, idx: number) => {
         const ex = we.exercises || {};
         const isTime = we.tracking_type === 'time' || (we.target_time && we.target_time > 0);
         return {

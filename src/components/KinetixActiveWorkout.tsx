@@ -11,6 +11,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -145,7 +147,7 @@ export default function KinetixActiveWorkout({
   onFinish,
 }: KinetixActiveWorkoutProps) {
   const router = useRouter();
-  const { activeSessionMetadata, setActiveSessionMetadata } = useContext(TrainingContext) || {};
+  const { activeSessionMetadata, setActiveSessionMetadata, updateActiveSessionMetadata } = useContext(TrainingContext) || {};
 
   // Check whether we have an active workout session in progress
   const hasActiveSession = Boolean(
@@ -154,8 +156,10 @@ export default function KinetixActiveWorkout({
 
   useKeepAwake();
 
-  // Dual-Mode Training State (Manual mode by default)
-  const [isGuidedMode, setIsGuidedMode] = useState<boolean>(false);
+  // Dual-Mode Training State (Restores previous mode if user was in Guided Trainer)
+  const [isGuidedMode, setIsGuidedMode] = useState<boolean>(
+    Boolean(activeSessionMetadata?.isGuidedMode)
+  );
 
   // Active workout states
   const [currentSessionName, setCurrentSessionName] = useState<string>(
@@ -205,7 +209,10 @@ export default function KinetixActiveWorkout({
         };
       })
     : worksession?.worksession_exercises && worksession.worksession_exercises.length > 0
-    ? worksession.worksession_exercises.map((we: any, idx: number) => {
+    ? worksession.worksession_exercises
+        .slice()
+        .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+        .map((we: any, idx: number) => {
         const ex = we.exercises || {};
         const inferred = getExerciseTrackingType(ex);
         const rawType = we.tracking_type || inferred;
@@ -307,9 +314,14 @@ export default function KinetixActiveWorkout({
   const [activeMode, setActiveMode] = useState<'duration' | 'weight_reps' | 'bodyweight'>(() => resolveTargetMode(currentEx));
 
   // Modality States
-  const [holdSeconds, setHoldSeconds] = useState(45);
+  const [holdSeconds, setHoldSeconds] = useState<number>(() => {
+    if (typeof activeSessionMetadata?.manualHoldSeconds === 'number') {
+      return activeSessionMetadata.manualHoldSeconds;
+    }
+    return 45;
+  });
   const [timerRunning, setTimerRunning] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
+  const [isPaused, setIsPaused] = useState(Boolean(activeSessionMetadata?.isPaused));
 
   const [wrReps, setWrReps] = useState(8);
   const [wrWeight, setWrWeight] = useState(80);
@@ -350,9 +362,18 @@ export default function KinetixActiveWorkout({
   const toastTranslateY = useRef(new Animated.Value(-15)).current;
   const toastTimeoutRef = useRef<any>(null);
 
-  const [isResting, setIsResting] = useState<boolean>(false);
-  const [restSecondsLeft, setRestSecondsLeft] = useState<number>(0);
-  const [totalRestTarget, setTotalRestTarget] = useState<number>(60);
+  const initialManualRestLeft =
+    activeSessionMetadata?.manualRestEndTime && activeSessionMetadata.manualRestEndTime > Date.now()
+      ? Math.ceil((activeSessionMetadata.manualRestEndTime - Date.now()) / 1000)
+      : (activeSessionMetadata?.manualRestSecondsLeft || 0);
+
+  const [isResting, setIsResting] = useState<boolean>(
+    Boolean(activeSessionMetadata?.manualIsResting && initialManualRestLeft > 0)
+  );
+  const [restSecondsLeft, setRestSecondsLeft] = useState<number>(initialManualRestLeft);
+  const [totalRestTarget, setTotalRestTarget] = useState<number>(
+    activeSessionMetadata?.manualTotalRestTarget || 60
+  );
 
   const triggerToast = (toast: {
     type: 'set_completed' | 'exercise_completed';
@@ -439,23 +460,7 @@ export default function KinetixActiveWorkout({
     return () => clearInterval(interval);
   }, [hasActiveSession, isPaused, workoutStartTime]);
 
-  // Sync active session metadata globally whenever an active workout is in progress
-  useEffect(() => {
-    if (hasActiveSession && setActiveSessionMetadata) {
-      setActiveSessionMetadata({
-        isActive: true,
-        worksessionName: currentSessionName,
-        currentExerciseName: currentEx?.name || 'Exercise',
-        currentExerciseIndex: currentExIndex,
-        totalExercises: currentExercises.length,
-        currentSet: currentSet,
-        totalSets: currentEx?.totalSets || 4,
-        currentLoad: currentDockLoad,
-        startTime: workoutStartTime,
-        exercises: currentExercises,
-      });
-    }
-  }, [hasActiveSession, currentSessionName, currentExIndex, currentSet, currentDockLoad, currentEx?.name, workoutStartTime]);
+
 
 
 
@@ -640,12 +645,19 @@ export default function KinetixActiveWorkout({
     }
   };
 
-  // Guided Training State Machine Hook
+  // Guided Training State Machine Hook with full state restoration
   const player = useWorkoutPlayer({
     exercises: currentExercises as PlayerExercise[],
     leadInDurationSeconds: 5,
     initialExerciseIndex: currentExIndex,
     initialSetIndex: Math.max(0, currentSet - 1),
+    initialState: activeSessionMetadata?.guidedPlayerState || 'READY',
+    initialSecondsRemaining: activeSessionMetadata?.guidedSecondsRemaining,
+    initialEndTime: activeSessionMetadata?.guidedEndTime,
+    initialTotalDurationMs: activeSessionMetadata?.guidedTotalDurationMs,
+    initialWasAutoPaused: activeSessionMetadata?.wasAutoPaused,
+    initialCadenceMode: activeSessionMetadata?.cadenceMode || 'auto',
+    initialAudioPacerMode: activeSessionMetadata?.audioPacerMode || 'tones',
     onSetCompleted: (log) => {
       const completedSetNum = log.setNumber;
       const totalSetsForEx = currentEx?.totalSets || 4;
@@ -668,6 +680,25 @@ export default function KinetixActiveWorkout({
     },
   });
 
+  // Keep references synchronized for lifecycle/unmount handlers
+  const hasActiveSessionRef = useRef(hasActiveSession);
+  const isGuidedModeRef = useRef(isGuidedMode);
+  const playerRef = useRef(player);
+  const timerRunningRef = useRef(timerRunning);
+  const isPausedRef = useRef(isPaused);
+  const isRestingRef = useRef(isResting);
+  const restSecondsLeftRef = useRef(restSecondsLeft);
+
+  useEffect(() => {
+    hasActiveSessionRef.current = hasActiveSession;
+    isGuidedModeRef.current = isGuidedMode;
+    playerRef.current = player;
+    timerRunningRef.current = timerRunning;
+    isPausedRef.current = isPaused;
+    isRestingRef.current = isResting;
+    restSecondsLeftRef.current = restSecondsLeft;
+  });
+
   // Bi-directional synchronization: Guided Player -> Active Workout Screen
   useEffect(() => {
     if (isGuidedMode) {
@@ -679,6 +710,131 @@ export default function KinetixActiveWorkout({
       }
     }
   }, [isGuidedMode, player.currentExerciseIndex, player.currentSet]);
+
+  // Continuously persist active workout session state to context and storage
+  useEffect(() => {
+    if (!hasActiveSession || !updateActiveSessionMetadata) return;
+
+    updateActiveSessionMetadata({
+      isActive: true,
+      worksessionName: currentSessionName,
+      currentExerciseName: currentEx?.name || 'Exercise',
+      currentExerciseIndex: currentExIndex,
+      totalExercises: currentExercises.length,
+      currentSet: currentSet,
+      totalSets: currentEx?.totalSets || 4,
+      currentLoad: currentDockLoad,
+      startTime: workoutStartTime,
+      exercises: currentExercises,
+      worksession,
+      plan,
+      isGuidedMode,
+      guidedPlayerState: player.state,
+      guidedSecondsRemaining: player.secondsRemaining,
+      guidedEndTime: player.endTime,
+      guidedTotalDurationMs: player.totalDurationMs,
+      wasAutoPaused: player.wasAutoPaused,
+      cadenceMode: player.cadenceMode,
+      audioPacerMode: player.audioPacerMode,
+      manualIsResting: isResting,
+      manualRestSecondsLeft: restSecondsLeft,
+      manualRestEndTime: isResting ? Date.now() + restSecondsLeft * 1000 : null,
+      manualTotalRestTarget: totalRestTarget,
+      manualIsHolding: timerRunning,
+      manualHoldSeconds: holdSeconds,
+      isPaused: isPaused || player.isPaused,
+    });
+  }, [
+    hasActiveSession,
+    currentSessionName,
+    currentEx?.name,
+    currentExIndex,
+    currentExercises,
+    currentSet,
+    currentEx?.totalSets,
+    currentDockLoad,
+    workoutStartTime,
+    isGuidedMode,
+    player.state,
+    player.secondsRemaining,
+    player.endTime,
+    player.totalDurationMs,
+    player.wasAutoPaused,
+    player.cadenceMode,
+    player.audioPacerMode,
+    isResting,
+    restSecondsLeft,
+    totalRestTarget,
+    timerRunning,
+    holdSeconds,
+    isPaused,
+    player.isPaused,
+    worksession,
+    plan,
+  ]);
+
+  // Manual Mode AppState auto-pause handler (freezes manual holds on screen lock / background)
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      'change',
+      (nextAppState: AppStateStatus) => {
+        if (!isGuidedMode) {
+          if (nextAppState === 'background' || nextAppState === 'inactive') {
+            if (timerRunning && !isPaused) {
+              setIsPaused(true);
+            }
+          }
+        }
+      }
+    );
+    return () => subscription.remove();
+  }, [isGuidedMode, timerRunning, isPaused]);
+
+  // Screen Exit / Unmount cleanup: auto-pause active work when leaving workout screen
+  useEffect(() => {
+    return () => {
+      if (hasActiveSessionRef.current && updateActiveSessionMetadata) {
+        const isGuided = isGuidedModeRef.current;
+        if (isGuided) {
+          const snapshot = playerRef.current?.getSessionSnapshot?.() || {};
+          const curState = snapshot.state;
+          if (curState === 'ACTIVE_WORK' || curState === 'LEAD_IN') {
+            playerRef.current?.pause?.(true);
+            updateActiveSessionMetadata({
+              isGuidedMode: true,
+              guidedPlayerState: 'PAUSED',
+              wasAutoPaused: true,
+              guidedSecondsRemaining: snapshot.secondsRemaining,
+              guidedTotalDurationMs: snapshot.totalDurationMs,
+            });
+          } else if (curState === 'RESTING') {
+            // Keep recovery rest running in background!
+            updateActiveSessionMetadata({
+              isGuidedMode: true,
+              guidedPlayerState: 'RESTING',
+              guidedEndTime: snapshot.endTime,
+              guidedSecondsRemaining: snapshot.secondsRemaining,
+              guidedTotalDurationMs: snapshot.totalDurationMs,
+            });
+          }
+        } else {
+          if (timerRunningRef.current && !isPausedRef.current) {
+            updateActiveSessionMetadata({
+              isGuidedMode: false,
+              isPaused: true,
+            });
+          } else if (isRestingRef.current && restSecondsLeftRef.current > 0) {
+            updateActiveSessionMetadata({
+              isGuidedMode: false,
+              manualIsResting: true,
+              manualRestEndTime: Date.now() + restSecondsLeftRef.current * 1000,
+              manualRestSecondsLeft: restSecondsLeftRef.current,
+            });
+          }
+        }
+      }
+    };
+  }, []);
 
   // Active Rest countdown interval for manual workout mode
   useEffect(() => {
@@ -1301,6 +1457,8 @@ export default function KinetixActiveWorkout({
         {isGuidedMode ? (
           <GuidedCounterCard
             state={player.state}
+            previousState={player.previousState}
+            wasAutoPaused={player.wasAutoPaused}
             isPaused={player.isPaused}
             currentExercise={player.currentExercise}
             currentSet={player.currentSet}
@@ -1328,6 +1486,18 @@ export default function KinetixActiveWorkout({
             skipRest={player.skipRest}
             addRestSeconds={player.addRestSeconds}
             onOpenTargetModal={handleOpenTargetModal}
+
+            isCadenceActive={player.isCadenceActive}
+            cadenceProfile={player.cadenceProfile}
+            cadenceMode={player.cadenceMode}
+            setCadenceMode={player.setCadenceMode}
+            audioPacerMode={player.audioPacerMode}
+            setAudioPacerMode={player.setAudioPacerMode}
+            currentRepNumber={player.currentRepNumber}
+            currentCadencePhase={player.currentCadencePhase}
+            cadencePhaseSecondsRemaining={player.cadencePhaseSecondsRemaining}
+            cadencePhaseProgress={player.cadencePhaseProgress}
+            cadenceRepProgress={player.cadenceRepProgress}
           />
         ) : (
           <View style={styles.counterCard}>

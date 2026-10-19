@@ -79,6 +79,16 @@ export const TrainingProvider = ({ children, session }) => {
     saveActiveSession();
   }, [activeSessionMetadata, activeSessionState, activeSessionTimer]);
 
+  const updateActiveSessionMetadata = (updater) => {
+    setActiveSessionMetadata((prev) => {
+      if (typeof updater === 'function') {
+        return updater(prev);
+      }
+      if (!updater) return null;
+      return { ...(prev || {}), ...updater };
+    });
+  };
+
   useEffect(() => {
     const loadCachedWorkspaces = async () => {
       try {
@@ -298,7 +308,7 @@ export const TrainingProvider = ({ children, session }) => {
   return (
     <TrainingContext.Provider value={{ 
       history, saveToCloud, workspaces, updateWorkspaces, logWorkout, latestWorkout,
-      activeSessionMetadata, setActiveSessionMetadata,
+      activeSessionMetadata, setActiveSessionMetadata, updateActiveSessionMetadata,
       activeSessionState, setActiveSessionState,
       activeSessionTimer, setActiveSessionTimer,
       session

@@ -121,14 +121,14 @@ async function buildDatabaseLibrary() {
   const { data: wsData } = await supabase
     .from('worksessions')
     .select(
-      'id, name, modality, description, created_at, worksession_exercises(id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes, exercises(id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps))'
+      'id, name, modality, description, created_at, worksession_exercises(id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes, exercises(id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps))'
     )
     .order('created_at', { ascending: false });
 
   const { data: plansData } = await supabase
     .from('training_plans')
     .select(
-      'id, name, schedule_type, goal_category, description, is_standard_template, plan_worksessions(id, day_name, order_index, worksessions(id, name, modality, description, worksession_exercises(id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes, exercises(id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps))))'
+      'id, name, schedule_type, goal_category, description, is_standard_template, plan_worksessions(id, day_name, order_index, worksessions(id, name, modality, description, worksession_exercises(id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes, exercises(id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps))))'
     )
     .order('created_at', { ascending: false });
 
@@ -203,7 +203,10 @@ async function buildDatabaseLibrary() {
 
   const formattedWorksessions = (wsData || []).map((ws) => {
     const meta = inferTypeAndCategory(ws);
-    const exercises = (ws.worksession_exercises || []).map(mapExercise);
+    const exercises = (ws.worksession_exercises || [])
+      .slice()
+      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+      .map(mapExercise);
 
     const totalSets = exercises.reduce((acc, e) => acc + (e.sets || 3), 0);
     const durationMin = Math.max(

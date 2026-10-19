@@ -34,7 +34,10 @@ export default function ActiveWorkoutEngine({ sessionId, plan, worksession, onFi
       });
       let initialExercises = [];
       if (worksession && worksession.worksession_exercises?.length > 0) {
-        initialExercises = worksession.worksession_exercises.map((te) => {
+        initialExercises = worksession.worksession_exercises
+          .slice()
+          .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+          .map((te) => {
           const numSets = te.target_sets || 3;
           const initialSets = [];
           for (let i = 0; i < numSets; i++) {
