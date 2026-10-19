@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Image,
   Platform,
+  Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +24,15 @@ import {
   DatabaseWorksessionCard,
 } from '../data/databaseLibraryData';
 import { getDeletedPlanIds } from '../services/planPersistence';
+import { WeeklyScheduleSlot } from '../types/database';
+import {
+  loadWeeklySchedule,
+  getPlannedActivitiesForDate,
+  buildDefaultHybridWeeklySchedule,
+} from '../services/scheduleService';
+import SportQuickLogModal from './SportQuickLogModal';
+import { getExerciseTrackingType } from '../data/recoveryMetadata';
+
 
 // Image mapping helper for dynamic worksession imagery
 const getWorksessionImage = (modality?: string, type?: string) => {
@@ -74,13 +84,24 @@ interface PlanSessionItem {
 
 export default function KinetixDashboard() {
   const router = useRouter();
-  const { session, workspaces, updateWorkspaces, history, setActiveSessionMetadata } =
-    useContext(TrainingContext) || {};
+  const {
+    session,
+    workspaces,
+    updateWorkspaces,
+    history,
+    logWorkout,
+    setActiveSessionMetadata,
+  } = useContext(TrainingContext) || {};
 
   // Available plans state: initialized with static database plans, augmented with live plans from DB
   const [plans, setPlans] = useState<DatabasePlan[]>(DATABASE_PLANS);
   const [selectedWorkoutPlanId, setSelectedWorkoutPlanId] = useState<string | null>(null);
   const [selectedRehabId, setSelectedRehabId] = useState<string | null>(null);
+  const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleSlot[]>(() =>
+    buildDefaultHybridWeeklySchedule()
+  );
+  const [sportLogSlot, setSportLogSlot] = useState<WeeklyScheduleSlot | null>(null);
+
 
   const athleteName = useMemo(() => {
     const rawName =
@@ -157,6 +178,13 @@ export default function KinetixDashboard() {
           if (firstRehabPlan) setSelectedRehabId(firstRehabPlan.id);
         }
       }
+      const loadedSched = await loadWeeklySchedule({
+        userId: session?.user?.id,
+        workspaces,
+      });
+      if (loadedSched && loadedSched.length > 0) {
+        setWeeklySchedule(loadedSched);
+      }
     } catch (e) {
       console.error('[KinetixDashboard] Error syncing active plans:', e);
     }
@@ -165,6 +193,8 @@ export default function KinetixDashboard() {
   useEffect(() => {
     syncActivePlans();
   }, [
+    session?.user?.id,
+    workspaces?.weekly_schedule,
     workspaces?.activeWorkoutPlanId,
     workspaces?.defaultPlanId,
     workspaces?.activePlanId,
@@ -183,6 +213,78 @@ export default function KinetixDashboard() {
     ])
   );
 
+  // Helper to map DB worksession exercise preserving rest and hold-time rep pyramids
+  const mapDbWorksessionExercise = (we: any) => {
+    const ex = we.exercises || {};
+    const isHold =
+      we.tracking_type === 'time' ||
+      we.tracking_type === 'duration' ||
+      Boolean(we.target_time && we.target_time > 0) ||
+      Boolean(we.target_duration_seconds && we.target_duration_seconds > 0);
+
+    const rawRest =
+      typeof we.target_rest_seconds === 'number'
+        ? we.target_rest_seconds
+        : typeof we.restSeconds === 'number'
+        ? we.restSeconds
+        : typeof ex.default_rest_seconds === 'number'
+        ? ex.default_rest_seconds
+        : 60;
+
+    const exName = (ex.name || we.name || 'Exercise').toLowerCase();
+    const cueLower = (we.notes || ex.instructions || '').toLowerCase();
+    const isMcGill = exName.includes('mcgill') || exName.includes('bird-dog');
+    const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('50s, 30s') || cueLower.includes('5-3-1');
+    const tSets = we.target_sets || 3;
+
+    let holdSecondsPerRep: number | undefined = we.hold_seconds_per_rep || undefined;
+    let repsPerSet: number[] | undefined = we.reps_per_set || undefined;
+    let durationsPerSet: number[] | undefined = we.durations_per_set || undefined;
+
+    if ((isMcGill || isPyramid) && tSets >= 3 && !exName.includes('warmup')) {
+      holdSecondsPerRep = 10;
+      repsPerSet = [5, 3, 1];
+      durationsPerSet = [50, 30, 10];
+    } else if (exName.includes('warmup') && (isMcGill || isPyramid)) {
+      holdSecondsPerRep = 10;
+      repsPerSet = [3];
+      durationsPerSet = [30];
+    }
+
+    let formattedReps = '10';
+    if (durationsPerSet && durationsPerSet.length > 0) {
+      formattedReps = `${durationsPerSet[0]}s (${repsPerSet ? repsPerSet.join('-') : '5-3-1'} reps × 10s)`;
+    } else if (isHold) {
+      const dur = we.target_duration_seconds || we.target_time || 45;
+      formattedReps = `${dur}s`;
+    } else if (we.target_reps) {
+      formattedReps = String(we.target_reps);
+    } else if (we.reps) {
+      formattedReps = String(we.reps);
+    }
+
+    return {
+      name: ex.name || we.name || 'Exercise',
+      cue: we.notes || ex.instructions || 'Controlled execution.',
+      sets: tSets,
+      reps: formattedReps,
+      weight: 'Standard',
+      restSeconds: rawRest,
+      target_rest_seconds: rawRest,
+      target_duration_seconds: we.target_duration_seconds || (isHold ? (we.target_time || 45) : undefined),
+      target_reps: we.target_reps || undefined,
+      hold_seconds_per_rep: holdSecondsPerRep,
+      reps_per_set: repsPerSet,
+      durations_per_set: durationsPerSet,
+      tracking_type: isHold ? 'duration' : (we.tracking_type || 'reps'),
+      equipment: ex.equipment || 'Bodyweight',
+      muscle_group: ex.muscle_group || 'General',
+      difficulty: ex.difficulty || 'Intermediate',
+      mechanics: ex.mechanics || 'Compound',
+      description: ex.description || null,
+    };
+  };
+
   // 2. Fetch live plans from Supabase if authenticated
   useEffect(() => {
     let isMounted = true;
@@ -200,8 +302,8 @@ export default function KinetixDashboard() {
               worksessions (
                 id, name, modality, description,
                 worksession_exercises (
-                  id, target_sets, target_reps, tracking_type, target_time, notes,
-                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics)
+                  id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
+                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
                 )
               )
             )
@@ -220,20 +322,7 @@ export default function KinetixDashboard() {
 
             const sessions = (p.plan_worksessions || []).map((pw: any) => {
               const ws = pw.worksessions;
-              const exercises = (ws?.worksession_exercises || []).map((we: any) => ({
-                name: we.exercises?.name || 'Exercise',
-                cue: we.notes || we.exercises?.instructions || 'Controlled execution.',
-                sets: we.target_sets || 3,
-                reps: we.tracking_type === 'time' ? `${we.target_time || 45}s` : String(we.target_reps || 10),
-                weight: 'Standard',
-                restSeconds: 60,
-                tracking_type: we.tracking_type || 'reps_weight',
-                equipment: we.exercises?.equipment || 'Bodyweight',
-                muscle_group: we.exercises?.muscle_group || 'General',
-                difficulty: we.exercises?.difficulty || 'Intermediate',
-                mechanics: we.exercises?.mechanics || 'Compound',
-                description: we.exercises?.description || null,
-              }));
+              const exercises = (ws?.worksession_exercises || []).map(mapDbWorksessionExercise);
 
               const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
               const fullWs: DatabaseWorksessionCard = {
@@ -312,8 +401,8 @@ export default function KinetixDashboard() {
               .select(`
                 id, name, modality, description,
                 worksession_exercises (
-                  id, target_sets, target_reps, tracking_type, target_time, notes,
-                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics)
+                  id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
+                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
                 )
               `)
               .in('id', wsIds);
@@ -335,20 +424,7 @@ export default function KinetixDashboard() {
 
               const phaseSessions = pwList.map((pw: any, pIdx: number) => {
                 const ws = worksessionMap.get(pw.worksession_id);
-                const exercises = (ws?.worksession_exercises || []).map((we: any) => ({
-                  name: we.exercises?.name || 'Exercise',
-                  cue: we.notes || we.exercises?.instructions || 'Controlled execution.',
-                  sets: we.target_sets || 3,
-                  reps: we.tracking_type === 'time' ? `${we.target_time || 45}s` : String(we.target_reps || 10),
-                  weight: 'Standard',
-                  restSeconds: 60,
-                  tracking_type: we.tracking_type || 'reps',
-                  equipment: we.exercises?.equipment || 'Bodyweight',
-                  muscle_group: we.exercises?.muscle_group || 'General',
-                  difficulty: we.exercises?.difficulty || 'Intermediate',
-                  mechanics: we.exercises?.mechanics || 'Compound',
-                  description: we.exercises?.description || null,
-                }));
+                const exercises = (ws?.worksession_exercises || []).map(mapDbWorksessionExercise);
 
                 const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
                 const fullWs: DatabaseWorksessionCard = {
@@ -410,9 +486,12 @@ export default function KinetixDashboard() {
         const allFetched = [...mappedRehabPrograms, ...mappedUserPlans];
         const deletedIds = await getDeletedPlanIds();
         const existingPlanIds = new Set(allFetched.map((p) => p.id));
+        const existingPlanNames = new Set(allFetched.map((p) => p.name.trim().toLowerCase()));
         const mergedPlans = [
           ...allFetched,
-          ...DATABASE_PLANS.filter((p) => !existingPlanIds.has(p.id)),
+          ...DATABASE_PLANS.filter(
+            (p) => !existingPlanIds.has(p.id) && !existingPlanNames.has(p.name.trim().toLowerCase())
+          ),
         ].filter((p) => !deletedIds.includes(p.id));
         setPlans(mergedPlans);
       }
@@ -598,15 +677,124 @@ export default function KinetixDashboard() {
     };
   };
 
-  const workoutSchedule = useMemo(
-    () => computeSchedule(activeWorkoutPlan, resolvedWorkoutSessions),
-    [activeWorkoutPlan, resolvedWorkoutSessions, todayDayName]
+  const todayIsoKey = useMemo(() => new Date().toISOString().split('T')[0], []);
+
+  const todayPlanned = useMemo(
+    () => getPlannedActivitiesForDate(todayIsoKey, weeklySchedule),
+    [todayIsoKey, weeklySchedule]
   );
 
-  const rehabSchedule = useMemo(
-    () => computeSchedule(activeRehabPlan, resolvedRehabSessions),
-    [activeRehabPlan, resolvedRehabSessions, todayDayName]
+  const todaySportSlots = useMemo(
+    () => todayPlanned.activeSlots.filter((s) => s.activity_type === 'sport'),
+    [todayPlanned]
   );
+
+  const workoutSchedule = useMemo(() => {
+    const base = computeSchedule(activeWorkoutPlan, resolvedWorkoutSessions);
+    if (weeklySchedule.length === 0) return base;
+
+    const plannedWorkoutSlots = todayPlanned.activeSlots.filter(
+      (s) => s.activity_type === 'workout'
+    );
+    if (plannedWorkoutSlots.length === 0) {
+      return {
+        todaySessions: [] as PlanSessionItem[],
+        upcomingSessions: resolvedWorkoutSessions,
+        isRestDay: true,
+      };
+    }
+
+    const mappedToday: PlanSessionItem[] = plannedWorkoutSlots.map((slot, idx) => {
+      const fromResolved =
+        resolvedWorkoutSessions.find(
+          (r) =>
+            (slot.worksession_id && r.worksessionId === slot.worksession_id) ||
+            r.worksessionName.toLowerCase() === slot.title.toLowerCase()
+        ) || resolvedWorkoutSessions[idx % Math.max(resolvedWorkoutSessions.length, 1)];
+
+      const fromCatalog = slot.worksession_id
+        ? DATABASE_WORKSESSIONS.find((w) => w.id === slot.worksession_id)
+        : DATABASE_WORKSESSIONS.find(
+            (w) => w.type === 'workout' && w.title.toLowerCase() === slot.title.toLowerCase()
+          );
+
+      const wsCard = fromCatalog || fromResolved?.worksession || DATABASE_WORKSESSIONS[0];
+      return {
+        dayName: todayDayName,
+        worksessionId: wsCard.id,
+        worksessionName: wsCard.title || slot.title,
+        modality: wsCard.category || slot.subtitle || 'Strength & Power',
+        exerciseCount: wsCard.exercises?.length || 3,
+        worksession: wsCard,
+        trackType: 'workout',
+      };
+    });
+
+    const todayIds = new Set(mappedToday.map((m) => m.worksessionId));
+    const upcoming = resolvedWorkoutSessions.filter((r) => !todayIds.has(r.worksessionId));
+
+    return {
+      todaySessions: mappedToday,
+      upcomingSessions: upcoming.length > 0 ? upcoming : base.upcomingSessions,
+      isRestDay: false,
+    };
+  }, [activeWorkoutPlan, resolvedWorkoutSessions, todayDayName, weeklySchedule, todayPlanned]);
+
+  const rehabSchedule = useMemo(() => {
+    const base = computeSchedule(activeRehabPlan, resolvedRehabSessions);
+    if (weeklySchedule.length === 0) return base;
+
+    const plannedRehabSlots = todayPlanned.activeSlots.filter(
+      (s) => s.activity_type === 'rehab'
+    );
+    if (plannedRehabSlots.length === 0) {
+      return {
+        todaySessions: [] as PlanSessionItem[],
+        upcomingSessions: resolvedRehabSessions,
+        isRestDay: true,
+      };
+    }
+
+    const mappedToday: PlanSessionItem[] = plannedRehabSlots.map((slot, idx) => {
+      const fromResolved =
+        resolvedRehabSessions.find(
+          (r) =>
+            (slot.worksession_id && r.worksessionId === slot.worksession_id) ||
+            r.worksessionName.toLowerCase() === slot.title.toLowerCase()
+        ) || resolvedRehabSessions[idx % Math.max(resolvedRehabSessions.length, 1)];
+
+      const fromCatalog = slot.worksession_id
+        ? DATABASE_WORKSESSIONS.find((w) => w.id === slot.worksession_id)
+        : DATABASE_WORKSESSIONS.find(
+            (w) => w.type === 'rehab' && w.title.toLowerCase() === slot.title.toLowerCase()
+          );
+
+      const wsCard =
+        fromCatalog ||
+        fromResolved?.worksession ||
+        DATABASE_WORKSESSIONS.find((w) => w.type === 'rehab') ||
+        DATABASE_WORKSESSIONS[0];
+
+      return {
+        dayName: todayDayName,
+        worksessionId: wsCard.id,
+        worksessionName: wsCard.title || slot.title,
+        modality: wsCard.category || slot.subtitle || 'Clinical Rehab',
+        exerciseCount: wsCard.exercises?.length || 4,
+        worksession: wsCard,
+        trackType: 'rehab',
+      };
+    });
+
+    const todayIds = new Set(mappedToday.map((m) => m.worksessionId));
+    const upcoming = resolvedRehabSessions.filter((r) => !todayIds.has(r.worksessionId));
+
+    return {
+      todaySessions: mappedToday,
+      upcomingSessions: upcoming.length > 0 ? upcoming : base.upcomingSessions,
+      isRestDay: false,
+    };
+  }, [activeRehabPlan, resolvedRehabSessions, todayDayName, weeklySchedule, todayPlanned]);
 
   const allUpcomingSessions = useMemo(() => {
     return [
@@ -615,9 +803,45 @@ export default function KinetixDashboard() {
     ];
   }, [workoutSchedule.upcomingSessions, rehabSchedule.upcomingSessions]);
 
+  const handleSaveSportLog = async (logData: {
+    sportTitle: string;
+    durationMinutes: number;
+    hoursPlayed: number;
+    intensity: string;
+    rpe: number;
+    notes: string;
+    exerciseId?: string | null;
+  }) => {
+    if (logWorkout) {
+      await logWorkout(
+        logData.sportTitle,
+        logData.durationMinutes,
+        logData.intensity,
+        logData.exerciseId || 'sport-session',
+        {
+          isSport: true,
+          sessionType: 'sport',
+          category: 'Collective Sports',
+          hoursPlayed: logData.hoursPlayed,
+          rpe: logData.rpe,
+          notes: logData.notes,
+          exerciseId: logData.exerciseId,
+          durationFormatted: `${logData.hoursPlayed}h (${logData.durationMinutes}m)`,
+        }
+      );
+      Alert.alert(
+        'Sport Practice Logged! 🏐',
+        `Recorded ${logData.hoursPlayed}h of ${logData.sportTitle} (RPE ${logData.rpe}/10).`
+      );
+    }
+  };
+
   // Combined scheduled duration for today
   const totalTodayDuration = useMemo(() => {
     let mins = 0;
+    todaySportSlots.forEach((s) => {
+      mins += s.target_duration_minutes || 120;
+    });
     workoutSchedule.todaySessions.forEach((s) => {
       mins += parseInt(s.worksession?.metrics?.duration || '45') || 45;
     });
@@ -626,7 +850,7 @@ export default function KinetixDashboard() {
     });
     if (mins === 0) return 'RECOVERY DAY';
     return `${mins} MIN TOTAL`;
-  }, [workoutSchedule.todaySessions, rehabSchedule.todaySessions]);
+  }, [todaySportSlots, workoutSchedule.todaySessions, rehabSchedule.todaySessions]);
 
   // 7. Dynamic Weekly Consistency Calculation from History
   const weeklyConsistency = useMemo(() => {
@@ -688,8 +912,16 @@ export default function KinetixDashboard() {
         sets: e.sets || 3,
         reps: e.reps || 10,
         weight: e.weight || 'Standard',
-        restSeconds: e.restSeconds || 60,
-        tracking_type: e.tracking_type || 'reps_weight',
+        restSeconds: typeof e.restSeconds === 'number' ? e.restSeconds : (typeof (e as any).target_rest_seconds === 'number' ? (e as any).target_rest_seconds : 60),
+        target_rest_seconds: typeof (e as any).target_rest_seconds === 'number' ? (e as any).target_rest_seconds : (typeof e.restSeconds === 'number' ? e.restSeconds : 60),
+        target_duration_seconds: (e as any).target_duration_seconds,
+        target_reps: (e as any).target_reps,
+        hold_seconds_per_rep: (e as any).hold_seconds_per_rep,
+        reps_per_set: (e as any).reps_per_set,
+        durations_per_set: (e as any).durations_per_set,
+        tracking_type: e.tracking_type || getExerciseTrackingType(e) || 'bodyweight',
+        equipment: e.equipment,
+        muscle_group: e.muscle_group,
       })),
     };
 
@@ -980,6 +1212,42 @@ export default function KinetixDashboard() {
               <Text style={[styles.activePlanStatusText, { color: KinetixTheme.colors.coral }]}>Active</Text>
             </View>
           </View>
+
+          <View style={styles.activePlansDivider} />
+
+          {/* Row 3: Unified Weekly Schedule & Sports Routine */}
+          <View style={styles.activePlanRow}>
+            <View style={styles.activePlanInfoCol}>
+              <View style={styles.activePlanBadgeRow}>
+                <View style={[styles.activePlanIndicatorDot, { backgroundColor: '#D97706' }]} />
+                <Text style={[styles.activePlanBadgeText, { color: '#D97706' }]}>
+                  WEEKLY HYBRID SCHEDULE
+                </Text>
+              </View>
+              <Text style={styles.activePlanNameText} numberOfLines={1}>
+                {todayPlanned.activeSlots.length > 0
+                  ? `${todayDayName}: ${todayPlanned.activeSlots.map((s) => s.title).join(' + ')}`
+                  : `${todayDayName}: Scheduled Rest & Recovery Day`}
+              </Text>
+              <Text style={styles.activePlanScheduleMetaText} numberOfLines={1}>
+                Sports, Workout Plan & Rehab Phase Dependencies synced
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.activePlanStatusBadge,
+                { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' },
+              ]}
+              onPress={() => router.push('/history')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="calendar" size={13} color={KinetixTheme.colors.primary} />
+              <Text style={[styles.activePlanStatusText, { color: KinetixTheme.colors.primary }]}>
+                Edit Schedule
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Today's Schedule Section Heading */}
@@ -987,20 +1255,76 @@ export default function KinetixDashboard() {
           <Text style={styles.sectionHeading}>Today's Schedule</Text>
           <View style={styles.timeTag}>
             <Ionicons
-              name={workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 ? 'leaf-outline' : 'time-outline'}
+              name={workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 && todaySportSlots.length === 0 ? 'leaf-outline' : 'time-outline'}
               size={13}
-              color={workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 ? '#059669' : KinetixTheme.colors.textMuted}
+              color={workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 && todaySportSlots.length === 0 ? '#059669' : KinetixTheme.colors.textMuted}
             />
             <Text
               style={[
                 styles.timeTagText,
-                workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 && { color: '#059669', fontWeight: '800' },
+                workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 && todaySportSlots.length === 0 && { color: '#059669', fontWeight: '800' },
               ]}
             >
               {totalTodayDuration}
             </Text>
           </View>
         </View>
+
+        {/* 0. Today's Scheduled Collective Sport Practice Cards */}
+        {todaySportSlots.map((sportSlot) => {
+          const targetHrs = ((sportSlot.target_duration_minutes || 120) / 60)
+            .toFixed(1)
+            .replace(/\.0$/, '');
+          return (
+            <View
+              key={sportSlot.id}
+              style={[
+                styles.trackCard,
+                { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' },
+              ]}
+            >
+              <View style={styles.trackTopBar}>
+                <View style={styles.trackIndicatorRow}>
+                  <View style={[styles.trackDot, { backgroundColor: '#D97706' }]} />
+                  <Text style={[styles.trackTrackTitle, { color: '#D97706' }]}>
+                    Collective Sports Practice
+                  </Text>
+                </View>
+                <View style={[styles.trackDurationPill, { backgroundColor: '#FEF3C7' }]}>
+                  <Text style={[styles.trackDurationText, { color: '#B45309' }]}>
+                    Target: {targetHrs}h ({sportSlot.target_duration_minutes || 120} min)
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ marginBottom: 12 }}>
+                <Text style={styles.trackName}>{sportSlot.title}</Text>
+                <Text style={styles.trackDescription}>
+                  Scheduled for {todayDayName} • Manual hours & RPE tracking enabled
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.startWorkoutButton, { backgroundColor: '#D97706' }]}
+                onPress={() => setSportLogSlot(sportSlot)}
+                activeOpacity={0.88}
+              >
+                <View style={styles.ctaLeftContent}>
+                  <View style={styles.ctaPlayCircle}>
+                    <Ionicons name="time-outline" size={20} color="#FFFFFF" />
+                  </View>
+                  <View>
+                    <Text style={styles.ctaTitle}>Log Practice Hours</Text>
+                    <Text style={styles.ctaSubtitle}>
+                      Record {targetHrs}h {sportSlot.title} & RPE
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons name="checkmark-done" size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          );
+        })}
 
         {/* 1. Both Tracks Rest Day */}
         {workoutSchedule.isRestDay && rehabSchedule.todaySessions.length === 0 && (
@@ -1149,6 +1473,17 @@ export default function KinetixDashboard() {
 
         <View style={{ height: 24 }} />
       </ScrollView>
+
+      <SportQuickLogModal
+        visible={Boolean(sportLogSlot)}
+        sportTitle={sportLogSlot?.title || 'Volleyball Practice'}
+        exerciseId={sportLogSlot?.exercise_id}
+        defaultDurationMinutes={sportLogSlot?.target_duration_minutes || 120}
+        defaultIntensity={sportLogSlot?.intensity_target || 'High'}
+        targetDateLabel={`Today (${todayFormatted})`}
+        onClose={() => setSportLogSlot(null)}
+        onSaveLog={handleSaveSportLog}
+      />
 
       {/* Persistent Bottom Nav */}
       <KinetixBottomNav activeTab="today" />

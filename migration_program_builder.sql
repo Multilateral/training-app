@@ -419,8 +419,8 @@ SET search_path = public
 AS $$
 DECLARE
   v_enrollment RECORD;
-  v_current_phase RECORD;
-  v_next_phase RECORD;
+  v_current_phase program_phases%ROWTYPE;
+  v_next_phase program_phases%ROWTYPE;
   v_sessions_completed INTEGER;
   v_avg_pain NUMERIC(4,2);
   v_advanced BOOLEAN := false;
@@ -428,6 +428,9 @@ DECLARE
   v_requires_more_time BOOLEAN := false;
   v_recent_pains INTEGER[];
   v_log_id UUID;
+  v_out_phase_id UUID;
+  v_out_phase_order INTEGER;
+  v_out_phase_title TEXT;
 BEGIN
   -- 1. Validate pain score range (0-10)
   IF p_pain_score < 0 OR p_pain_score > 10 THEN
@@ -477,6 +480,10 @@ BEGIN
   FROM program_phases
   WHERE id = p_program_phase_id;
 
+  v_out_phase_id := v_current_phase.id;
+  v_out_phase_order := v_current_phase.phase_order;
+  v_out_phase_title := v_current_phase.title;
+
   -- 5. Count total completed sessions for this phase
   SELECT COUNT(*)::INTEGER
   INTO v_sessions_completed
@@ -520,6 +527,9 @@ BEGIN
         v_advanced := true;
         v_completed_program := false;
         v_requires_more_time := false;
+        v_out_phase_id := v_next_phase.id;
+        v_out_phase_order := v_next_phase.phase_order;
+        v_out_phase_title := v_next_phase.title;
       ELSE
         UPDATE user_enrollments
         SET 
@@ -565,9 +575,9 @@ BEGIN
     'advanced', v_advanced,
     'completed_program', v_completed_program,
     'requires_more_time', v_requires_more_time,
-    'current_phase_id', CASE WHEN v_advanced AND NOT v_completed_program THEN v_next_phase.id ELSE v_current_phase.id END,
-    'current_phase_order', CASE WHEN v_advanced AND NOT v_completed_program THEN v_next_phase.phase_order ELSE v_current_phase.phase_order END,
-    'current_phase_title', CASE WHEN v_advanced AND NOT v_completed_program THEN v_next_phase.title ELSE v_current_phase.title END,
+    'current_phase_id', v_out_phase_id,
+    'current_phase_order', v_out_phase_order,
+    'current_phase_title', v_out_phase_title,
     'sessions_completed', v_sessions_completed,
     'required_sessions', v_current_phase.required_sessions_to_pass,
     'avg_pain_score', v_avg_pain,

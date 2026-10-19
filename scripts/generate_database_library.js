@@ -121,49 +121,89 @@ async function buildDatabaseLibrary() {
   const { data: wsData } = await supabase
     .from('worksessions')
     .select(
-      'id, name, modality, description, created_at, worksession_exercises(id, target_sets, target_reps, tracking_type, target_time, notes, exercises(id, name, category, equipment, muscle_group, instructions, difficulty, mechanics))'
+      'id, name, modality, description, created_at, worksession_exercises(id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes, exercises(id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps))'
     )
     .order('created_at', { ascending: false });
 
   const { data: plansData } = await supabase
     .from('training_plans')
     .select(
-      'id, name, schedule_type, goal_category, description, is_standard_template, plan_worksessions(id, day_name, order_index, worksessions(id, name, modality, description, worksession_exercises(id, target_sets, target_reps, tracking_type, target_time, notes, exercises(id, name, category, equipment, muscle_group, instructions, difficulty, mechanics))))'
+      'id, name, schedule_type, goal_category, description, is_standard_template, plan_worksessions(id, day_name, order_index, worksessions(id, name, modality, description, worksession_exercises(id, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes, exercises(id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps))))'
     )
     .order('created_at', { ascending: false });
 
+  const mapExercise = (we) => {
+    const ex = we.exercises || {};
+    const isHold =
+      (ex.name &&
+        (ex.name.includes('McGill') ||
+          ex.name.includes('Bird-Dog') ||
+          ex.name.includes('Plank') ||
+          ex.name.includes('Hold') ||
+          ex.name.includes('Pallof'))) ||
+      we.tracking_type === 'time' ||
+      (we.target_time && we.target_time > 0);
+
+    const holdSeconds = isHold ? 10 : undefined;
+    const repsPerSet = isHold ? [5, 3, 1] : undefined;
+    const durationsPerSet = isHold ? [50, 30, 10] : undefined;
+    const restSeconds =
+      typeof we.target_rest_seconds === 'number'
+        ? we.target_rest_seconds
+        : typeof ex.default_rest_seconds === 'number'
+        ? ex.default_rest_seconds
+        : isHold
+        ? 45
+        : 60;
+    const durationSeconds =
+      typeof we.target_duration_seconds === 'number'
+        ? we.target_duration_seconds
+        : typeof we.target_time === 'number' && we.target_time > 0
+        ? we.target_time
+        : typeof ex.default_duration_seconds === 'number'
+        ? ex.default_duration_seconds
+        : isHold
+        ? 50
+        : undefined;
+
+    const trackingType = durationSeconds || isHold
+      ? 'time'
+      : getInferredTrackingType(ex.name, ex.category, ex.equipment, ex.mechanics);
+
+    return {
+      name: ex.name || 'Exercise',
+      cue: we.notes || ex.instructions || 'Maintain controlled form and posture.',
+      sets: we.target_sets || 3,
+      reps: durationSeconds
+        ? `${durationSeconds}s`
+        : we.target_reps
+        ? String(we.target_reps)
+        : '10-12',
+      weight:
+        ex.equipment === 'Bodyweight' || ex.equipment === 'Floor Mat'
+          ? 'Bodyweight'
+          : ex.equipment === 'Kettlebell'
+          ? '24kg'
+          : 'Moderate',
+      restSeconds,
+      target_rest_seconds: we.target_rest_seconds,
+      target_duration_seconds: we.target_duration_seconds || durationSeconds,
+      target_reps: we.target_reps,
+      hold_seconds_per_rep: holdSeconds,
+      reps_per_set: repsPerSet,
+      durations_per_set: durationsPerSet,
+      tracking_type: trackingType,
+      equipment: ex.equipment || 'Bodyweight',
+      muscle_group: ex.muscle_group || ex.category || 'General',
+      difficulty: ex.difficulty || 'Intermediate',
+      mechanics: ex.mechanics || 'Compound',
+      description: ex.description || getExerciseDescription(ex) || null,
+    };
+  };
+
   const formattedWorksessions = (wsData || []).map((ws) => {
     const meta = inferTypeAndCategory(ws);
-    const exercises = (ws.worksession_exercises || []).map((we) => {
-      const ex = we.exercises || {};
-      const isHold = we.tracking_type === 'time' || (we.target_time && we.target_time > 0);
-      const trackingType = isHold ? 'time' : getInferredTrackingType(ex.name, ex.category, ex.equipment, ex.mechanics);
-      return {
-        name: ex.name || 'Exercise',
-        cue: we.notes || ex.instructions || 'Maintain controlled form and posture.',
-        sets: we.target_sets || 3,
-        reps: isHold
-          ? we.target_time
-            ? `${we.target_time}s`
-            : '45s'
-          : we.target_reps
-          ? String(we.target_reps)
-          : '10-12',
-        weight:
-          ex.equipment === 'Bodyweight' || ex.equipment === 'Floor Mat'
-            ? 'Bodyweight'
-            : ex.equipment === 'Kettlebell'
-            ? '24kg'
-            : 'Moderate',
-        restSeconds: isHold ? 45 : 60,
-        tracking_type: trackingType,
-        equipment: ex.equipment || 'Bodyweight',
-        muscle_group: ex.muscle_group || ex.category || 'General',
-        difficulty: ex.difficulty || 'Intermediate',
-        mechanics: ex.mechanics || 'Compound',
-        description: ex.description || getExerciseDescription(ex) || null,
-      };
-    });
+    const exercises = (ws.worksession_exercises || []).map(mapExercise);
 
     const totalSets = exercises.reduce((acc, e) => acc + (e.sets || 3), 0);
     const durationMin = Math.max(
@@ -239,6 +279,12 @@ export interface DatabaseWorksessionCard {
     reps: string | number;
     weight: string;
     restSeconds: number;
+    target_rest_seconds?: number;
+    target_duration_seconds?: number;
+    target_reps?: number;
+    hold_seconds_per_rep?: number;
+    reps_per_set?: number[];
+    durations_per_set?: number[];
     tracking_type?: string;
     equipment?: string;
     muscle_group?: string;
@@ -248,13 +294,13 @@ export interface DatabaseWorksessionCard {
   }[];
 }
 
-export interface DatabasePlan {
+export interface DatabasePlanPhase {
   id: string;
-  name: string;
-  schedule_type: string;
-  goal_category: string;
+  phase_order: number;
+  title: string;
   description?: string;
-  is_standard_template: boolean;
+  required_sessions_to_pass?: number;
+  max_allowed_pain_score?: number;
   worksessions: {
     dayName: string;
     worksessionId: string;
@@ -265,13 +311,31 @@ export interface DatabasePlan {
   }[];
 }
 
-export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = ${JSON.stringify(
+export interface DatabasePlan {
+  id: string;
+  name: string;
+  schedule_type: string;
+  goal_category: string;
+  description?: string;
+  is_standard_template: boolean;
+  phases?: DatabasePlanPhase[];
+  worksessions: {
+    dayName: string;
+    worksessionId: string;
+    worksessionName: string;
+    modality?: string;
+    exerciseCount: number;
+    worksession?: DatabaseWorksessionCard | null;
+  }[];
+}
+
+export const DATABASE_WORKSESSIONS: DatabaseWorksessionCard[] = \${JSON.stringify(
     formattedWorksessions,
     null,
     2
   )};
 
-export const DATABASE_PLANS: DatabasePlan[] = ${JSON.stringify(
+export const DATABASE_PLANS: DatabasePlan[] = \${JSON.stringify(
     formattedPlans,
     null,
     2

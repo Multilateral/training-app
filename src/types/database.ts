@@ -1,6 +1,6 @@
 export type DifficultyLevel = 'Beginner' | 'Intermediate' | 'Advanced';
 
-export type TrackingType = 'reps' | 'time' | 'weight_reps' | 'distance';
+export type TrackingType = 'reps' | 'time' | 'weight_reps' | 'distance' | 'manual';
 
 export interface Exercise {
   id: string;
@@ -16,6 +16,9 @@ export interface Exercise {
   video_url?: string | null;
   video_thumbnail_url?: string | null;
   is_default?: boolean;
+  default_rest_seconds?: number;
+  default_duration_seconds?: number;
+  default_reps?: number;
   user_id?: string | null;
   created_at?: string;
 }
@@ -38,6 +41,11 @@ export interface WorksessionExercise {
   target_reps?: number | null;
   tracking_type?: TrackingType | string;
   target_time?: number | null;
+  target_rest_seconds?: number | null;
+  target_duration_seconds?: number | null;
+  hold_seconds_per_rep?: number | null;
+  reps_per_set?: number[] | null;
+  durations_per_set?: number[] | null;
   notes?: string | null;
   created_at?: string;
   exercises?: Exercise;
@@ -78,3 +86,26 @@ export interface UserGoal {
   created_at?: string;
   updated_at?: string;
 }
+
+export type ScheduleActivityType = 'workout' | 'rehab' | 'sport' | 'rest';
+
+export interface WeeklyScheduleSlot {
+  id: string;
+  user_id?: string;
+  day_of_week: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
+  day_index: number; // 0 = Monday ... 6 = Sunday
+  activity_type: ScheduleActivityType;
+  title: string;
+  subtitle?: string | null;
+  worksession_id?: string | null;
+  program_id?: string | null;
+  exercise_id?: string | null;
+  bind_to_active_phase?: boolean;
+  target_duration_minutes?: number;
+  intensity_target?: string | null;
+  notes?: string | null;
+  order_index?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+

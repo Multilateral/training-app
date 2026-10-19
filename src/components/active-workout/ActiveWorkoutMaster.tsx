@@ -394,7 +394,11 @@ export default function ActiveWorkoutMaster({
       {videoModal && (
         <ExerciseVideoModal
           visible={Boolean(videoModal)}
-          exercise={videoModal}
+          exercise={{
+            name: videoModal.title,
+            video_url: videoModal.url,
+            ...videoModal,
+          }}
           onClose={() => setVideoModal(null)}
         />
       )}

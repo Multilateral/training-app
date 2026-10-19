@@ -282,7 +282,8 @@ export const KETTLEBELL_EXERCISES_METADATA = {
     muscle: 'Quadriceps / Glutes / Core',
     difficulty: 'Beginner',
     mechanics: 'Knee-Dominant',
-    instructions: 'Hold bell by the horns tight against chest. Squat down between knees keeping chest tall and elbows inside knees. Drive through midfoot to stand.'
+    instructions: 'Hold bell by the horns tight against chest. Squat down between knees keeping chest tall and elbows inside knees. Drive through midfoot to stand.',
+    description: 'Target Musculature & Clinical Purpose:\nQuadriceps and glute recruitment with high anterior core stabilization. The counterbalance of the goblet position allows a more vertical torso, drastically reducing spinal shear forces.\n\nSetup & Joint Positioning:\nStand with feet shoulder-width, toes angled out 15-30 degrees. Hold kettlebell close to chest with elbows pointing down.\n\nBiomechanical Execution & Cues:\n• Sit down between your heels while pushing knees gently outward.\n• Descend until hip crease is parallel with knees without tucking the tailbone (butt wink).\n• Push through whole foot to stand tall.\n• Cues: "Pry your knees open with your elbows" and "Keep chest proud."\n\nCommon Faults & Kinetotherapy Fixes:\nHeels rising or torso collapsing forward. Fix: Elevate heels on small 2.5lb plates or regress depth.\n\nRehab / Loading Parameters:\n3 sets × 10 reps. Rest 90s.'
   },
   'e0000002-0000-4000-a000-000000000004': {
     name: 'Kettlebell Clean',
@@ -330,7 +331,8 @@ export const KETTLEBELL_EXERCISES_METADATA = {
     muscle: 'Hamstrings / Glutes',
     difficulty: 'Beginner',
     mechanics: 'Hip Hinge',
-    instructions: 'Stand tall holding bell(s). Soften knees, push hips back keeping back flat until hamstrings stretch; return by driving hips forward.'
+    instructions: 'Stand tall holding bell(s). Soften knees, push hips back keeping back flat until hamstrings stretch; return by driving hips forward.',
+    description: 'Target Musculature & Clinical Purpose:\nHip hinge motor pattern and posterior chain eccentric loading. Teaches the patient to load the glutes and hamstrings rather than rounding through the lumbar spine under load.\n\nSetup & Joint Positioning:\nStand with feet hip-width apart. Hold kettlebell with both hands in front of thighs. Shoulders packed down and back, core braced.\n\nBiomechanical Execution & Cues:\n• Soften knees slightly (15-20 degrees) and lock them in place.\n• Hinge backward by pushing hips toward the rear wall.\n• Keep kettlebell close to shins; spine remains straight as an arrow.\n• Cues: "Push a car door shut with your glutes" and "Shave your shins with the weight."\n\nCommon Faults & Kinetotherapy Fixes:\nSquatting down (bending knees too much) or rounding the upper/lower back. Fix: Stand 6 inches from a wall and hinge until glutes touch the wall.\n\nRehab / Loading Parameters:\n4 sets × 8 reps. Rest 90s.'
   },
   'e0000002-0000-4000-a000-000000000010': {
     name: 'Kettlebell Gorilla Row',
@@ -494,6 +496,96 @@ export const CORE_EXERCISES_METADATA = {
     difficulty: 'Beginner',
     mechanics: 'Dynamic Concentric',
     instructions: 'Feet in TRX straps in high push-up plank. Drive both knees together straight toward chest, rounding lower back slightly at end, then extend legs back.'
+  },
+  'e0000001-0000-4000-a000-000000000030': {
+    name: 'Psoas March (Supine)',
+    alias: 'Supine Psoas March',
+    area: 'Lower Back & Lumbar Spine',
+    muscle: 'Deep Core / Psoas / Hip Flexors',
+    difficulty: 'Beginner',
+    mechanics: 'Motor Control / Anti-Extension',
+    instructions: 'Lie supine on back with hips and knees at 90 degrees. Flatten lower back against floor. Slowly lower one heel to tap floor without arching spine, then return under control. Alternate sides.',
+    description: 'Target Musculature & Clinical Purpose:\nPsoas major and anterior core motor control. Dissociates hip flexion from lumbar spinal movement, retraining the hip flexors to operate without dragging the pelvis into anterior tilt or hyper-extending the lumbar spine.\n\nSetup & Joint Positioning:\nLie flat on your back on a mat. Bring both knees and hips to 90 degrees (tabletop position). Slide your ribs down to gently press the lower back against the floor in a neutral braced position.\n\nBiomechanical Execution & Cues:\n• Eccentric / Loading: Slowly extend one hip, tapping the heel gently to the floor over a 2-second count.\n• Bottom Position: Do not allow the lower back to peel or arch off the floor as the leg lowers.\n• Concentric / Drive: Pull the knee back to the 90-degree starting position.\n• Internal & External Cues: "Keep your lower back glued to the floor" and "Move from the hip crease, not the lower back."\n\nCommon Faults & Kinetotherapy Fixes:\nArching the lumbar spine as the heel approaches the floor. Fix: Stop the heel tap higher off the ground, or regress by placing the non-working foot flat on the floor.\n\nRehab / Loading Parameters:\n2 sets × 10 reps per side (Tempo: 2-1-2-0).'
+  },
+  'e0000001-0000-4000-a000-000000000031': {
+    name: 'Active Straight Leg Raise',
+    alias: 'Supine ASLR',
+    area: 'Lower Back & Lumbar Spine',
+    muscle: 'Hamstrings / Core / Hip Flexors',
+    difficulty: 'Beginner',
+    mechanics: 'Active Mobility & Stability',
+    instructions: 'Lie on back with legs straight and toes pointed up. Keep non-working leg pressed into floor. Slowly raise working leg with straight knee as high as possible without pelvis shifting. Lower with control.',
+    description: 'Target Musculature & Clinical Purpose:\nHip mobility and contra-lateral pelvic stability. Restores active hamstring flexibility while training the opposite hip and abdominal wall to maintain an unyielding neutral pelvic anchor.\n\nSetup & Joint Positioning:\nLie flat on your back with legs straight and toes pointed up. Place arms at your sides, palms flat.\n\nBiomechanical Execution & Cues:\n• Actively press the non-working leg flat into the floor.\n• Raise the active leg straight up toward the ceiling with the knee locked.\n• Pause at the peak for 1 second, then lower slowly over 3 seconds.\n• Cues: "Drive the opposite heel into the floor" and "Keep your kneecap pulled up."\n\nCommon Faults & Kinetotherapy Fixes:\nBending the knee or allowing the opposite leg to externally rotate. Fix: Use a towel or band around the working foot if hamstring tightness prevents vertical reach.\n\nRehab / Loading Parameters:\n2 sets × 12 reps per side (Tempo: 3-1-1-0).'
+  },
+  'e0000001-0000-4000-a000-000000000032': {
+    name: 'Bird-Dog Squares',
+    alias: 'Quadruped Bird-Dog Squares',
+    area: 'Lower Back & Lumbar Spine',
+    muscle: 'Erector Spinae / Multifidus / Gluteal',
+    difficulty: 'Intermediate',
+    mechanics: 'Dynamic Core Stability',
+    instructions: 'From standard Bird-Dog extension, draw small controlled squares in the air with both hand and opposite foot. Maintain rigid torso with zero lumbar rotation.',
+    description: 'Target Musculature & Clinical Purpose:\nMultifidus endurance and dynamic rotational resistance. Adding planar perturbation (drawing squares) forces deep spinal stabilizers to continually micro-adjust, building resilient stiffness against unpredictable loads.\n\nSetup & Joint Positioning:\nQuadruped (all-fours) position. Stiffen core 360 degrees. Extend opposite arm and leg parallel to floor.\n\nBiomechanical Execution & Cues:\n• Move the hand and foot simultaneously in a square: up, out, down, in.\n• Torso must remain motionless; only the shoulder and hip joints articulate.\n• Cues: "Freeze your spine in carbonite" and "Draw tight, crisp corners."\n\nCommon Faults & Kinetotherapy Fixes:\nPelvis tilting side-to-side. Fix: Place a foam yoga block horizontally across the sacrum; it must not slide off during the set.\n\nRehab / Loading Parameters:\n3 sets × 45 seconds per side (Tempo: Controlled micro-movements).'
+  },
+  'e0000001-0000-4000-a000-000000000033': {
+    name: 'Rolling Side Planks',
+    alias: 'Dynamic Side Bridge to Front Plank',
+    area: 'Lower Back & Lumbar Spine',
+    muscle: 'Obliques / Transverse Abdominis / QL',
+    difficulty: 'Intermediate',
+    mechanics: 'Rotational Control',
+    instructions: 'Start in side plank. Rotate torso as a single rigid cylinder into a front plank on elbows, then rotate onto other side plank without sagging hips.',
+    description: 'Target Musculature & Clinical Purpose:\nTransverse abdominis and oblique sling integration. Retrains the core musculature to transfer torsional stiffness seamlessly from the sagittal to the frontal and transverse planes without spinal buckle.\n\nSetup & Joint Positioning:\nBegin in an elbow side plank on the right forearm, body rigid from head to heels.\n\nBiomechanical Execution & Cues:\n• Pivot both feet and hips simultaneously as a single unit into a standard elbow front plank.\n• Pause for 1 second, then continue rolling smoothly into a left side plank.\n• Cues: "Rotate like a log rolling down a hill" and "Never let the hips dip toward the mat."\n\nCommon Faults & Kinetotherapy Fixes:\nThe hips lagging behind the shoulders during the roll. Fix: Imagine a steel rod connecting the pelvis to the chest; they must rotate simultaneously.\n\nRehab / Loading Parameters:\n3 sets × 60 seconds continuous controlled rotation.'
+  },
+  'e0000001-0000-4000-a000-000000000034': {
+    name: 'Pallof Press (Isometric Hold)',
+    alias: 'Pallof Press Hold',
+    area: 'Lower Back & Lumbar Spine',
+    muscle: 'Deep Core / Anti-Rotation',
+    difficulty: 'Intermediate',
+    mechanics: 'Anti-Rotation Isometric',
+    instructions: 'Stand perpendicular to resistance band anchored at chest height. Press band straight out in front of chest. Hold statically resisting rotational pull for 20s. Return to chest.',
+    description: 'Target Musculature & Clinical Purpose:\nInternal and external obliques, quadratus lumborum anti-rotation capacity. Lengthening the lever arm (hands extended) creates maximum rotational torque, conditioning the lumbar spine to resist sudden lateral/twisting forces.\n\nSetup & Joint Positioning:\nStand athletic, feet hip-width, knees soft. Hold band handle with both hands at center of sternum.\n\nBiomechanical Execution & Cues:\n• Press both arms straight forward until elbows are locked.\n• Hold rigidly for the prescribed duration (20s) without letting the hands drift toward the anchor.\n• Cues: "Anchor your feet into the earth" and "Lock your ribcage over your pelvis."\n\nCommon Faults & Kinetotherapy Fixes:\nTwisting the hips or flaring the ribs. Fix: Step closer to the anchor to reduce tension until the torso can stay completely square.\n\nRehab / Loading Parameters:\n3 sets × 20 seconds hold per side. Rest 45s between sets.'
+  },
+  'e0000001-0000-4000-a000-000000000035': {
+    name: '90/90 Diaphragmatic Breathing',
+    alias: '90-90 Breathing with Pelvic Tilt',
+    area: 'Lower Back & Pelvis',
+    muscle: 'Diaphragm / Pelvic Floor / Deep Core',
+    difficulty: 'Beginner',
+    mechanics: 'Respiratory Reset',
+    instructions: 'Lie on back, heels rested on bench or wall with hips and knees at 90°. Inhale slowly through nose expanding 360° belly/ribs. Exhale fully through mouth pulling ribs down. Rest 0s after sets.',
+    description: 'Target Musculature & Clinical Purpose:\nDiaphragmatic excursion, parasympathetic nervous system down-regulation, and pelvic repositioning. Re-centers the ribcage over the pelvis, reducing hypertonic tone in the erector spinae and psoas.\n\nSetup & Joint Positioning:\nLie on back. Place feet on a bench or wall with hips and knees at 90 degrees. Drag heels down slightly to activate hamstrings and induce a subtle posterior pelvic tilt (lower back flat).\n\nBiomechanical Execution & Cues:\n• Inhale quietly through the nose for 4 seconds, filling the lower abdomen and lateral ribcage.\n• Exhale fully through the mouth for 6-8 seconds until all air is emptied and ribs sink down.\n• Pause 2-3 seconds before next inhalation.\n• Cues: "Breathe into your belt line" and "Blow through a straw."\n\nCommon Faults & Kinetotherapy Fixes:\nChest and shoulders rising on inhalation instead of the belly/ribs expanding. Fix: Place one hand on the chest and one on the belly; only the belly hand should rise.\n\nRehab / Loading Parameters:\n1 set × 120-180 seconds continuous. Rest: 0s.'
+  },
+  'e0000001-0000-4000-a000-000000000036': {
+    name: 'Suitcase Carries',
+    alias: 'Single-Arm Kettlebell Carry',
+    area: 'Lower Back & Core',
+    muscle: 'Quadratus Lumborum / Obliques / Grip',
+    difficulty: 'Intermediate',
+    mechanics: 'Loaded Carry / Anti-Lateral Flexion',
+    instructions: 'Hold single heavy kettlebell or dumbbell at side. Walk in straight line with upright vertical posture, shoulders level, and zero lateral leaning. Walk 30m per side.',
+    description: 'Target Musculature & Clinical Purpose:\nQuadratus lumborum (QL) and contralateral lateral stabilizer strength. Bridges the gap between floor core stiffness and real-world upright locomotion under asymmetrical gravitational load.\n\nSetup & Joint Positioning:\nDeadlift a heavy kettlebell or dumbbell with one hand. Stand tall with neutral cervical and lumbar curves.\n\nBiomechanical Execution & Cues:\n• Walk forward at a measured, controlled pace.\n• Keep shoulders level with the horizon; do not hike the loaded shoulder or tilt to the side.\n• Cues: "Walk tall like carrying a cup of boiling water" and "Stay stiff as an iron beam."\n\nCommon Faults & Kinetotherapy Fixes:\nTilting toward the weight or shrugging the trap. Fix: Lighten load or place opposite hand on hip to monitor vertical posture.\n\nRehab / Loading Parameters:\n3 sets × 30 meters per side. Rest 60s.'
+  },
+  'e0000001-0000-4000-a000-000000000037': {
+    name: 'Kettlebell Romanian Deadlift (RDL)',
+    alias: 'KB RDL',
+    area: 'Posterior Chain & Lumbar',
+    muscle: 'Hamstrings / Glutes / Erectors',
+    difficulty: 'Intermediate',
+    mechanics: 'Hip Hinge',
+    instructions: 'Stand tall with kettlebell held with both hands. Soften knees, push hips backward horizontally keeping spine flat. Lower bell below knees feeling deep hamstring stretch, then drive hips forward to stand.',
+    description: 'Target Musculature & Clinical Purpose:\nHip hinge motor pattern and posterior chain eccentric loading. Teaches the patient to load the glutes and hamstrings rather than rounding through the lumbar spine under load.\n\nSetup & Joint Positioning:\nStand with feet hip-width apart. Hold kettlebell with both hands in front of thighs. Shoulders packed down and back, core braced.\n\nBiomechanical Execution & Cues:\n• Soften knees slightly (15-20 degrees) and lock them in place.\n• Hinge backward by pushing hips toward the rear wall.\n• Keep kettlebell close to shins; spine remains straight as an arrow.\n• Cues: "Push a car door shut with your glutes" and "Shave your shins with the weight."\n\nCommon Faults & Kinetotherapy Fixes:\nSquatting down (bending knees too much) or rounding the upper/lower back. Fix: Stand 6 inches from a wall and hinge until glutes touch the wall.\n\nRehab / Loading Parameters:\n4 sets × 8 reps. Rest 90s.'
+  },
+  'e0000001-0000-4000-a000-000000000038': {
+    name: 'Kettlebell Goblet Squat',
+    alias: 'KB Goblet Squat',
+    area: 'Lower Body & Core',
+    muscle: 'Quadriceps / Glutes / Anterior Core',
+    difficulty: 'Intermediate',
+    mechanics: 'Squat Compound',
+    instructions: 'Hold kettlebell at chest by the horns. Stand shoulder-width, toes turned out slightly. Squat down between knees keeping torso vertical and heels flat. Drive floor away to return.',
+    description: 'Target Musculature & Clinical Purpose:\nQuadriceps and glute recruitment with high anterior core stabilization. The counterbalance of the goblet position allows a more vertical torso, drastically reducing spinal shear forces.\n\nSetup & Joint Positioning:\nStand with feet shoulder-width, toes angled out 15-30 degrees. Hold kettlebell close to chest with elbows pointing down.\n\nBiomechanical Execution & Cues:\n• Sit down between your heels while pushing knees gently outward.\n• Descend until hip crease is parallel with knees without tucking the tailbone (butt wink).\n• Push through whole foot to stand tall.\n• Cues: "Pry your knees open with your elbows" and "Keep chest proud."\n\nCommon Faults & Kinetotherapy Fixes:\nHeels rising or torso collapsing forward. Fix: Elevate heels on small 2.5lb plates or regress depth.\n\nRehab / Loading Parameters:\n3 sets × 10 reps. Rest 90s.'
   }
 };
 
@@ -577,10 +669,16 @@ export const ALL_EXERCISES_METADATA = {
 const EXERCISE_BY_NAME = {};
 Object.values(ALL_EXERCISES_METADATA).forEach(meta => {
   if (meta?.name) {
-    EXERCISE_BY_NAME[meta.name.toLowerCase().trim()] = meta;
+    const key = meta.name.toLowerCase().trim();
+    if (!EXERCISE_BY_NAME[key] || (!EXERCISE_BY_NAME[key].description && meta.description)) {
+      EXERCISE_BY_NAME[key] = meta;
+    }
   }
   if (meta?.alias) {
-    EXERCISE_BY_NAME[meta.alias.toLowerCase().trim()] = meta;
+    const key = meta.alias.toLowerCase().trim();
+    if (!EXERCISE_BY_NAME[key] || (!EXERCISE_BY_NAME[key].description && meta.description)) {
+      EXERCISE_BY_NAME[key] = meta;
+    }
   }
 });
 
@@ -592,6 +690,16 @@ EXERCISE_BY_NAME['prone y-t-w raises'] = ALL_EXERCISES_METADATA['e0000001-0000-4
 EXERCISE_BY_NAME['decline slant board squat'] = ALL_EXERCISES_METADATA['e0000001-0000-4000-a000-000000000023'];
 EXERCISE_BY_NAME['dumbbell scaption'] = ALL_EXERCISES_METADATA['e0000001-0000-4000-a000-000000000024'];
 EXERCISE_BY_NAME['deficit calf raises'] = ALL_EXERCISES_METADATA['e0000001-0000-4000-a000-000000000021'];
+EXERCISE_BY_NAME['side plank (short lever/knees)'] = {
+  ...ALL_EXERCISES_METADATA['e0000001-0000-4000-a000-000000000008'],
+  name: 'Side Plank (Short Lever/Knees)',
+  instructions: 'Lie on side with knees bent at 90° and bottom elbow under shoulder. Drive hips up forming a rigid line from knees to ears. Hold statically without twisting or sagging.',
+  difficulty: 'Beginner',
+  mechanics: 'Isometric / Anti-Lateral Flexion',
+  equipment: 'Mat / Bodyweight',
+};
+EXERCISE_BY_NAME['mcgill curl-up (warmup)'] = ALL_EXERCISES_METADATA['e0000001-0000-4000-a000-000000000006'];
+EXERCISE_BY_NAME['bird-dog (warmup)'] = ALL_EXERCISES_METADATA['e0000001-0000-4000-a000-000000000007'];
 
 const WORKSESSION_BY_NAME = {};
 Object.values(RECOVERY_WORKSESSIONS_METADATA).forEach(meta => {
@@ -599,6 +707,22 @@ Object.values(RECOVERY_WORKSESSIONS_METADATA).forEach(meta => {
     WORKSESSION_BY_NAME[meta.name.toLowerCase().trim()] = meta;
   }
 });
+
+const resolveExerciseMeta = (exercise) => {
+  if (!exercise) return null;
+  if (exercise.id && ALL_EXERCISES_METADATA[exercise.id]) {
+    return ALL_EXERCISES_METADATA[exercise.id];
+  }
+  const nameKey = exercise.name?.toLowerCase().trim();
+  if (nameKey && EXERCISE_BY_NAME[nameKey]) {
+    return EXERCISE_BY_NAME[nameKey];
+  }
+  const baseNameKey = nameKey ? nameKey.replace(/\s*\([^)]*\)/g, '').trim() : null;
+  if (baseNameKey && EXERCISE_BY_NAME[baseNameKey]) {
+    return EXERCISE_BY_NAME[baseNameKey];
+  }
+  return null;
+};
 
 export const getExerciseInstructions = (exercise) => {
   if (!exercise) return null;
@@ -609,6 +733,10 @@ export const getExerciseInstructions = (exercise) => {
   const nameKey = exercise.name?.toLowerCase().trim();
   if (nameKey && EXERCISE_BY_NAME[nameKey]?.instructions) {
     return EXERCISE_BY_NAME[nameKey].instructions;
+  }
+  const baseNameKey = nameKey ? nameKey.replace(/\s*\([^)]*\)/g, '').trim() : null;
+  if (baseNameKey && EXERCISE_BY_NAME[baseNameKey]?.instructions) {
+    return EXERCISE_BY_NAME[baseNameKey].instructions;
   }
   return null;
 };
@@ -623,33 +751,43 @@ export const getExerciseDescription = (exercise) => {
   if (nameKey && EXERCISE_BY_NAME[nameKey]?.description) {
     return EXERCISE_BY_NAME[nameKey].description;
   }
+  const baseNameKey = nameKey ? nameKey.replace(/\s*\([^)]*\)/g, '').trim() : null;
+  if (baseNameKey && EXERCISE_BY_NAME[baseNameKey]?.description) {
+    return EXERCISE_BY_NAME[baseNameKey].description;
+  }
   return null;
 };
 
 export const getExerciseDifficulty = (exercise) => {
   if (!exercise) return null;
   if (exercise.difficulty) return exercise.difficulty;
-  if (exercise.id && ALL_EXERCISES_METADATA[exercise.id]?.difficulty) {
-    return ALL_EXERCISES_METADATA[exercise.id].difficulty;
-  }
-  const nameKey = exercise.name?.toLowerCase().trim();
-  if (nameKey && EXERCISE_BY_NAME[nameKey]?.difficulty) {
-    return EXERCISE_BY_NAME[nameKey].difficulty;
-  }
-  return null;
+  return resolveExerciseMeta(exercise)?.difficulty || null;
 };
 
 export const getExerciseMechanics = (exercise) => {
   if (!exercise) return null;
   if (exercise.mechanics) return exercise.mechanics;
-  if (exercise.id && ALL_EXERCISES_METADATA[exercise.id]?.mechanics) {
-    return ALL_EXERCISES_METADATA[exercise.id].mechanics;
-  }
-  const nameKey = exercise.name?.toLowerCase().trim();
-  if (nameKey && EXERCISE_BY_NAME[nameKey]?.mechanics) {
-    return EXERCISE_BY_NAME[nameKey].mechanics;
-  }
-  return null;
+  return resolveExerciseMeta(exercise)?.mechanics || null;
+};
+
+export const getExerciseMuscleGroup = (exercise) => {
+  if (!exercise) return null;
+  if (exercise.muscle_group) return exercise.muscle_group;
+  if (exercise.muscle) return exercise.muscle;
+  const meta = resolveExerciseMeta(exercise);
+  return meta?.muscle || meta?.area || null;
+};
+
+export const getExerciseEquipment = (exercise) => {
+  if (!exercise) return null;
+  if (exercise.equipment) return exercise.equipment;
+  return resolveExerciseMeta(exercise)?.equipment || null;
+};
+
+export const getExerciseCategory = (exercise) => {
+  if (!exercise) return null;
+  if (exercise.category) return exercise.category;
+  return resolveExerciseMeta(exercise)?.area || null;
 };
 
 export const getWorksessionDescription = (worksession) => {
@@ -674,42 +812,54 @@ export const getWorksessionExerciseCue = (worksession, exerciseId) => {
 export const getExerciseVideoUrl = (exercise) => {
   if (!exercise) return null;
   if (exercise.video_url) return exercise.video_url;
-  if (exercise.id && ALL_EXERCISES_METADATA[exercise.id]?.video_url) {
-    return ALL_EXERCISES_METADATA[exercise.id].video_url;
-  }
-  const nameKey = exercise.name?.toLowerCase().trim();
-  if (nameKey && EXERCISE_BY_NAME[nameKey]?.video_url) {
-    return EXERCISE_BY_NAME[nameKey].video_url;
-  }
-  return null;
+  return resolveExerciseMeta(exercise)?.video_url || null;
 };
 
 export const getExerciseVideoThumbnail = (exercise) => {
   if (!exercise) return null;
   if (exercise.video_thumbnail_url) return exercise.video_thumbnail_url;
-  if (exercise.id && ALL_EXERCISES_METADATA[exercise.id]?.video_thumbnail_url) {
-    return ALL_EXERCISES_METADATA[exercise.id].video_thumbnail_url;
-  }
-  const nameKey = exercise.name?.toLowerCase().trim();
-  if (nameKey && EXERCISE_BY_NAME[nameKey]?.video_thumbnail_url) {
-    return EXERCISE_BY_NAME[nameKey].video_thumbnail_url;
-  }
-  return null;
+  return resolveExerciseMeta(exercise)?.video_thumbnail_url || null;
 };
 
 export const getExerciseTrackingType = (exercise) => {
   if (!exercise) return 'weight_reps';
 
+  const n = (exercise.name || '').toLowerCase();
+  if (n.includes('cat-cow') || n.includes('cat cow')) {
+    return 'time';
+  }
+
   // Explicit tracking type field
   const explicit = exercise.tracking_type || exercise.trackingType;
   if (explicit === 'time' || explicit === 'duration') return 'time';
   if (explicit === 'weight_reps') return 'weight_reps';
-  if (explicit === 'bodyweight') return 'bodyweight';
+  if (explicit === 'bodyweight' || explicit === 'reps') return 'bodyweight';
+  if (explicit === 'manual') return 'manual';
 
-  const n = (exercise.name || '').toLowerCase();
   const c = (exercise.category || '').toLowerCase();
   const eq = (exercise.equipment || '').toLowerCase();
   const m = (exercise.mechanics || '').toLowerCase();
+
+  // 0. Manual / Hours log (Collective Sports, sport matches, outdoor activities)
+  if (
+    c.includes('collective sports') ||
+    c.includes('sports') ||
+    m.includes('manual') ||
+    n === 'tennis' ||
+    n === 'soccer' ||
+    n === 'football' ||
+    n === 'basketball' ||
+    n === 'volleyball' ||
+    n === 'badminton' ||
+    n === 'rugby' ||
+    n === 'cricket' ||
+    n === 'baseball' ||
+    n === 'water polo' ||
+    n === 'handball' ||
+    n === 'hockey'
+  ) {
+    return 'manual';
+  }
 
   // 1. Time-related (holds, isometrics, planks, yoga poses, duration-based)
   if (

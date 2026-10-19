@@ -69,6 +69,9 @@ export interface PlayerExercise {
   restSeconds?: number;
   target_duration_seconds?: number;
   target_time?: number;
+  hold_seconds_per_rep?: number;
+  reps_per_set?: number[];
+  durations_per_set?: number[];
   tracking_type?: string;
   trackingType?: string;
   equipment?: string;
@@ -97,6 +100,121 @@ export interface UseWorkoutPlayerOptions {
 // Bundled sound assets for countdown pips and transition chimes
 const PIP_SOUND_ASSET = require('../../assets/sounds/pip.wav');
 const CHIME_SOUND_ASSET = require('../../assets/sounds/chime.wav');
+
+/**
+ * Resolves the target hold duration for a specific set of an exercise.
+ * Supports:
+ * - Explicit `durations_per_set` array (e.g. [50, 30, 10])
+ * - Explicit `reps_per_set` with hold time (e.g. [5, 3, 1] * 10s = [50, 30, 10])
+ * - Stuart McGill descending pyramid (Set 1: 5 reps = 50s, Set 2: 3 reps = 30s, Set 3: 1 rep = 10s)
+ * - Explicit `target_duration_seconds` or `target_time`
+ */
+export const getExerciseSetDuration = (
+  ex: PlayerExercise | undefined,
+  setIndex: number
+): number => {
+  if (!ex) return 45;
+
+  // 1. Explicit durations_per_set array
+  if (Array.isArray(ex.durations_per_set) && typeof ex.durations_per_set[setIndex] === 'number') {
+    return ex.durations_per_set[setIndex];
+  }
+
+  // 2. Explicit reps_per_set with hold time
+  if (Array.isArray(ex.reps_per_set) && typeof ex.reps_per_set[setIndex] === 'number') {
+    const holdTime = ex.hold_seconds_per_rep || 10;
+    return ex.reps_per_set[setIndex] * holdTime;
+  }
+
+  // 3. Stuart McGill protocol or descending pyramid hold
+  const nameLower = (ex.name || '').toLowerCase();
+  const cueLower = (ex.cue || '').toLowerCase();
+  const isMcGill = nameLower.includes('mcgill') || nameLower.includes('bird-dog');
+  const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('50s, 30s') || cueLower.includes('5-3-1');
+  const tSets = ex.totalSets || ex.sets || 3;
+
+  if ((isMcGill || isPyramid) && tSets >= 3 && !nameLower.includes('warmup')) {
+    // Standard 5-3-1 McGill descending pyramid (50s, 30s, 10s)
+    const mcgillPyramidDurations = [50, 30, 10];
+    if (setIndex < mcgillPyramidDurations.length) {
+      return mcgillPyramidDurations[setIndex];
+    }
+  }
+
+  // 4. Target reps with hold time
+  if (ex.hold_seconds_per_rep && ex.target_reps) {
+    return ex.target_reps * ex.hold_seconds_per_rep;
+  }
+
+  // 5. Explicit target_duration_seconds or target_time
+  if (typeof ex.target_duration_seconds === 'number' && ex.target_duration_seconds > 0) {
+    return ex.target_duration_seconds;
+  }
+  if (typeof ex.target_time === 'number' && ex.target_time > 0) {
+    return ex.target_time;
+  }
+
+  // 6. Parsed from reps string (e.g. "50s")
+  const parsedDigits = parseInt(String(ex.reps || '').replace(/[^0-9]/g, ''));
+  if (!isNaN(parsedDigits) && parsedDigits > 0) {
+    return parsedDigits;
+  }
+
+  return 45;
+};
+
+/**
+ * Resolves the target reps for a specific set of an exercise.
+ */
+export const getExerciseSetReps = (
+  ex: PlayerExercise | undefined,
+  setIndex: number
+): number => {
+  if (!ex) return 10;
+
+  // 1. Explicit reps_per_set array
+  if (Array.isArray(ex.reps_per_set) && typeof ex.reps_per_set[setIndex] === 'number') {
+    return ex.reps_per_set[setIndex];
+  }
+
+  // 2. Explicit durations_per_set with hold time
+  if (Array.isArray(ex.durations_per_set) && typeof ex.durations_per_set[setIndex] === 'number') {
+    const holdTime = ex.hold_seconds_per_rep || 10;
+    return Math.max(1, Math.round(ex.durations_per_set[setIndex] / holdTime));
+  }
+
+  // 3. Stuart McGill protocol pyramid
+  const nameLower = (ex.name || '').toLowerCase();
+  const cueLower = (ex.cue || '').toLowerCase();
+  const isMcGill = nameLower.includes('mcgill') || nameLower.includes('bird-dog');
+  const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('5-3-1');
+  const tSets = ex.totalSets || ex.sets || 3;
+
+  if ((isMcGill || isPyramid) && tSets >= 3 && !nameLower.includes('warmup')) {
+    const mcgillReps = [5, 3, 1];
+    if (setIndex < mcgillReps.length) {
+      return mcgillReps[setIndex];
+    }
+  }
+
+  if (typeof ex.target_reps === 'number' && ex.target_reps > 0) return ex.target_reps;
+  const parsedDigits = parseInt(String(ex.reps || '').replace(/[^0-9]/g, ''));
+  if (!isNaN(parsedDigits) && parsedDigits > 0) return parsedDigits;
+  return 10;
+};
+
+/**
+ * Resolves the target rest seconds for an exercise.
+ * Accurately honors 0 seconds rest (e.g. Diaphragmatic Breathing or continuous transitions).
+ */
+export const getExerciseRestSeconds = (
+  ex: PlayerExercise | undefined
+): number => {
+  if (!ex) return 60;
+  if (typeof ex.target_rest_seconds === 'number') return ex.target_rest_seconds;
+  if (typeof ex.restSeconds === 'number') return ex.restSeconds;
+  return 60;
+};
 
 export function useWorkoutPlayer({
   exercises,
@@ -248,22 +366,12 @@ export function useWorkoutPlayer({
 
   // Current targets
   const totalSets = currentExercise?.totalSets || currentExercise?.sets || 3;
-  const targetReps =
-    currentExercise?.target_reps ||
-    parseInt(String(currentExercise?.reps || '').replace(/[^0-9]/g, '')) ||
-    10;
+  const targetReps = getExerciseSetReps(currentExercise, currentSetIndex);
   const targetWeight =
     parseInt(String(currentExercise?.target_weight || currentExercise?.load || currentExercise?.weight || '').replace(/[^0-9]/g, '')) ||
     0;
-  const targetDurationSeconds =
-    currentExercise?.target_duration_seconds ||
-    currentExercise?.target_time ||
-    parseInt(String(currentExercise?.reps || '').replace(/[^0-9]/g, '')) ||
-    45;
-  const targetRestSeconds =
-    currentExercise?.target_rest_seconds ||
-    currentExercise?.restSeconds ||
-    60;
+  const targetDurationSeconds = getExerciseSetDuration(currentExercise, currentSetIndex);
+  const targetRestSeconds = getExerciseRestSeconds(currentExercise);
 
   // Actual input states for manual sets
   const [prevSelectionKey, setPrevSelectionKey] = useState<string>(
@@ -568,6 +676,12 @@ export function useWorkoutPlayer({
 
       setLoggedSets((prev) => [...prev, newLog]);
       if (onSetCompleted) onSetCompleted(newLog);
+
+      if (targetRestSeconds <= 0) {
+        // Zero rest time configured: immediately advance to next set or exercise
+        handleRestCompleteRef.current();
+        return;
+      }
 
       setState('RESTING');
       const restDurationMs = targetRestSeconds * 1000;

@@ -197,7 +197,7 @@ export default function GuidedCounterCard({
               <View style={[styles.targetPill, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}>
                 <Ionicons name="battery-charging-outline" size={14} color="#16A34A" />
                 <Text style={[styles.targetPillText, { color: '#15803D' }]}>
-                  Rest: {targetRestSeconds}s
+                  {targetRestSeconds <= 0 ? 'Rest: 0s (Continuous)' : `Rest: ${targetRestSeconds}s`}
                 </Text>
               </View>
             </View>
@@ -281,7 +281,13 @@ export default function GuidedCounterCard({
                     </Text>
                   </View>
                   <Text style={styles.durationRingLabel}>HOLD TIME</Text>
-                  <Text style={styles.durationTargetSmall}>Target: {targetDurationSeconds}s</Text>
+                  <Text style={styles.durationTargetSmall}>
+                    {currentExercise?.hold_seconds_per_rep ||
+                    (currentExercise?.name || '').toLowerCase().includes('mcgill') ||
+                    (currentExercise?.name || '').toLowerCase().includes('bird-dog')
+                      ? `${targetReps} reps × ${currentExercise?.hold_seconds_per_rep || 10}s (${targetDurationSeconds}s)`
+                      : `Target: ${targetDurationSeconds}s`}
+                  </Text>
                 </View>
               </CircularProgressRing>
 
@@ -380,7 +386,9 @@ export default function GuidedCounterCard({
               >
                 <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
                 <Text style={styles.logAndRestBtnText}>
-                  Finish Set & Start Rest ({targetRestSeconds}s)
+                  {targetRestSeconds <= 0
+                    ? 'Finish Set & Continue (0s Rest)'
+                    : `Finish Set & Start Rest (${targetRestSeconds}s)`}
                 </Text>
               </TouchableOpacity>
             </View>

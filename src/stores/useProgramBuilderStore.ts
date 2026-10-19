@@ -17,6 +17,9 @@ export interface BuilderExercise {
   target_time: number;
   target_rest_seconds?: number;
   target_duration_seconds?: number;
+  hold_seconds_per_rep?: number;
+  reps_per_set?: number[];
+  durations_per_set?: number[];
   cue?: string;
   is_new?: boolean;
 }
@@ -601,15 +604,50 @@ export const useProgramBuilderStore = create<ProgramBuilderState>((set, get) => 
           const weList = ws.worksession_exercises || [];
           const exercises: BuilderExercise[] = weList.map((we: any, eIdx: number) => {
             const ex = we.exercises || {};
+            const isHold =
+              (ex.name &&
+                (ex.name.includes('McGill') ||
+                  ex.name.includes('Bird-Dog') ||
+                  ex.name.includes('Plank') ||
+                  ex.name.includes('Hold') ||
+                  ex.name.includes('Pallof'))) ||
+              we.hold_seconds_per_rep;
+            const holdSeconds = we.hold_seconds_per_rep ?? (isHold ? 10 : undefined);
+            const repsPerSet = we.reps_per_set ?? (isHold ? [5, 3, 1] : undefined);
+            const durationsPerSet = we.durations_per_set ?? (isHold ? [50, 30, 10] : undefined);
+            const restSeconds =
+              typeof we.target_rest_seconds === 'number'
+                ? we.target_rest_seconds
+                : typeof ex.default_rest_seconds === 'number'
+                ? ex.default_rest_seconds
+                : isHold
+                ? 45
+                : 60;
+            const durationSeconds =
+              typeof we.target_duration_seconds === 'number'
+                ? we.target_duration_seconds
+                : typeof we.target_time === 'number' && we.target_time > 0
+                ? we.target_time
+                : typeof ex.default_duration_seconds === 'number'
+                ? ex.default_duration_seconds
+                : isHold
+                ? 50
+                : undefined;
+
             return {
               id: ex.id || we.exercise_id || `ex-${pIdx}-${wIdx}-${eIdx}`,
               name: ex.name || 'Exercise',
               muscle_group: ex.muscle_group || 'General',
               equipment: ex.equipment || 'Bodyweight',
-              tracking_type: we.tracking_type || 'reps',
+              tracking_type: we.tracking_type || (durationSeconds || isHold ? 'time' : 'reps'),
               target_sets: we.target_sets || 3,
-              target_reps: we.target_reps || 10,
-              target_time: we.target_time || 45,
+              target_reps: we.target_reps || (repsPerSet ? repsPerSet[0] : 10),
+              target_time: durationSeconds || we.target_time || 45,
+              target_rest_seconds: restSeconds,
+              target_duration_seconds: durationSeconds,
+              hold_seconds_per_rep: holdSeconds,
+              reps_per_set: repsPerSet,
+              durations_per_set: durationsPerSet,
               cue: we.notes || ex.instructions || '',
               is_new: false,
             };
@@ -659,15 +697,50 @@ export const useProgramBuilderStore = create<ProgramBuilderState>((set, get) => 
       const weList = ws.worksession_exercises || [];
       const exercises: BuilderExercise[] = weList.map((we: any, eIdx: number) => {
         const ex = we.exercises || {};
+        const isHold =
+          (ex.name &&
+            (ex.name.includes('McGill') ||
+              ex.name.includes('Bird-Dog') ||
+              ex.name.includes('Plank') ||
+              ex.name.includes('Hold') ||
+              ex.name.includes('Pallof'))) ||
+          we.hold_seconds_per_rep;
+        const holdSeconds = we.hold_seconds_per_rep ?? (isHold ? 10 : undefined);
+        const repsPerSet = we.reps_per_set ?? (isHold ? [5, 3, 1] : undefined);
+        const durationsPerSet = we.durations_per_set ?? (isHold ? [50, 30, 10] : undefined);
+        const restSeconds =
+          typeof we.target_rest_seconds === 'number'
+            ? we.target_rest_seconds
+            : typeof ex.default_rest_seconds === 'number'
+            ? ex.default_rest_seconds
+            : isHold
+            ? 45
+            : 60;
+        const durationSeconds =
+          typeof we.target_duration_seconds === 'number'
+            ? we.target_duration_seconds
+            : typeof we.target_time === 'number' && we.target_time > 0
+            ? we.target_time
+            : typeof ex.default_duration_seconds === 'number'
+            ? ex.default_duration_seconds
+            : isHold
+            ? 50
+            : undefined;
+
         return {
           id: ex.id || we.exercise_id || `ex-${wIdx}-${eIdx}`,
           name: ex.name || 'Exercise',
           muscle_group: ex.muscle_group || 'General',
           equipment: ex.equipment || 'Bodyweight',
-          tracking_type: we.tracking_type || 'reps',
+          tracking_type: we.tracking_type || (durationSeconds || isHold ? 'time' : 'reps'),
           target_sets: we.target_sets || 3,
-          target_reps: we.target_reps || 10,
-          target_time: we.target_time || 45,
+          target_reps: we.target_reps || (repsPerSet ? repsPerSet[0] : 10),
+          target_time: durationSeconds || we.target_time || 45,
+          target_rest_seconds: restSeconds,
+          target_duration_seconds: durationSeconds,
+          hold_seconds_per_rep: holdSeconds,
+          reps_per_set: repsPerSet,
+          durations_per_set: durationsPerSet,
           cue: we.notes || ex.instructions || '',
           is_new: false,
         };

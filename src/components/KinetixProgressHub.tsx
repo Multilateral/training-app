@@ -1,11 +1,10 @@
-import React, { useState, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   TextInput,
   Modal,
   Alert,
@@ -17,7 +16,25 @@ import { TrainingContext } from '../context/TrainingContext';
 import { getCurrentWeekDays, computeWeeklyMetrics } from '../utils/dashboardUtils';
 import KinetixHeader from './KinetixHeader';
 import KinetixBottomNav from './KinetixBottomNav';
-import { DATABASE_WORKSESSIONS } from '../data/databaseLibraryData';
+import { DATABASE_WORKSESSIONS, DATABASE_PLANS } from '../data/databaseLibraryData';
+import { WeeklyScheduleSlot } from '../types/database';
+import {
+  loadWeeklySchedule,
+  saveWeeklySchedule,
+  getPlannedActivitiesForDate,
+  computePlanScheduleDependencies,
+  buildDefaultHybridWeeklySchedule,
+} from '../services/scheduleService';
+import {
+  getActiveUserEnrollment,
+  advanceToNextRehabPhase,
+  keepPracticingCurrentRehabPhase,
+  UserEnrollment,
+} from '../services/rehabProgressionService';
+import WeeklySchedulePlannerSection from './WeeklySchedulePlannerSection';
+import SportQuickLogModal from './SportQuickLogModal';
+import RehabPhaseRetentionModal from './RehabPhaseRetentionModal';
+
 
 interface GoalItem {
   id: string;
@@ -85,12 +102,23 @@ export default function KinetixProgressHub() {
     workspaces,
     updateWorkspaces,
     saveToCloud,
+    logWorkout,
+    setActiveSessionMetadata,
   } = useContext(TrainingContext) || {};
 
   // Calendar month state
   const [viewDate, setViewDate] = useState(() => new Date());
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayDayIndex = useMemo(() => (new Date().getDay() + 6) % 7, []);
   const [selectedDateKey, setSelectedDateKey] = useState<string>(todayStr);
+
+  // Weekly Schedule & Rehab Enrollment state
+  const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleSlot[]>(() =>
+    buildDefaultHybridWeeklySchedule()
+  );
+  const [activeEnrollment, setActiveEnrollment] = useState<UserEnrollment | null>(null);
+  const [sportLogSlot, setSportLogSlot] = useState<WeeklyScheduleSlot | null>(null);
+  const [showRetentionModal, setShowRetentionModal] = useState<boolean>(false);
 
   // Bodyweight state
   const [selectedRange, setSelectedRange] = useState<'30' | '90' | '365'>('30');
@@ -106,15 +134,277 @@ export default function KinetixProgressHub() {
   const [newGoalUnit, setNewGoalUnit] = useState('sessions');
   const [isAddingNewGoal, setIsAddingNewGoal] = useState(false);
 
-  const athleteName =
-    session?.user?.user_metadata?.full_name ||
-    session?.user?.email?.split('@')[0] ||
-    'Marcus Vance';
+  // Active Workout & Rehab Plan resolution for schedule dependencies
+  const activeWorkoutPlan = useMemo(() => {
+    const candidateId =
+      workspaces?.activeWorkoutPlanId ||
+      workspaces?.defaultPlanId ||
+      workspaces?.activePlanId;
+    if (candidateId) {
+      const found = DATABASE_PLANS.find((p) => p.id === candidateId);
+      if (found) return found;
+    }
+    return (
+      DATABASE_PLANS.find(
+        (p) =>
+          !p.name.toLowerCase().includes('rehab') &&
+          !p.name.toLowerCase().includes('recovery')
+      ) || DATABASE_PLANS[0]
+    );
+  }, [workspaces?.activeWorkoutPlanId, workspaces?.defaultPlanId, workspaces?.activePlanId]);
+
+  const activeRehabPlan = useMemo(() => {
+    const candidateId = workspaces?.activeRehabPlanId;
+    if (candidateId) {
+      const foundPlan = DATABASE_PLANS.find((p) => p.id === candidateId);
+      if (foundPlan) return foundPlan;
+      const foundWs = DATABASE_WORKSESSIONS.find((w) => w.id === candidateId);
+      if (foundWs) {
+        return {
+          id: foundWs.id,
+          name: foundWs.title,
+          schedule_type: 'floating',
+          goal_category: foundWs.category || 'Clinical Rehab',
+          description: foundWs.description || '',
+          is_standard_template: false,
+          worksessions: [
+            {
+              dayName: 'Daily Protocol',
+              worksessionId: foundWs.id,
+              worksessionName: foundWs.title,
+              modality: foundWs.category,
+              exerciseCount: foundWs.exercises?.length || 4,
+              worksession: foundWs,
+            },
+          ],
+        };
+      }
+    }
+    return (
+      DATABASE_PLANS.find(
+        (p) =>
+          p.name.toLowerCase().includes('rehab') ||
+          p.name.toLowerCase().includes('recovery')
+      ) || null
+    );
+  }, [workspaces?.activeRehabPlanId]);
+
+  const refreshScheduleAndEnrollment = useCallback(async () => {
+    const [loadedSchedule, enrollmentData] = await Promise.all([
+      loadWeeklySchedule({
+        userId: session?.user?.id,
+        workspaces,
+        activeWorkoutPlan,
+        activeRehabPlan,
+      }),
+      getActiveUserEnrollment(session?.user?.id),
+    ]);
+    if (loadedSchedule && loadedSchedule.length > 0) {
+      setWeeklySchedule(loadedSchedule);
+    }
+    if (enrollmentData) {
+      setActiveEnrollment(enrollmentData);
+    }
+  }, [session?.user?.id, workspaces?.weekly_schedule, activeWorkoutPlan, activeRehabPlan]);
+
+  useEffect(() => {
+    refreshScheduleAndEnrollment();
+  }, [refreshScheduleAndEnrollment]);
+
+  const dependencyReport = useMemo(
+    () =>
+      computePlanScheduleDependencies({
+        schedule: weeklySchedule,
+        activeWorkoutPlan,
+        activeRehabPlan,
+        enrollment: activeEnrollment,
+      }),
+    [weeklySchedule, activeWorkoutPlan, activeRehabPlan, activeEnrollment]
+  );
+
+  // Schedule CRUD handlers
+  const handleAddScheduleSlot = async (newSlot: Omit<WeeklyScheduleSlot, 'id'>) => {
+    // Filter out any pure 'rest' slot on that day when adding an active session
+    const withoutRest = weeklySchedule.filter(
+      (s) => !(Number(s.day_index) === Number(newSlot.day_index) && s.activity_type === 'rest')
+    );
+    const dayExisting = withoutRest.filter(
+      (s) => Number(s.day_index) === Number(newSlot.day_index)
+    );
+    const created: WeeklyScheduleSlot = {
+      ...newSlot,
+      id: `sched-${newSlot.day_index}-${Date.now()}`,
+      order_index: dayExisting.length,
+    };
+    const nextList = [...withoutRest, created];
+    setWeeklySchedule(nextList);
+    await saveWeeklySchedule({
+      slots: nextList,
+      userId: session?.user?.id,
+      updateWorkspaces,
+      currentWorkspaces: workspaces,
+    });
+  };
+
+  const handleRemoveScheduleSlot = async (slotId: string) => {
+    const target = weeklySchedule.find((s) => s.id === slotId);
+    const remaining = weeklySchedule.filter((s) => s.id !== slotId);
+    if (target) {
+      const stillHasOnDay = remaining.some(
+        (s) => Number(s.day_index) === Number(target.day_index)
+      );
+      if (!stillHasOnDay) {
+        remaining.push({
+          id: `sched-rest-${target.day_index}-${Date.now()}`,
+          day_of_week: target.day_of_week,
+          day_index: target.day_index,
+          activity_type: 'rest',
+          title: 'Rest & Recovery Day',
+          subtitle: 'Off Day • Tissue Adaptation',
+          target_duration_minutes: 0,
+          intensity_target: 'Rest',
+          order_index: 0,
+        });
+      }
+    }
+    setWeeklySchedule(remaining);
+    await saveWeeklySchedule({
+      slots: remaining,
+      userId: session?.user?.id,
+      updateWorkspaces,
+      currentWorkspaces: workspaces,
+    });
+  };
+
+  const handleSetRestDay = async (dayIndex: number) => {
+    const dayNames: WeeklyScheduleSlot['day_of_week'][] = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    const filtered = weeklySchedule.filter((s) => Number(s.day_index) !== dayIndex);
+    const restSlot: WeeklyScheduleSlot = {
+      id: `sched-rest-${dayIndex}-${Date.now()}`,
+      day_of_week: dayNames[dayIndex] || 'Wednesday',
+      day_index: dayIndex,
+      activity_type: 'rest',
+      title: 'Rest & Tissue Adaptation Day',
+      subtitle: 'Off Day • Central Nervous System Recovery',
+      target_duration_minutes: 0,
+      intensity_target: 'Rest',
+      order_index: 0,
+    };
+    const nextList = [...filtered, restSlot];
+    setWeeklySchedule(nextList);
+    await saveWeeklySchedule({
+      slots: nextList,
+      userId: session?.user?.id,
+      updateWorkspaces,
+      currentWorkspaces: workspaces,
+    });
+  };
+
+  const handleResetDefaultSchedule = async () => {
+    const seeded = buildDefaultHybridWeeklySchedule(activeWorkoutPlan, activeRehabPlan);
+    setWeeklySchedule(seeded);
+    await saveWeeklySchedule({
+      slots: seeded,
+      userId: session?.user?.id,
+      updateWorkspaces,
+      currentWorkspaces: workspaces,
+    });
+  };
+
+  const handleSaveSportLog = async (logData: {
+    sportTitle: string;
+    durationMinutes: number;
+    hoursPlayed: number;
+    intensity: string;
+    rpe: number;
+    notes: string;
+    exerciseId?: string | null;
+  }) => {
+    if (logWorkout) {
+      await logWorkout(
+        logData.sportTitle,
+        logData.durationMinutes,
+        logData.intensity,
+        logData.exerciseId || 'sport-session',
+        {
+          isSport: true,
+          sessionType: 'sport',
+          category: 'Collective Sports',
+          hoursPlayed: logData.hoursPlayed,
+          rpe: logData.rpe,
+          notes: logData.notes,
+          exerciseId: logData.exerciseId,
+          durationFormatted: `${logData.hoursPlayed}h (${logData.durationMinutes}m)`,
+          targetDateKey: selectedDateKey || todayStr,
+        }
+      );
+      Alert.alert(
+        'Sport Practice Logged! 🏐',
+        `Recorded ${logData.hoursPlayed}h of ${logData.sportTitle} (RPE ${logData.rpe}/10).`
+      );
+    }
+  };
+
+  const handleAdvancePhase = async () => {
+    const res = await advanceToNextRehabPhase(session?.user?.id, activeEnrollment?.id);
+    await refreshScheduleAndEnrollment();
+    if (res.success) {
+      Alert.alert(
+        'Advanced to Next Rehab Phase! 🎉',
+        `Your weekly schedule is now bound to ${
+          res.new_phase_title || 'the next rehabilitation phase'
+        }.`
+      );
+    }
+  };
+
+  const handleKeepPracticingPhase = async (additionalSessions: number) => {
+    await keepPracticingCurrentRehabPhase(
+      session?.user?.id,
+      activeEnrollment?.id,
+      additionalSessions
+    );
+    await refreshScheduleAndEnrollment();
+    Alert.alert(
+      'Phase Extended — Keep Practicing ✓',
+      `Added +${additionalSessions} practice sessions to Phase ${dependencyReport.rehabDependency.activePhaseOrder}. Your weekly schedule and completion forecast have been updated.`
+    );
+  };
+
+  // Helper to determine if a workout is a collective sport session
+  const isSportWorkout = (w: any) => {
+    if (!w) return false;
+    if (w.sessionType === 'sport' || w.isSport === true) return true;
+    const cat = (w.category || '').toLowerCase();
+    const title = (w.worksessionName || w.type || '').toLowerCase();
+    return (
+      cat.includes('sport') ||
+      title.includes('volleyball') ||
+      title.includes('basketball') ||
+      title.includes('football') ||
+      title.includes('soccer') ||
+      title.includes('tennis') ||
+      title.includes('badminton') ||
+      title.includes('handball') ||
+      title.includes('rugby') ||
+      title.includes('hockey') ||
+      title.includes('water polo') ||
+      title.includes('baseball') ||
+      title.includes('cricket')
+    );
+  };
 
   // Helper to determine if a workout is rehab/recovery
   const isRehabWorkout = (w: any) => {
-    if (!w) return false;
-    // 1. Explicit properties
+    if (!w || isSportWorkout(w)) return false;
     if (w.sessionType === 'rehab' || w.isRehab === true) return true;
     if (w.type === 'rehab') return true;
     if (
@@ -125,7 +415,6 @@ export default function KinetixProgressHub() {
       return true;
     }
 
-    // 2. Lookup against known database worksessions by title or id
     const title = (w.worksessionName || w.type || '').trim().toLowerCase();
     const dbMatch = DATABASE_WORKSESSIONS.find(
       (d) =>
@@ -135,7 +424,6 @@ export default function KinetixProgressHub() {
     );
     if (dbMatch && dbMatch.type === 'rehab') return true;
 
-    // 3. Keyword heuristic on title & description
     return (
       title.includes('rehab') ||
       title.includes('mcgill') ||
@@ -158,7 +446,7 @@ export default function KinetixProgressHub() {
   };
 
   // ----------------------------------------------------
-  // 1. Calendar Calculations
+  // 1. Calendar Calculations (Completed + Planned Dual Indicators)
   // ----------------------------------------------------
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -188,22 +476,33 @@ export default function KinetixProgressHub() {
       const dayData = history?.[dateKey];
       const workouts: any[] = dayData?.move?.workouts || [];
 
+      const hasSport = workouts.some((w) => isSportWorkout(w));
       const hasRehab = workouts.some((w) => isRehabWorkout(w));
-      const hasStrength = workouts.some((w) => !isRehabWorkout(w));
+      const hasStrength = workouts.some((w) => !isRehabWorkout(w) && !isSportWorkout(w));
+
+      const planned = getPlannedActivitiesForDate(dateKey, weeklySchedule);
 
       return {
         day,
         dateKey,
+        dayIndex: planned.dayIndex,
         workouts,
         hasStrength,
         hasRehab,
-        isDual: hasStrength && hasRehab,
+        hasSport,
+        hasPlannedWorkout: planned.hasPlannedWorkout,
+        hasPlannedRehab: planned.hasPlannedRehab,
+        hasPlannedSport: planned.hasPlannedSport,
+        plannedSlots: planned.activeSlots,
+        isPlannedRest: planned.isPlannedRest,
+        isDual:
+          [hasStrength, hasRehab, hasSport].filter(Boolean).length >= 2,
         isToday: dateKey === todayStr,
       };
     });
-  }, [year, month, daysInMonth, history, todayStr]);
+  }, [year, month, daysInMonth, history, todayStr, weeklySchedule]);
 
-  // Monthly stats (divided by Strength vs Rehab Done)
+  // Monthly stats (divided by Strength/Sport vs Rehab Done)
   const { monthStrength, monthRehab, attendanceRate } = useMemo(() => {
     let strengthCount = 0;
     let rehabCount = 0;
@@ -249,16 +548,25 @@ export default function KinetixProgressHub() {
 
     const dayWorkouts: any[] = history?.[selectedDateKey]?.move?.workouts || [];
     const dateObj = new Date(selectedDateKey + 'T12:00:00');
+    const planned = getPlannedActivitiesForDate(selectedDateKey, weeklySchedule);
+
     return {
       day: isNaN(dateObj.getTime()) ? 1 : dateObj.getDate(),
       dateKey: selectedDateKey,
+      dayIndex: planned.dayIndex,
       workouts: dayWorkouts,
-      hasStrength: dayWorkouts.some((w) => !isRehabWorkout(w)),
+      hasStrength: dayWorkouts.some((w) => !isRehabWorkout(w) && !isSportWorkout(w)),
       hasRehab: dayWorkouts.some((w) => isRehabWorkout(w)),
+      hasSport: dayWorkouts.some((w) => isSportWorkout(w)),
+      hasPlannedWorkout: planned.hasPlannedWorkout,
+      hasPlannedRehab: planned.hasPlannedRehab,
+      hasPlannedSport: planned.hasPlannedSport,
+      plannedSlots: planned.activeSlots,
+      isPlannedRest: planned.isPlannedRest,
       isDual: false,
       isToday: selectedDateKey === todayStr,
     };
-  }, [calendarDays, selectedDateKey, history, todayStr]);
+  }, [calendarDays, selectedDateKey, history, todayStr, weeklySchedule]);
 
   const selectedDayFormattedTitle = useMemo(() => {
     const d = new Date(selectedDateKey + 'T12:00:00');
@@ -651,28 +959,6 @@ export default function KinetixProgressHub() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Athlete Profile Mini Card */}
-        <View style={styles.profileMiniCard}>
-          <View style={styles.profileLeft}>
-            <View style={styles.profileAvatarBox}>
-              <Image
-                source={{
-                  uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
-                }}
-                style={styles.profileAvatar}
-              />
-              <View style={styles.profileOnlineDot} />
-            </View>
-            <View style={styles.profileTextCol}>
-              <Text style={styles.profileName}>{athleteName}</Text>
-              <Text style={styles.profileSubtitle}>Performance & Rehab Tracker</Text>
-            </View>
-          </View>
-          <View style={styles.onTrackBadge}>
-            <Text style={styles.onTrackBadgeText}>STATUS: ON TRACK</Text>
-          </View>
-        </View>
-
         {/* Section 1: Workout History Calendar */}
         <View style={styles.sectionCard}>
           <View style={styles.calendarTopBar}>
@@ -759,6 +1045,7 @@ export default function KinetixProgressHub() {
                     {cd.day}
                   </Text>
                   <View style={styles.dayDotsRow}>
+                    {/* Completed Dots (Solid) */}
                     {cd.hasStrength && (
                       <View
                         style={[
@@ -775,13 +1062,47 @@ export default function KinetixProgressHub() {
                         ]}
                       />
                     )}
+                    {cd.hasSport && (
+                      <View
+                        style={[
+                          styles.microDot,
+                          { backgroundColor: '#D97706' },
+                        ]}
+                      />
+                    )}
+
+                    {/* Planned Dots (Outline Rings) when not yet completed */}
+                    {!cd.hasStrength && cd.hasPlannedWorkout && (
+                      <View
+                        style={[
+                          styles.microDotOutline,
+                          { borderColor: KinetixTheme.colors.primary },
+                        ]}
+                      />
+                    )}
+                    {!cd.hasRehab && cd.hasPlannedRehab && (
+                      <View
+                        style={[
+                          styles.microDotOutline,
+                          { borderColor: KinetixTheme.colors.secondary },
+                        ]}
+                      />
+                    )}
+                    {!cd.hasSport && cd.hasPlannedSport && (
+                      <View
+                        style={[
+                          styles.microDotOutline,
+                          { borderColor: '#D97706' },
+                        ]}
+                      />
+                    )}
                   </View>
                 </TouchableOpacity>
               );
             })}
           </View>
 
-          {/* Calendar Legend */}
+          {/* Calendar Legend (Completed Solid vs Planned Ring) */}
           <View style={styles.calendarLegend}>
             <View style={styles.legendItem}>
               <View
@@ -790,7 +1111,7 @@ export default function KinetixProgressHub() {
                   { backgroundColor: KinetixTheme.colors.primary },
                 ]}
               />
-              <Text style={styles.legendText}>Strength</Text>
+              <Text style={styles.legendText}>Workout</Text>
             </View>
             <View style={styles.legendItem}>
               <View
@@ -802,48 +1123,61 @@ export default function KinetixProgressHub() {
               <Text style={styles.legendText}>Rehab</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={{ flexDirection: 'row', gap: 2 }}>
-                <View
-                  style={[
-                    styles.legendDot,
-                    { backgroundColor: KinetixTheme.colors.primary },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.legendDot,
-                    { backgroundColor: KinetixTheme.colors.secondary },
-                  ]}
-                />
-              </View>
-              <Text style={styles.legendText}>Dual Session</Text>
+              <View
+                style={[
+                  styles.legendDot,
+                  { backgroundColor: '#D97706' },
+                ]}
+              />
+              <Text style={styles.legendText}>Sport</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View
+                style={[
+                  styles.legendDotOutline,
+                  { borderColor: KinetixTheme.colors.primary },
+                ]}
+              />
+              <Text style={styles.legendText}>Planned</Text>
             </View>
           </View>
 
-          {/* Selected Day Snippet */}
+          {/* Selected Day Snippet (Shows Both Completed & Planned Activities) */}
           <View
             style={[
               styles.daySnippet,
-              selectedDayData.workouts.length === 0 && styles.restDaySnippet,
-              selectedDayData.hasRehab && !selectedDayData.hasStrength && styles.rehabDaySnippet,
+              selectedDayData.workouts.length === 0 &&
+                selectedDayData.isPlannedRest &&
+                styles.restDaySnippet,
+              selectedDayData.hasRehab &&
+                !selectedDayData.hasStrength &&
+                styles.rehabDaySnippet,
             ]}
           >
             <Ionicons
               name={
-                selectedDayData.workouts.length === 0
+                selectedDayData.workouts.length > 0
+                  ? selectedDayData.isDual
+                    ? 'checkmark-done-circle'
+                    : selectedDayData.hasSport
+                    ? 'trophy-outline'
+                    : selectedDayData.hasRehab
+                    ? 'bandage-outline'
+                    : 'barbell-outline'
+                  : selectedDayData.isPlannedRest
                   ? 'moon-outline'
-                  : selectedDayData.hasRehab && !selectedDayData.hasStrength
-                  ? 'bandage-outline'
-                  : selectedDayData.isDual
-                  ? 'checkmark-done-circle'
-                  : 'barbell-outline'
+                  : 'calendar-outline'
               }
               size={18}
               color={
-                selectedDayData.workouts.length === 0
+                selectedDayData.workouts.length > 0
+                  ? selectedDayData.hasSport && !selectedDayData.hasStrength
+                    ? '#D97706'
+                    : selectedDayData.hasRehab && !selectedDayData.hasStrength
+                    ? KinetixTheme.colors.secondary
+                    : KinetixTheme.colors.primary
+                  : selectedDayData.isPlannedRest
                   ? KinetixTheme.colors.textMuted
-                  : selectedDayData.hasRehab && !selectedDayData.hasStrength
-                  ? KinetixTheme.colors.secondary
                   : KinetixTheme.colors.primary
               }
               style={{ marginTop: 2 }}
@@ -856,42 +1190,112 @@ export default function KinetixProgressHub() {
                 <View
                   style={[
                     styles.completedTag,
-                    selectedDayData.workouts.length === 0 && styles.restDayTag,
-                    selectedDayData.hasRehab && !selectedDayData.hasStrength && styles.rehabTag,
+                    selectedDayData.workouts.length === 0 &&
+                      selectedDayData.isPlannedRest &&
+                      styles.restDayTag,
+                    selectedDayData.workouts.length === 0 &&
+                      !selectedDayData.isPlannedRest && {
+                        backgroundColor: '#DBEAFE',
+                      },
+                    selectedDayData.hasRehab &&
+                      !selectedDayData.hasStrength &&
+                      styles.rehabTag,
                   ]}
                 >
                   <Text
                     style={[
                       styles.completedTagText,
-                      selectedDayData.workouts.length === 0 && styles.restDayTagText,
-                      selectedDayData.hasRehab && !selectedDayData.hasStrength && styles.rehabTagText,
+                      selectedDayData.workouts.length === 0 &&
+                        selectedDayData.isPlannedRest &&
+                        styles.restDayTagText,
+                      selectedDayData.workouts.length === 0 &&
+                        !selectedDayData.isPlannedRest && {
+                          color: KinetixTheme.colors.primary,
+                        },
+                      selectedDayData.hasRehab &&
+                        !selectedDayData.hasStrength &&
+                        styles.rehabTagText,
                     ]}
                   >
-                    {selectedDayData.workouts.length === 0
-                      ? 'Rest Day'
-                      : selectedDayData.isDual
-                      ? 'Dual Session ✓'
-                      : selectedDayData.hasRehab
-                      ? 'Rehab Done ✓'
-                      : 'Strength Done ✓'}
+                    {selectedDayData.workouts.length > 0
+                      ? selectedDayData.isDual
+                        ? 'Multi-Session Done ✓'
+                        : selectedDayData.hasSport
+                        ? 'Sport Logged ✓'
+                        : selectedDayData.hasRehab
+                        ? 'Rehab Done ✓'
+                        : 'Workout Done ✓'
+                      : selectedDayData.isPlannedRest
+                      ? 'Planned Rest Day'
+                      : `${selectedDayData.plannedSlots.length} Planned`}
                   </Text>
                 </View>
               </View>
-              <Text style={styles.snippetDesc}>
-                {selectedDayData.workouts.length > 0
-                  ? selectedDayData.workouts
-                      .map((w: any) => {
-                        const isRehab = isRehabWorkout(w);
-                        const dur = w.durationFormatted || (w.duration ? `${w.duration}m` : 'Done');
-                        const tag = isRehab ? 'Rehab Protocol' : 'Strength Session';
-                        return `${w.type || w.worksessionName || 'Session'} (${dur}) • ${tag}`;
+
+              {/* Completed Workouts on Selected Day */}
+              {selectedDayData.workouts.length > 0 && (
+                <Text style={styles.snippetDesc}>
+                  Done:{' '}
+                  {selectedDayData.workouts
+                    .map((w: any) => {
+                      const isSport = isSportWorkout(w);
+                      const isRehab = isRehabWorkout(w);
+                      const dur =
+                        w.durationFormatted || (w.duration ? `${w.duration}m` : 'Done');
+                      const tag = isSport
+                        ? 'Sport'
+                        : isRehab
+                        ? 'Rehab'
+                        : 'Workout';
+                      return `${w.type || w.worksessionName || 'Session'} (${dur} • ${tag})`;
+                    })
+                    .join('  •  ')}
+                </Text>
+              )}
+
+              {/* Planned Schedule Slots on Selected Day */}
+              {selectedDayData.plannedSlots.length > 0 ? (
+                <View style={{ marginTop: 4 }}>
+                  <Text style={styles.snippetDesc}>
+                    Planned:{' '}
+                    {selectedDayData.plannedSlots
+                      .map((s) => {
+                        const dur =
+                          s.activity_type === 'sport'
+                            ? `${((s.target_duration_minutes || 120) / 60)
+                                .toFixed(1)
+                                .replace(/\.0$/, '')}h`
+                            : `${s.target_duration_minutes || 30}m`;
+                        return `${s.title} (${dur})`;
                       })
-                      .join('  •  ')
-                  : 'No workout sessions logged for this day.'}
-              </Text>
+                      .join('  +  ')}
+                  </Text>
+                </View>
+              ) : (
+                selectedDayData.workouts.length === 0 && (
+                  <Text style={styles.snippetDesc}>
+                    Scheduled Off / Rest Day. Tap + Add below to customize this day.
+                  </Text>
+                )
+              )}
             </View>
           </View>
         </View>
+
+        {/* Section 1B: Weekly Training Schedule & Plan Dependency Planner */}
+        <WeeklySchedulePlannerSection
+          schedule={weeklySchedule}
+          dependencyReport={dependencyReport}
+          activeWorkoutPlan={activeWorkoutPlan}
+          activeRehabPlan={activeRehabPlan}
+          todayDayIndex={todayDayIndex}
+          selectedDayIndex={selectedDayData.dayIndex}
+          onAddSlot={handleAddScheduleSlot}
+          onRemoveSlot={handleRemoveScheduleSlot}
+          onSetRestDay={handleSetRestDay}
+          onResetDefaultSchedule={handleResetDefaultSchedule}
+          onOpenPhaseRetentionModal={() => setShowRetentionModal(true)}
+        />
 
         {/* Section 2: Logged Workouts & Session Timestamps */}
         <View style={styles.sectionCard}>
@@ -914,11 +1318,16 @@ export default function KinetixProgressHub() {
           <View style={styles.workoutListContainer}>
             {allLoggedWorkouts.length > 0 ? (
               allLoggedWorkouts.slice(0, 5).map((workout, index) => {
+                const isSport = isSportWorkout(workout);
                 const isRehab = isRehabWorkout(workout);
-                const accentColor = isRehab
+                const accentColor = isSport
+                  ? '#D97706'
+                  : isRehab
                   ? KinetixTheme.colors.secondary
                   : KinetixTheme.colors.primary;
-                const accentBg = isRehab
+                const accentBg = isSport
+                  ? '#FEF3C7'
+                  : isRehab
                   ? KinetixTheme.colors.secondaryLight
                   : KinetixTheme.colors.primaryLight;
                 const timeDisplay =
@@ -939,7 +1348,13 @@ export default function KinetixProgressHub() {
                     <View style={styles.workoutItemLeft}>
                       <View style={[styles.workoutIconBox, { backgroundColor: accentBg }]}>
                         <Ionicons
-                          name={isRehab ? 'bandage-outline' : 'barbell-outline'}
+                          name={
+                            isSport
+                              ? 'trophy-outline'
+                              : isRehab
+                              ? 'bandage-outline'
+                              : 'barbell-outline'
+                          }
                           size={18}
                           color={accentColor}
                         />
@@ -986,7 +1401,11 @@ export default function KinetixProgressHub() {
                           {durationDisplay}
                         </Text>
                       </View>
-                      {workout.intensity ? (
+                      {workout.rpe ? (
+                        <Text style={styles.workoutIntensityText}>
+                          RPE {workout.rpe}/10 • {workout.intensity || 'High'}
+                        </Text>
+                      ) : workout.intensity ? (
                         <Text style={styles.workoutIntensityText}>
                           {workout.intensity} Intensity
                         </Text>
@@ -1004,16 +1423,8 @@ export default function KinetixProgressHub() {
                 />
                 <Text style={styles.emptyWorkoutsTitle}>No Workouts Logged Yet</Text>
                 <Text style={styles.emptyWorkoutsDesc}>
-                  Start an active workout session to record sets, reps, and track progress here.
+                  Start a workout or rehab session from the Home or Workouts screen to record sets, reps, and track progress here.
                 </Text>
-                <TouchableOpacity
-                  style={styles.emptyStartBtn}
-                  onPress={() => router.push('/active-workout')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="play" size={14} color="#FFFFFF" />
-                  <Text style={styles.emptyStartBtnText}>Start Workout</Text>
-                </TouchableOpacity>
               </View>
             )}
           </View>
@@ -1545,6 +1956,51 @@ export default function KinetixProgressHub() {
         </View>
       </Modal>
 
+      {/* Sport Quick Log Modal */}
+      <SportQuickLogModal
+        visible={Boolean(sportLogSlot)}
+        sportTitle={sportLogSlot?.title || 'Volleyball Practice'}
+        exerciseId={sportLogSlot?.exercise_id}
+        defaultDurationMinutes={sportLogSlot?.target_duration_minutes || 120}
+        defaultIntensity={sportLogSlot?.intensity_target || 'High'}
+        targetDateLabel={selectedDayFormattedTitle}
+        onClose={() => setSportLogSlot(null)}
+        onSaveLog={handleSaveSportLog}
+      />
+
+      {/* Rehab Phase Retention & Progression Modal */}
+      <RehabPhaseRetentionModal
+        visible={showRetentionModal}
+        programTitle={dependencyReport.rehabDependency.programName}
+        currentPhaseOrder={dependencyReport.rehabDependency.activePhaseOrder}
+        currentPhaseTitle={dependencyReport.rehabDependency.activePhaseTitle}
+        nextPhaseOrder={
+          dependencyReport.rehabDependency.activePhaseOrder <
+          dependencyReport.rehabDependency.totalPhases
+            ? dependencyReport.rehabDependency.activePhaseOrder + 1
+            : null
+        }
+        nextPhaseTitle={
+          activeEnrollment?.program?.phases?.find(
+            (p) => p.phase_order === dependencyReport.rehabDependency.activePhaseOrder + 1
+          )?.title ||
+          (dependencyReport.rehabDependency.activePhaseOrder <
+          dependencyReport.rehabDependency.totalPhases
+            ? `Phase ${dependencyReport.rehabDependency.activePhaseOrder + 1}`
+            : null)
+        }
+        sessionsCompleted={dependencyReport.rehabDependency.sessionsCompletedInPhase}
+        requiredSessions={dependencyReport.rehabDependency.requiredSessionsInPhase}
+        avgPainScore={activeEnrollment?.avg_pain_last_3 ?? 2.8}
+        maxAllowedPainScore={activeEnrollment?.current_phase?.max_allowed_pain_score ?? 4.0}
+        scheduledRehabDaysPerWeek={dependencyReport.rehabDependency.scheduledDaysPerWeek}
+        isPhaseExtended={dependencyReport.rehabDependency.isPhaseExtended}
+        extendedSessionsCount={dependencyReport.rehabDependency.extendedSessionsCount}
+        onClose={() => setShowRetentionModal(false)}
+        onAdvanceToNextPhase={handleAdvancePhase}
+        onKeepPracticingCurrentPhase={handleKeepPracticingPhase}
+      />
+
       {/* Bottom Nav */}
       <KinetixBottomNav activeTab="progress" />
     </View>
@@ -1563,74 +2019,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 24,
-  },
-  profileMiniCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: KinetixTheme.borderRadius.xl,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: KinetixTheme.colors.border,
-    marginBottom: 14,
-    ...KinetixTheme.shadows.card,
-  },
-  profileLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  profileAvatarBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    position: 'relative',
-  },
-  profileAvatar: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 12,
-  },
-  profileOnlineDot: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: KinetixTheme.colors.secondary,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-  profileTextCol: {
-    justifyContent: 'center',
-  },
-  profileName: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: KinetixTheme.colors.text,
-    letterSpacing: -0.2,
-  },
-  profileSubtitle: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: KinetixTheme.colors.textMuted,
-    marginTop: 1,
-  },
-  onTrackBadge: {
-    backgroundColor: KinetixTheme.colors.secondaryLight,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: KinetixTheme.borderRadius.full,
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-  },
-  onTrackBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: KinetixTheme.colors.secondaryDark,
-    letterSpacing: 0.5,
   },
   sectionCard: {
     backgroundColor: '#FFFFFF',
@@ -1751,14 +2139,22 @@ const styles = StyleSheet.create({
   },
   dayDotsRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 2,
     marginTop: 2,
-    height: 4,
+    height: 5,
   },
   microDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    width: 4.5,
+    height: 4.5,
+    borderRadius: 2.5,
+  },
+  microDotOutline: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    borderWidth: 1.2,
+    backgroundColor: 'transparent',
   },
   calendarLegend: {
     flexDirection: 'row',
@@ -1771,12 +2167,19 @@ const styles = StyleSheet.create({
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   legendDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
+  },
+  legendDotOutline: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    borderWidth: 1.5,
+    backgroundColor: 'transparent',
   },
   legendText: {
     fontSize: 11,

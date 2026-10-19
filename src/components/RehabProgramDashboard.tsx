@@ -7,15 +7,21 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { KinetixTheme } from '../constants/theme';
 import {
   getActiveUserEnrollment,
+  getLocalEnrollmentOverride,
+  advanceToNextRehabPhase,
+  keepPracticingCurrentRehabPhase,
   UserEnrollment,
   ProgramPhase,
 } from '../services/rehabProgressionService';
+import RehabPhaseRetentionModal from './RehabPhaseRetentionModal';
+
 
 export interface RehabProgramDashboardProps {
   userId?: string;
@@ -78,15 +84,22 @@ export default function RehabProgramDashboard({
   const [enrollment, setEnrollment] = useState<UserEnrollment | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [showRetentionModal, setShowRetentionModal] = useState<boolean>(false);
 
   const fetchEnrollment = useCallback(async () => {
     try {
-      const data = await getActiveUserEnrollment(userId);
+      const [data, localOverride] = await Promise.all([
+        getActiveUserEnrollment(userId),
+        getLocalEnrollmentOverride(),
+      ]);
       if (data) {
         setEnrollment(data);
       } else {
-        // Fallback to demo structure if no cloud enrollment exists yet
-        setEnrollment(DEFAULT_LOWER_BACK_PROGRAM);
+        // Fallback to demo structure merged with any local phase retention overrides
+        setEnrollment({
+          ...DEFAULT_LOWER_BACK_PROGRAM,
+          ...(localOverride || {}),
+        });
       }
     } catch (err) {
       console.warn('[RehabProgramDashboard] Falling back to default program:', err);
@@ -293,6 +306,47 @@ export default function RehabProgramDashboard({
                 </View>
                 <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
               </TouchableOpacity>
+
+              {/* User-Controlled Phase Retention ("Keep Practicing") Button */}
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  backgroundColor: enrollment?.is_phase_extended ? '#FFFBEB' : '#F8FAFC',
+                  borderWidth: 1,
+                  borderColor: enrollment?.is_phase_extended ? '#FCD34D' : '#CBD5E1',
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderRadius: 10,
+                  marginTop: 10,
+                }}
+                onPress={() => setShowRetentionModal(true)}
+                activeOpacity={0.8}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <Ionicons
+                    name="shield-half"
+                    size={16}
+                    color={enrollment?.is_phase_extended ? '#B45309' : '#047857'}
+                  />
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontWeight: '800',
+                      color: enrollment?.is_phase_extended ? '#92400E' : '#0F172A',
+                      flex: 1,
+                    }}
+                  >
+                    {enrollment?.is_phase_extended
+                      ? `Practicing Phase ${phase.phase_order} Longer (+${
+                          enrollment?.extended_sessions_count || 3
+                        } sessions) • Manage`
+                      : 'Not Ready for Next Phase? Keep Practicing / Manage Phase'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={15} color="#64748B" />
+              </TouchableOpacity>
             </View>
           );
         }
@@ -327,6 +381,51 @@ export default function RehabProgramDashboard({
           </View>
         );
       })}
+
+      <RehabPhaseRetentionModal
+        visible={showRetentionModal}
+        programTitle={currentProgram?.title || 'Lower Back Resilience'}
+        currentPhaseOrder={
+          phases.find((p) => p.id === currentPhaseId)?.phase_order || 1
+        }
+        currentPhaseTitle={
+          phases.find((p) => p.id === currentPhaseId)?.title || 'Phase 1'
+        }
+        nextPhaseOrder={
+          (phases.find((p) => p.id === currentPhaseId)?.phase_order || 1) + 1
+        }
+        nextPhaseTitle={
+          phases.find(
+            (p) =>
+              p.phase_order ===
+              (phases.find((cur) => cur.id === currentPhaseId)?.phase_order || 1) + 1
+          )?.title || null
+        }
+        sessionsCompleted={sessionsCompleted}
+        requiredSessions={
+          phases.find((p) => p.id === currentPhaseId)?.required_sessions_to_pass || 8
+        }
+        avgPainScore={avgPainLast3}
+        maxAllowedPainScore={
+          phases.find((p) => p.id === currentPhaseId)?.max_allowed_pain_score || 4.0
+        }
+        isPhaseExtended={enrollment?.is_phase_extended}
+        extendedSessionsCount={enrollment?.extended_sessions_count}
+        onClose={() => setShowRetentionModal(false)}
+        onAdvanceToNextPhase={async () => {
+          await advanceToNextRehabPhase(userId, enrollment?.id);
+          await fetchEnrollment();
+          Alert.alert('Phase Advanced! 🎉', 'You have moved to the next rehabilitation phase.');
+        }}
+        onKeepPracticingCurrentPhase={async (extraSessions) => {
+          await keepPracticingCurrentRehabPhase(userId, enrollment?.id, extraSessions);
+          await fetchEnrollment();
+          Alert.alert(
+            'Phase Extended ✓',
+            `Added +${extraSessions} practice sessions to your current phase.`
+          );
+        }}
+      />
 
       <View style={{ height: 40 }} />
     </ScrollView>

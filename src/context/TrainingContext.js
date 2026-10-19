@@ -174,9 +174,9 @@ export const TrainingProvider = ({ children, session }) => {
   };
 
   const logWorkout = async (type, duration, intensity, planId = null, extraDetails = {}) => {
-    const todayStr = getDateString();
-    const todayProfile = history[todayStr] || { };
-    const currentMove = todayProfile.move || { workouts: [], stepCount: 0 };
+    const targetDateStr = extraDetails.targetDateKey || getDateString();
+    const dayProfile = history[targetDateStr] || {};
+    const currentMove = dayProfile.move || { workouts: [], stepCount: 0 };
     
     const now = new Date();
     const startTimeIso = extraDetails.startTime 
@@ -195,12 +195,34 @@ export const TrainingProvider = ({ children, session }) => {
     const formatDurationStr = (sec) => {
       const m = Math.floor(sec / 60);
       const s = sec % 60;
+      if (m >= 60 && s === 0) {
+        const hrs = (m / 60).toFixed(1).replace(/\.0$/, '');
+        return `${hrs}h (${m} min)`;
+      }
       if (s === 0) return `${m} min`;
       return `${m}m ${s.toString().padStart(2, '0')}s`;
     };
 
     const checkTitle = `${type || ''} ${extraDetails.worksessionName || ''}`.toLowerCase();
-    const isRehab = Boolean(
+    const isSport = Boolean(
+      extraDetails.isSport ||
+      extraDetails.sessionType === 'sport' ||
+      (extraDetails.category || '').toLowerCase().includes('sport') ||
+      checkTitle.includes('volleyball') ||
+      checkTitle.includes('basketball') ||
+      checkTitle.includes('football') ||
+      checkTitle.includes('soccer') ||
+      checkTitle.includes('tennis') ||
+      checkTitle.includes('badminton') ||
+      checkTitle.includes('handball') ||
+      checkTitle.includes('rugby') ||
+      checkTitle.includes('hockey') ||
+      checkTitle.includes('water polo') ||
+      checkTitle.includes('baseball') ||
+      checkTitle.includes('cricket')
+    );
+
+    const isRehab = !isSport && Boolean(
       extraDetails.isRehab ||
       extraDetails.sessionType === 'rehab' ||
       checkTitle.includes('rehab') ||
@@ -214,15 +236,21 @@ export const TrainingProvider = ({ children, session }) => {
       checkTitle.includes('back')
     );
 
+    const resolvedSessionType = isSport ? 'sport' : isRehab ? 'rehab' : 'workout';
+
     const newWorkout = { 
       id: Date.now().toString(), 
       type, 
-      sessionType: isRehab ? 'rehab' : 'workout',
+      sessionType: resolvedSessionType,
       isRehab,
-      category: extraDetails.category || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
+      isSport,
+      category: extraDetails.category || (isSport ? 'Collective Sports' : isRehab ? 'Clinical Rehab' : 'Strength & Power'),
       duration: durationMins,
       durationSeconds: durationSecs,
       durationFormatted: extraDetails.durationFormatted || formatDurationStr(durationSecs),
+      hoursPlayed: extraDetails.hoursPlayed || (isSport ? Number((durationMins / 60).toFixed(2)) : null),
+      rpe: extraDetails.rpe || null,
+      notes: extraDetails.notes || null,
       intensity: intensity || 'High', 
       planId,
       startTime: startTimeIso,
@@ -237,7 +265,7 @@ export const TrainingProvider = ({ children, session }) => {
     
     const updatedMove = { ...currentMove, workouts: [newWorkout, ...currentMove.workouts] };
     
-    await saveToCloud(todayStr, { ...todayProfile, move: updatedMove });
+    await saveToCloud(targetDateStr, { ...dayProfile, move: updatedMove });
     setLatestWorkout(newWorkout);
 
     if (session?.user?.id) {
@@ -249,6 +277,20 @@ export const TrainingProvider = ({ children, session }) => {
         }]);
       } catch (err) {
         console.error('Failed to log to active_sessions:', err);
+      }
+
+      if (isSport) {
+        try {
+          await supabase.from('workout_session_logs').insert([{
+            user_id: session.user.id,
+            session_id: extraDetails.exerciseId || planId || 'sport-session',
+            duration_minutes: durationMins,
+            notes: `${type} • ${extraDetails.hoursPlayed || (durationMins / 60).toFixed(1)}h${extraDetails.rpe ? ` • RPE ${extraDetails.rpe}/10` : ''}${extraDetails.notes ? ` • ${extraDetails.notes}` : ''}`,
+            completed_at: endTimeIso,
+          }]);
+        } catch (err) {
+          console.warn('Sport workout_session_logs insert skipped:', err);
+        }
       }
     }
   };

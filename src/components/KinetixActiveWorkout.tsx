@@ -21,8 +21,19 @@ import KinetixBottomNav from './KinetixBottomNav';
 import KinetixHeader from './KinetixHeader';
 import { TrainingContext } from '../context/TrainingContext';
 import { DATABASE_WORKSESSIONS } from '../data/databaseLibraryData';
-import { getExerciseTrackingType } from '../data/recoveryMetadata';
-import { useWorkoutPlayer, PlayerExercise } from '../hooks/useWorkoutPlayer';
+import {
+  getExerciseTrackingType,
+  getExerciseDescription,
+  getExerciseInstructions,
+  getExerciseDifficulty,
+  getExerciseMechanics,
+  getExerciseMuscleGroup,
+  getExerciseEquipment,
+  getExerciseCategory,
+  getExerciseVideoUrl,
+  getExerciseVideoThumbnail,
+} from '../data/recoveryMetadata';
+import { useWorkoutPlayer, PlayerExercise, getExerciseSetDuration } from '../hooks/useWorkoutPlayer';
 import GuidedCounterCard from './active-workout/GuidedCounterCard';
 
 interface ExerciseData {
@@ -35,9 +46,24 @@ interface ExerciseData {
   load?: string;
   weight?: string;
   restSeconds?: number;
+  target_rest_seconds?: number;
+  target_duration_seconds?: number;
+  target_reps?: number;
+  hold_seconds_per_rep?: number;
+  reps_per_set?: number[];
+  durations_per_set?: number[];
   trackingType?: 'duration' | 'weight_reps' | 'bodyweight';
   tracking_type?: string;
   video_url?: string | null;
+  video_thumbnail_url?: string | null;
+  equipment?: string;
+  muscle_group?: string;
+  description?: string | null;
+  instructions?: string | null;
+  notes?: string | null;
+  category?: string | null;
+  difficulty?: string | null;
+  mechanics?: string | null;
 }
 
 interface WorksessionData {
@@ -87,15 +113,28 @@ const STANDBY_SESSIONS: WorksessionData[] = DATABASE_WORKSESSIONS.map((ws) => ({
     return {
       name: e.name,
       cue: e.cue || 'Controlled form.',
+      notes: e.cue || '',
       totalSets: e.sets || 3,
       reps: String(e.reps),
       load: e.weight || 'Standard',
-      restSeconds: e.restSeconds || 60,
+      restSeconds: typeof e.restSeconds === 'number' ? e.restSeconds : (typeof (e as any).target_rest_seconds === 'number' ? (e as any).target_rest_seconds : 60),
+      target_rest_seconds: typeof (e as any).target_rest_seconds === 'number' ? (e as any).target_rest_seconds : (typeof e.restSeconds === 'number' ? e.restSeconds : 60),
+      target_duration_seconds: (e as any).target_duration_seconds,
+      target_reps: (e as any).target_reps,
+      hold_seconds_per_rep: (e as any).hold_seconds_per_rep,
+      reps_per_set: (e as any).reps_per_set,
+      durations_per_set: (e as any).durations_per_set,
       trackingType: resolvedTrackingType,
       tracking_type: e.tracking_type || inferred,
-      video_url: null,
-      equipment: e.equipment,
-      muscle_group: e.muscle_group,
+      video_url: (e as any).video_url || getExerciseVideoUrl(e) || null,
+      video_thumbnail_url: (e as any).video_thumbnail_url || getExerciseVideoThumbnail(e) || null,
+      equipment: e.equipment || getExerciseEquipment(e),
+      muscle_group: e.muscle_group || getExerciseMuscleGroup(e),
+      description: (e as any).description || getExerciseDescription(e) || null,
+      instructions: (e as any).instructions || getExerciseInstructions(e) || null,
+      difficulty: (e as any).difficulty || getExerciseDifficulty(e) || null,
+      mechanics: (e as any).mechanics || getExerciseMechanics(e) || null,
+      category: (e as any).category || getExerciseCategory(e) || null,
     };
   }),
 }));
@@ -126,29 +165,54 @@ export default function KinetixActiveWorkout({
   const initialExercises: ExerciseData[] = worksession?.exercises && worksession.exercises.length > 0
     ? worksession.exercises.map((e: any, idx: number) => {
         const inferred = getExerciseTrackingType(e);
+        const rawType = e.tracking_type || inferred;
+        const isDuration = rawType === 'time' || rawType === 'duration' || inferred === 'time';
+        const isWeightReps = rawType === 'weight_reps';
         const resolvedTrackingType: 'duration' | 'weight_reps' | 'bodyweight' =
-          e.trackingType || (inferred === 'time' ? 'duration' : inferred === 'weight_reps' ? 'weight_reps' : 'bodyweight');
+          e.trackingType || (isDuration ? 'duration' : isWeightReps ? 'weight_reps' : 'bodyweight');
+        const restSec =
+          typeof e.restSeconds === 'number'
+            ? e.restSeconds
+            : typeof e.target_rest_seconds === 'number'
+            ? e.target_rest_seconds
+            : 60;
         return {
           id: `ex-${idx}`,
           name: e.name || 'Exercise',
           cue: e.cue || '',
+          notes: e.notes || e.cue || '',
           totalSets: e.totalSets || e.sets || 3,
-          reps: typeof e.reps === 'number' ? `${e.reps} reps` : (e.reps || '10 reps'),
+          reps: typeof e.reps === 'number' ? (isDuration ? `${e.reps}s` : `${e.reps} reps`) : (e.reps || (isDuration ? '45s' : '10 reps')),
           load: e.load || e.weight || 'Bodyweight',
+          restSeconds: restSec,
+          target_rest_seconds: restSec,
+          target_duration_seconds: e.target_duration_seconds || (isDuration ? (typeof e.reps === 'number' ? e.reps : 45) : undefined),
+          target_reps: e.target_reps,
+          hold_seconds_per_rep: e.hold_seconds_per_rep,
+          reps_per_set: e.reps_per_set,
+          durations_per_set: e.durations_per_set,
           trackingType: resolvedTrackingType,
-          tracking_type: e.tracking_type || inferred,
-          video_url: e.video_url || null,
-          equipment: e.equipment,
-          muscle_group: e.muscle_group,
+          tracking_type: rawType,
+          video_url: e.video_url || getExerciseVideoUrl(e) || null,
+          video_thumbnail_url: e.video_thumbnail_url || getExerciseVideoThumbnail(e) || null,
+          equipment: e.equipment || getExerciseEquipment(e),
+          muscle_group: e.muscle_group || getExerciseMuscleGroup(e),
+          description: e.description || getExerciseDescription(e) || null,
+          instructions: e.instructions || getExerciseInstructions(e) || null,
+          difficulty: e.difficulty || getExerciseDifficulty(e) || null,
+          mechanics: e.mechanics || getExerciseMechanics(e) || null,
+          category: e.category || getExerciseCategory(e) || null,
         };
       })
     : worksession?.worksession_exercises && worksession.worksession_exercises.length > 0
     ? worksession.worksession_exercises.map((we: any, idx: number) => {
         const ex = we.exercises || {};
-        const isHold = we.tracking_type === 'time' || (we.target_time && we.target_time > 0);
         const inferred = getExerciseTrackingType(ex);
+        const rawType = we.tracking_type || inferred;
+        const isHold = rawType === 'time' || rawType === 'duration' || (we.target_time && we.target_time > 0) || inferred === 'time';
+        const isWeightReps = rawType === 'weight_reps';
         const resolvedTrackingType: 'duration' | 'weight_reps' | 'bodyweight' =
-          isHold ? 'duration' : inferred === 'weight_reps' ? 'weight_reps' : 'bodyweight';
+          isHold ? 'duration' : isWeightReps ? 'weight_reps' : 'bodyweight';
 
         let parsedLoad = 'Bodyweight';
         if (we.notes && we.notes.toLowerCase().includes('load:')) {
@@ -160,20 +224,43 @@ export default function KinetixActiveWorkout({
           parsedLoad = '60kg';
         }
 
+        const restSec =
+          typeof we.target_rest_seconds === 'number'
+            ? we.target_rest_seconds
+            : typeof we.restSeconds === 'number'
+            ? we.restSeconds
+            : typeof ex.default_rest_seconds === 'number'
+            ? ex.default_rest_seconds
+            : 60;
+
         return {
           id: `ex-${idx}`,
           name: ex.name || 'Exercise',
           cue: we.notes || ex.instructions || 'Maintain controlled posture.',
+          notes: we.notes || ex.instructions || '',
           totalSets: we.target_sets || 3,
           reps: isHold
             ? (we.target_time ? `${we.target_time}s` : '45s')
             : (we.target_reps ? `${we.target_reps} reps` : '10 reps'),
           load: parsedLoad,
+          restSeconds: restSec,
+          target_rest_seconds: restSec,
+          target_duration_seconds: we.target_duration_seconds || (isHold ? (we.target_time || 45) : undefined),
+          target_reps: we.target_reps,
+          hold_seconds_per_rep: we.hold_seconds_per_rep,
+          reps_per_set: we.reps_per_set,
+          durations_per_set: we.durations_per_set,
           trackingType: resolvedTrackingType,
           tracking_type: we.tracking_type || inferred,
-          video_url: ex.video_url || null,
-          equipment: ex.equipment,
-          muscle_group: ex.muscle_group,
+          video_url: ex.video_url || getExerciseVideoUrl(ex) || null,
+          video_thumbnail_url: ex.video_thumbnail_url || getExerciseVideoThumbnail(ex) || null,
+          equipment: ex.equipment || getExerciseEquipment(ex),
+          muscle_group: ex.muscle_group || getExerciseMuscleGroup(ex),
+          description: we.description || ex.description || getExerciseDescription(ex) || null,
+          instructions: ex.instructions || we.instructions || getExerciseInstructions(ex) || null,
+          difficulty: ex.difficulty || we.difficulty || getExerciseDifficulty(ex) || null,
+          mechanics: ex.mechanics || we.mechanics || getExerciseMechanics(ex) || null,
+          category: ex.category || we.category || getExerciseCategory(ex) || null,
         };
       })
     : activeSessionMetadata?.exercises && activeSessionMetadata.exercises.length > 0
@@ -211,6 +298,9 @@ export default function KinetixActiveWorkout({
     const raw = ex.tracking_type || getExerciseTrackingType(ex);
     if (raw === 'time' || raw === 'duration') return 'duration';
     if (raw === 'weight_reps') return 'weight_reps';
+    const inferred = getExerciseTrackingType(ex);
+    if (inferred === 'time') return 'duration';
+    if (inferred === 'weight_reps') return 'weight_reps';
     return 'bodyweight';
   };
 
@@ -376,15 +466,26 @@ export default function KinetixActiveWorkout({
       setActiveMode(targetMode);
 
       if (targetMode === 'duration') {
-        const parsedSecs = parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 45;
+        const parsedSecs =
+          typeof currentEx.target_duration_seconds === 'number'
+            ? currentEx.target_duration_seconds
+            : parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 45;
         setHoldSeconds(parsedSecs);
         setTimerRunning(false);
         setIsPaused(false);
       } else if (targetMode === 'bodyweight') {
-        const parsedReps = parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 12;
+        const parsedReps =
+          typeof currentEx.target_reps === 'number'
+            ? currentEx.target_reps
+            : parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 10;
         setBwReps(parsedReps);
+        const parsedExtra = parseInt(String(currentEx.load || currentEx.weight).replace(/[^0-9]/g, '')) || 0;
+        setBwExtraLoad(parsedExtra);
       } else {
-        const parsedReps = parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 8;
+        const parsedReps =
+          typeof currentEx.target_reps === 'number'
+            ? currentEx.target_reps
+            : parseInt(String(currentEx.reps).replace(/[^0-9]/g, '')) || 8;
         setWrReps(parsedReps);
         const parsedWeight = parseInt(String(currentEx.load || currentEx.weight).replace(/[^0-9]/g, '')) || 60;
         if (parsedWeight > 0) {
@@ -548,11 +649,17 @@ export default function KinetixActiveWorkout({
     onSetCompleted: (log) => {
       const completedSetNum = log.setNumber;
       const totalSetsForEx = currentEx?.totalSets || 4;
+      const exRest =
+        typeof currentEx?.restSeconds === 'number'
+          ? currentEx.restSeconds
+          : typeof (currentEx as any)?.target_rest_seconds === 'number'
+          ? (currentEx as any).target_rest_seconds
+          : 60;
 
       triggerToast({
         type: 'set_completed',
         title: `Set ${completedSetNum} Logged! ✓`,
-        subtitle: `Next: Set ${Math.min(totalSetsForEx, completedSetNum + 1)} of ${totalSetsForEx} · ${currentEx?.restSeconds || 60}s Rest`,
+        subtitle: `Next: Set ${Math.min(totalSetsForEx, completedSetNum + 1)} of ${totalSetsForEx}${exRest > 0 ? ` · ${exRest}s Rest` : ' · Continuous'}`,
         badgeText: `SET ${completedSetNum}/${totalSetsForEx}`,
       });
     },
@@ -643,7 +750,12 @@ export default function KinetixActiveWorkout({
 
   const handleCompleteSet = () => {
     const totalSetsForEx = currentEx?.totalSets || 4;
-    const restDuration = currentEx?.restSeconds || 60;
+    const restDuration =
+      typeof currentEx?.restSeconds === 'number'
+        ? currentEx.restSeconds
+        : typeof (currentEx as any)?.target_rest_seconds === 'number'
+        ? (currentEx as any).target_rest_seconds
+        : 60;
 
     // Audible and tactile feedback on set completion
     player.triggerHaptic('success');
@@ -653,44 +765,59 @@ export default function KinetixActiveWorkout({
       const completedSetNum = currentSet;
       const nextSetNum = currentSet + 1;
       setCurrentSet(nextSetNum);
-      const parsedHold = parseInt(String(currentEx?.reps).replace(/[^0-9]/g, '')) || 45;
+      const parsedHold = getExerciseSetDuration(currentEx as any, nextSetNum - 1);
       setHoldSeconds(parsedHold);
       setTimerRunning(false);
 
-      // Start automatic rest timer
-      setTotalRestTarget(restDuration);
-      setRestSecondsLeft(restDuration);
-      setIsResting(true);
+      // Start automatic rest timer if restDuration > 0
+      if (restDuration > 0) {
+        setTotalRestTarget(restDuration);
+        setRestSecondsLeft(restDuration);
+        setIsResting(true);
+      } else {
+        setIsResting(false);
+        setRestSecondsLeft(0);
+      }
 
       // Non-blocking animated HUD toast
       triggerToast({
         type: 'set_completed',
         title: `Set ${completedSetNum} Logged! ✓`,
-        subtitle: `Next: Set ${nextSetNum} of ${totalSetsForEx} · ${restDuration}s Rest`,
+        subtitle: `Next: Set ${nextSetNum} of ${totalSetsForEx}${restDuration > 0 ? ` · ${restDuration}s Rest` : ' · Continuous'}`,
         badgeText: `SET ${completedSetNum}/${totalSetsForEx}`,
       });
     } else {
       if (currentExIndex < currentExercises.length - 1) {
         const finishedName = currentEx.name;
         const nextEx = currentExercises[currentExIndex + 1];
-        const nextRest = nextEx?.restSeconds || 60;
+        const nextRest =
+          typeof nextEx?.restSeconds === 'number'
+            ? nextEx.restSeconds
+            : typeof (nextEx as any)?.target_rest_seconds === 'number'
+            ? (nextEx as any).target_rest_seconds
+            : 60;
 
         setCurrentExIndex((prev) => prev + 1);
         setCurrentSet(1);
-        const parsedHold = parseInt(String(nextEx?.reps).replace(/[^0-9]/g, '')) || 45;
+        const parsedHold = getExerciseSetDuration(nextEx as any, 0);
         setHoldSeconds(parsedHold);
         setTimerRunning(false);
 
-        // Start rest before next exercise
-        setTotalRestTarget(nextRest);
-        setRestSecondsLeft(nextRest);
-        setIsResting(true);
+        // Start rest before next exercise if nextRest > 0
+        if (nextRest > 0) {
+          setTotalRestTarget(nextRest);
+          setRestSecondsLeft(nextRest);
+          setIsResting(true);
+        } else {
+          setIsResting(false);
+          setRestSecondsLeft(0);
+        }
 
         // Celebratory non-blocking exercise completed toast
         triggerToast({
           type: 'exercise_completed',
           title: `${finishedName} Completed! 🎉`,
-          subtitle: `Next up: ${nextEx.name} · ${nextEx.totalSets || 4} sets target`,
+          subtitle: `Next up: ${nextEx.name} · ${nextEx.totalSets || 4} sets target${nextRest > 0 ? ` · ${nextRest}s Rest` : ''}`,
           badgeText: `EXERCISE ${currentExIndex + 1}/${currentExercises.length} DONE`,
         });
       } else {
@@ -747,6 +874,17 @@ export default function KinetixActiveWorkout({
         subtitle: `Now starting: ${nextEx.name}`,
         badgeText: 'SKIPPED',
       });
+    }
+  };
+
+  const handleSelectExercise = (index: number) => {
+    if (index < 0 || index >= currentExercises.length || index === currentExIndex) return;
+    setCurrentExIndex(index);
+    setCurrentSet(1);
+    setIsResting(false);
+    setRestSecondsLeft(0);
+    if (isGuidedMode) {
+      player.syncPosition(index, 0);
     }
   };
 
@@ -1071,7 +1209,13 @@ export default function KinetixActiveWorkout({
                 <Ionicons name="checkmark-circle" size={13} color={KinetixTheme.colors.secondary} />
                 <Text style={styles.activePillText}>Active</Text>
               </View>
-              <View
+              <TouchableOpacity
+                onPress={() => {
+                  const modes: ('duration' | 'weight_reps' | 'bodyweight')[] = ['duration', 'weight_reps', 'bodyweight'];
+                  const nextIdx = (modes.indexOf(activeMode) + 1) % modes.length;
+                  setActiveMode(modes[nextIdx]);
+                }}
+                activeOpacity={0.7}
                 style={[
                   styles.metricIndicatorBadge,
                   activeMode === 'duration' && { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' },
@@ -1095,7 +1239,13 @@ export default function KinetixActiveWorkout({
                 >
                   {activeMode === 'duration' ? 'TIME HOLD' : activeMode === 'weight_reps' ? 'WEIGHT & REPS' : 'BODYWEIGHT REPS'}
                 </Text>
-              </View>
+                <Ionicons
+                  name="swap-horizontal"
+                  size={11}
+                  color={activeMode === 'duration' ? '#059669' : activeMode === 'weight_reps' ? '#2563EB' : '#475569'}
+                  style={{ marginLeft: 3, opacity: 0.7 }}
+                />
+              </TouchableOpacity>
             </View>
             <Text style={styles.currentExerciseHeading}>{currentEx?.name}</Text>
           </View>
@@ -1284,19 +1434,47 @@ export default function KinetixActiveWorkout({
                 <View style={styles.stepperCol}>
                   <Text style={styles.stepperColLabel}>LOAD (KG)</Text>
                   <View style={styles.stepperBox}>
-                    <TouchableOpacity style={styles.stepCircleBtn} onPress={() => setWrWeight(Math.max(0, wrWeight - 2.5))}>
+                    <TouchableOpacity
+                      style={styles.stepCircleBtn}
+                      onPress={() => {
+                        const next = Math.max(0, wrWeight - 2.5);
+                        setWrWeight(next);
+                        setCurrentDockLoad(next);
+                      }}
+                    >
                       <Text style={styles.stepTextBtn}>-2.5</Text>
                     </TouchableOpacity>
                     <Text style={styles.stepperVal}>{wrWeight}<Text style={styles.stepperUnit}>kg</Text></Text>
-                    <TouchableOpacity style={styles.stepCircleBtn} onPress={() => setWrWeight(wrWeight + 2.5)}>
+                    <TouchableOpacity
+                      style={styles.stepCircleBtn}
+                      onPress={() => {
+                        const next = wrWeight + 2.5;
+                        setWrWeight(next);
+                        setCurrentDockLoad(next);
+                      }}
+                    >
                       <Text style={styles.stepTextBtn}>+2.5</Text>
                     </TouchableOpacity>
                   </View>
                   <View style={styles.miniPillsRow}>
-                    <TouchableOpacity style={styles.miniPill} onPress={() => setWrWeight(wrWeight + 5)}>
+                    <TouchableOpacity
+                      style={styles.miniPill}
+                      onPress={() => {
+                        const next = wrWeight + 5;
+                        setWrWeight(next);
+                        setCurrentDockLoad(next);
+                      }}
+                    >
                       <Text style={styles.miniPillText}>+5kg</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.miniPill} onPress={() => setWrWeight(wrWeight + 10)}>
+                    <TouchableOpacity
+                      style={styles.miniPill}
+                      onPress={() => {
+                        const next = wrWeight + 10;
+                        setWrWeight(next);
+                        setCurrentDockLoad(next);
+                      }}
+                    >
                       <Text style={styles.miniPillText}>+10kg</Text>
                     </TouchableOpacity>
                   </View>
@@ -1360,7 +1538,10 @@ export default function KinetixActiveWorkout({
                       <TouchableOpacity
                         key={val}
                         style={[styles.extraPill, isSelected && styles.extraPillSelected]}
-                        onPress={() => setBwExtraLoad(val)}
+                        onPress={() => {
+                          setBwExtraLoad(val);
+                          setCurrentDockLoad(val);
+                        }}
                       >
                         <Text style={[styles.extraPillText, isSelected && styles.extraPillTextSelected]}>
                           {val === 0 ? 'None' : `+${val}kg`}
@@ -1389,19 +1570,43 @@ export default function KinetixActiveWorkout({
           </View>
           <View style={styles.dockCol}>
             <Text style={styles.dockLabel}>LOAD</Text>
-            <View style={styles.dockInlineStepper}>
-              <TouchableOpacity onPress={() => setCurrentDockLoad(Math.max(0, currentDockLoad - 2.5))}>
-                <Text style={styles.dockStepOp}>-</Text>
-              </TouchableOpacity>
-              <Text style={styles.dockVal}>{currentDockLoad}<Text style={styles.dockSub}>kg</Text></Text>
-              <TouchableOpacity onPress={() => setCurrentDockLoad(currentDockLoad + 2.5)}>
-                <Text style={styles.dockStepOp}>+</Text>
-              </TouchableOpacity>
-            </View>
+            {activeMode === 'duration' ? (
+              <Text style={[styles.dockVal, { color: KinetixTheme.colors.textSecondary, fontSize: 13 }]}>
+                Bodyweight
+              </Text>
+            ) : activeMode === 'bodyweight' ? (
+              <Text style={[styles.dockVal, { color: bwExtraLoad > 0 ? KinetixTheme.colors.primary : KinetixTheme.colors.textSecondary, fontSize: 13 }]}>
+                {bwExtraLoad > 0 ? `+${bwExtraLoad}kg` : 'Bodyweight'}
+              </Text>
+            ) : (
+              <View style={styles.dockInlineStepper}>
+                <TouchableOpacity
+                  onPress={() => {
+                    const next = Math.max(0, wrWeight - 2.5);
+                    setWrWeight(next);
+                    setCurrentDockLoad(next);
+                  }}
+                >
+                  <Text style={styles.dockStepOp}>-</Text>
+                </TouchableOpacity>
+                <Text style={styles.dockVal}>{wrWeight}<Text style={styles.dockSub}>kg</Text></Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    const next = wrWeight + 2.5;
+                    setWrWeight(next);
+                    setCurrentDockLoad(next);
+                  }}
+                >
+                  <Text style={styles.dockStepOp}>+</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
           <View style={styles.dockCol}>
             <Text style={styles.dockLabel}>REST</Text>
-            <Text style={styles.dockVal}>{currentEx?.restSeconds ? `${currentEx.restSeconds}s` : '60s'}</Text>
+            <Text style={styles.dockVal}>
+              {typeof currentEx?.restSeconds === 'number' ? `${currentEx.restSeconds}s` : '60s'}
+            </Text>
           </View>
         </View>
 
@@ -1499,8 +1704,10 @@ export default function KinetixActiveWorkout({
               const isCurrent = idx === currentExIndex;
 
               return (
-                <View
+                <TouchableOpacity
                   key={ex.id || idx}
+                  onPress={() => handleSelectExercise(idx)}
+                  activeOpacity={0.75}
                   style={[
                     styles.seqCard,
                     isCurrent && styles.seqCardCurrent,
@@ -1552,7 +1759,7 @@ export default function KinetixActiveWorkout({
                   <Text style={styles.seqSetsSummary}>
                     {isPast ? `${ex.totalSets || 4}/${ex.totalSets || 4}` : isCurrent ? `Set ${currentSet}/${ex.totalSets || 4}` : `${ex.totalSets || 4} sets`}
                   </Text>
-                </View>
+                </TouchableOpacity>
               );
             })}
           </View>
