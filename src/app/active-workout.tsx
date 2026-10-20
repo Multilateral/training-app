@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useState, useMemo, useCallback } from 'react';
 import { StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -32,23 +32,30 @@ export default function ActiveWorkoutScreen() {
     undefined
   );
 
-  let parsedPlan: any = null;
-  let parsedWorksession: any = null;
+  // Memoize parsed route parameters so object references remain completely stable across re-renders
+  const parsedPlan = useMemo(() => {
+    if (typeof plan === 'string') {
+      try {
+        return JSON.parse(plan);
+      } catch (e) {
+        console.error('Failed to parse plan param', e);
+      }
+    }
+    return activeSessionMetadata?.plan || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan]);
 
-  try {
-    if (typeof plan === 'string') parsedPlan = JSON.parse(plan);
-    if (typeof worksession === 'string') parsedWorksession = JSON.parse(worksession);
-  } catch (e) {
-    console.error('Failed to parse params', e);
-  }
-
-  // Restore worksession & plan from activeSessionMetadata when returning to screen without route params
-  if (!parsedWorksession && activeSessionMetadata?.worksession) {
-    parsedWorksession = activeSessionMetadata.worksession;
-  }
-  if (!parsedPlan && activeSessionMetadata?.plan) {
-    parsedPlan = activeSessionMetadata.plan;
-  }
+  const parsedWorksession = useMemo(() => {
+    if (typeof worksession === 'string') {
+      try {
+        return JSON.parse(worksession);
+      } catch (e) {
+        console.error('Failed to parse worksession param', e);
+      }
+    }
+    return activeSessionMetadata?.worksession || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worksession]);
 
   const handleFinish = async (durationMins?: number, summary?: any) => {
     const workoutTitle = parsedWorksession?.name || summary?.worksessionName || 'Active Workout';

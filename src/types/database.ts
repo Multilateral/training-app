@@ -19,6 +19,8 @@ export interface Exercise {
   default_rest_seconds?: number;
   default_duration_seconds?: number;
   default_reps?: number;
+  seconds_per_rep?: number | null;
+  reset_seconds_per_rep?: number | null;
   user_id?: string | null;
   created_at?: string;
 }
@@ -45,8 +47,10 @@ export interface WorksessionExercise {
   target_rest_seconds?: number | null;
   target_duration_seconds?: number | null;
   hold_seconds_per_rep?: number | null;
+  seconds_per_rep?: number | null;
   reps_per_set?: number[] | null;
   durations_per_set?: number[] | null;
+  reset_seconds_per_rep?: number | null;
   notes?: string | null;
   created_at?: string;
   exercises?: Exercise;

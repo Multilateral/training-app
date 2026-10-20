@@ -52,6 +52,8 @@ interface ExerciseData {
   target_duration_seconds?: number;
   target_reps?: number;
   hold_seconds_per_rep?: number;
+  reset_seconds_per_rep?: number | null;
+  seconds_per_rep?: number | null;
   reps_per_set?: number[];
   durations_per_set?: number[];
   trackingType?: 'duration' | 'weight_reps' | 'bodyweight';
@@ -124,6 +126,8 @@ const STANDBY_SESSIONS: WorksessionData[] = DATABASE_WORKSESSIONS.map((ws) => ({
       target_duration_seconds: (e as any).target_duration_seconds,
       target_reps: (e as any).target_reps,
       hold_seconds_per_rep: (e as any).hold_seconds_per_rep,
+      reset_seconds_per_rep: (e as any).reset_seconds_per_rep,
+      seconds_per_rep: (e as any).seconds_per_rep || (e as any).hold_seconds_per_rep,
       reps_per_set: (e as any).reps_per_set,
       durations_per_set: (e as any).durations_per_set,
       trackingType: resolvedTrackingType,
@@ -193,6 +197,8 @@ export default function KinetixActiveWorkout({
           target_duration_seconds: e.target_duration_seconds || (isDuration ? (typeof e.reps === 'number' ? e.reps : 45) : undefined),
           target_reps: e.target_reps,
           hold_seconds_per_rep: e.hold_seconds_per_rep,
+          reset_seconds_per_rep: (e as any).reset_seconds_per_rep,
+          seconds_per_rep: e.seconds_per_rep || e.hold_seconds_per_rep,
           reps_per_set: e.reps_per_set,
           durations_per_set: e.durations_per_set,
           trackingType: resolvedTrackingType,
@@ -255,6 +261,8 @@ export default function KinetixActiveWorkout({
           target_duration_seconds: we.target_duration_seconds || (isHold ? (we.target_time || 45) : undefined),
           target_reps: we.target_reps,
           hold_seconds_per_rep: we.hold_seconds_per_rep,
+          reset_seconds_per_rep: (we as any).reset_seconds_per_rep || (ex as any).reset_seconds_per_rep,
+          seconds_per_rep: we.seconds_per_rep || ex.seconds_per_rep || we.hold_seconds_per_rep,
           reps_per_set: we.reps_per_set,
           durations_per_set: we.durations_per_set,
           trackingType: resolvedTrackingType,
@@ -418,6 +426,7 @@ export default function KinetixActiveWorkout({
   };
 
   const handleSkipRest = () => {
+    manualRestEndTimeRef.current = null;
     setIsResting(false);
     setRestSecondsLeft(0);
   };
@@ -657,7 +666,7 @@ export default function KinetixActiveWorkout({
     initialTotalDurationMs: activeSessionMetadata?.guidedTotalDurationMs,
     initialWasAutoPaused: activeSessionMetadata?.wasAutoPaused,
     initialCadenceMode: activeSessionMetadata?.cadenceMode || 'auto',
-    initialAudioPacerMode: activeSessionMetadata?.audioPacerMode || 'tones',
+    initialAudioPacerMode: activeSessionMetadata?.audioPacerMode,
     onSetCompleted: (log) => {
       const completedSetNum = log.setNumber;
       const totalSetsForEx = currentEx?.totalSets || 4;
@@ -688,6 +697,13 @@ export default function KinetixActiveWorkout({
   const isPausedRef = useRef(isPaused);
   const isRestingRef = useRef(isResting);
   const restSecondsLeftRef = useRef(restSecondsLeft);
+  const holdSecondsRef = useRef(holdSeconds);
+  const currentExercisesRef = useRef(currentExercises);
+  const worksessionRef = useRef(worksession);
+  const planRef = useRef(plan);
+  const manualRestEndTimeRef = useRef<number | null>(
+    activeSessionMetadata?.manualRestEndTime || null
+  );
 
   useEffect(() => {
     hasActiveSessionRef.current = hasActiveSession;
@@ -697,6 +713,10 @@ export default function KinetixActiveWorkout({
     isPausedRef.current = isPaused;
     isRestingRef.current = isResting;
     restSecondsLeftRef.current = restSecondsLeft;
+    holdSecondsRef.current = holdSeconds;
+    currentExercisesRef.current = currentExercises;
+    worksessionRef.current = worksession;
+    planRef.current = plan;
   });
 
   // Bi-directional synchronization: Guided Player -> Active Workout Screen
@@ -711,7 +731,7 @@ export default function KinetixActiveWorkout({
     }
   }, [isGuidedMode, player.currentExerciseIndex, player.currentSet]);
 
-  // Continuously persist active workout session state to context and storage
+  // Synchronize active workout session state to context on key state milestones
   useEffect(() => {
     if (!hasActiveSession || !updateActiveSessionMetadata) return;
 
@@ -720,14 +740,14 @@ export default function KinetixActiveWorkout({
       worksessionName: currentSessionName,
       currentExerciseName: currentEx?.name || 'Exercise',
       currentExerciseIndex: currentExIndex,
-      totalExercises: currentExercises.length,
+      totalExercises: currentExercisesRef.current?.length || 0,
       currentSet: currentSet,
       totalSets: currentEx?.totalSets || 4,
       currentLoad: currentDockLoad,
       startTime: workoutStartTime,
-      exercises: currentExercises,
-      worksession,
-      plan,
+      exercises: currentExercisesRef.current,
+      worksession: worksessionRef.current,
+      plan: planRef.current,
       isGuidedMode,
       guidedPlayerState: player.state,
       guidedSecondsRemaining: player.secondsRemaining,
@@ -737,40 +757,30 @@ export default function KinetixActiveWorkout({
       cadenceMode: player.cadenceMode,
       audioPacerMode: player.audioPacerMode,
       manualIsResting: isResting,
-      manualRestSecondsLeft: restSecondsLeft,
-      manualRestEndTime: isResting ? Date.now() + restSecondsLeft * 1000 : null,
+      manualRestSecondsLeft: restSecondsLeftRef.current,
+      manualRestEndTime: isResting ? (manualRestEndTimeRef.current || (Date.now() + restSecondsLeftRef.current * 1000)) : null,
       manualTotalRestTarget: totalRestTarget,
       manualIsHolding: timerRunning,
-      manualHoldSeconds: holdSeconds,
+      manualHoldSeconds: holdSecondsRef.current,
       isPaused: isPaused || player.isPaused,
     });
   }, [
     hasActiveSession,
     currentSessionName,
-    currentEx?.name,
     currentExIndex,
-    currentExercises,
     currentSet,
-    currentEx?.totalSets,
     currentDockLoad,
     workoutStartTime,
     isGuidedMode,
     player.state,
-    player.secondsRemaining,
-    player.endTime,
-    player.totalDurationMs,
-    player.wasAutoPaused,
     player.cadenceMode,
     player.audioPacerMode,
     isResting,
-    restSecondsLeft,
     totalRestTarget,
     timerRunning,
-    holdSeconds,
     isPaused,
     player.isPaused,
-    worksession,
-    plan,
+    updateActiveSessionMetadata,
   ]);
 
   // Manual Mode AppState auto-pause handler (freezes manual holds on screen lock / background)
@@ -856,7 +866,7 @@ export default function KinetixActiveWorkout({
           }
           if (prev <= 4 && prev > 1) {
             player.triggerHaptic('light');
-            player.playSound('pip');
+            player.playSound('metronome_tick');
           }
           return prev - 1;
         });
@@ -881,7 +891,7 @@ export default function KinetixActiveWorkout({
           }
           if (prev <= 4 && prev > 1) {
             player.triggerHaptic('light');
-            player.playSound('pip');
+            player.playSound('metronome_tick');
           }
           return prev - 1;
         });
@@ -929,6 +939,7 @@ export default function KinetixActiveWorkout({
       if (restDuration > 0) {
         setTotalRestTarget(restDuration);
         setRestSecondsLeft(restDuration);
+        manualRestEndTimeRef.current = Date.now() + restDuration * 1000;
         setIsResting(true);
       } else {
         setIsResting(false);
@@ -963,6 +974,7 @@ export default function KinetixActiveWorkout({
         if (nextRest > 0) {
           setTotalRestTarget(nextRest);
           setRestSecondsLeft(nextRest);
+          manualRestEndTimeRef.current = Date.now() + nextRest * 1000;
           setIsResting(true);
         } else {
           setIsResting(false);
@@ -1498,6 +1510,8 @@ export default function KinetixActiveWorkout({
             cadencePhaseSecondsRemaining={player.cadencePhaseSecondsRemaining}
             cadencePhaseProgress={player.cadencePhaseProgress}
             cadenceRepProgress={player.cadenceRepProgress}
+            elapsedWorkMs={player.elapsedWorkMs}
+            isRestTransitioning={player.isRestTransitioning}
           />
         ) : (
           <View style={styles.counterCard}>
@@ -1726,59 +1740,7 @@ export default function KinetixActiveWorkout({
         </View>
         )}
 
-        {/* Essential Athlete Metrics Dock */}
-        <View style={styles.metricsDock}>
-          <View style={styles.dockCol}>
-            <Text style={styles.dockLabel}>SET</Text>
-            <Text style={styles.dockVal}>{currentSet} <Text style={styles.dockSub}>/ {currentEx?.totalSets || 4}</Text></Text>
-          </View>
-          <View style={styles.dockCol}>
-            <Text style={styles.dockLabel}>{activeMode === 'duration' ? 'TIME' : 'REPS'}</Text>
-            <Text style={[styles.dockVal, { color: KinetixTheme.colors.primary }]}>
-              {activeMode === 'duration' ? `${holdSeconds}s` : `${activeMode === 'weight_reps' ? wrReps : bwReps} reps`}
-            </Text>
-          </View>
-          <View style={styles.dockCol}>
-            <Text style={styles.dockLabel}>LOAD</Text>
-            {activeMode === 'duration' ? (
-              <Text style={[styles.dockVal, { color: KinetixTheme.colors.textSecondary, fontSize: 13 }]}>
-                Bodyweight
-              </Text>
-            ) : activeMode === 'bodyweight' ? (
-              <Text style={[styles.dockVal, { color: bwExtraLoad > 0 ? KinetixTheme.colors.primary : KinetixTheme.colors.textSecondary, fontSize: 13 }]}>
-                {bwExtraLoad > 0 ? `+${bwExtraLoad}kg` : 'Bodyweight'}
-              </Text>
-            ) : (
-              <View style={styles.dockInlineStepper}>
-                <TouchableOpacity
-                  onPress={() => {
-                    const next = Math.max(0, wrWeight - 2.5);
-                    setWrWeight(next);
-                    setCurrentDockLoad(next);
-                  }}
-                >
-                  <Text style={styles.dockStepOp}>-</Text>
-                </TouchableOpacity>
-                <Text style={styles.dockVal}>{wrWeight}<Text style={styles.dockSub}>kg</Text></Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    const next = wrWeight + 2.5;
-                    setWrWeight(next);
-                    setCurrentDockLoad(next);
-                  }}
-                >
-                  <Text style={styles.dockStepOp}>+</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-          <View style={styles.dockCol}>
-            <Text style={styles.dockLabel}>REST</Text>
-            <Text style={styles.dockVal}>
-              {typeof currentEx?.restSeconds === 'number' ? `${currentEx.restSeconds}s` : '60s'}
-            </Text>
-          </View>
-        </View>
+
 
         {/* Action Control Dock */}
         <View style={styles.actionDock}>

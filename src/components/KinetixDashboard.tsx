@@ -216,11 +216,25 @@ export default function KinetixDashboard() {
   // Helper to map DB worksession exercise preserving rest and hold-time rep pyramids
   const mapDbWorksessionExercise = (we: any) => {
     const ex = we.exercises || {};
+    const effectiveSecondsPerRep =
+      typeof we.seconds_per_rep === 'number' && we.seconds_per_rep > 0
+        ? we.seconds_per_rep
+        : typeof ex.seconds_per_rep === 'number' && ex.seconds_per_rep > 0
+        ? ex.seconds_per_rep
+        : undefined;
+
+    const isTimedReps =
+      we.tracking_type === 'reps' ||
+      ex.tracking_type === 'reps' ||
+      Boolean(effectiveSecondsPerRep && (we.target_reps || ex.default_reps));
+
     const isHold =
-      we.tracking_type === 'time' ||
-      we.tracking_type === 'duration' ||
-      Boolean(we.target_time && we.target_time > 0) ||
-      Boolean(we.target_duration_seconds && we.target_duration_seconds > 0);
+      !isTimedReps &&
+      (we.tracking_type === 'time' ||
+        we.tracking_type === 'duration' ||
+        ex.tracking_type === 'time' ||
+        Boolean(we.target_time && we.target_time > 0) ||
+        Boolean(we.target_duration_seconds && we.target_duration_seconds > 0 && !effectiveSecondsPerRep));
 
     const rawRest =
       typeof we.target_rest_seconds === 'number'
@@ -237,16 +251,16 @@ export default function KinetixDashboard() {
     const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('50s, 30s') || cueLower.includes('5-3-1');
     const tSets = we.target_sets || 3;
 
-    let holdSecondsPerRep: number | undefined = we.hold_seconds_per_rep || undefined;
+    let holdSecondsPerRep: number | undefined = we.hold_seconds_per_rep || effectiveSecondsPerRep || undefined;
     let repsPerSet: number[] | undefined = we.reps_per_set || undefined;
     let durationsPerSet: number[] | undefined = we.durations_per_set || undefined;
 
     if ((isMcGill || isPyramid) && tSets >= 3 && !exName.includes('warmup')) {
-      holdSecondsPerRep = 10;
+      holdSecondsPerRep = holdSecondsPerRep || 10;
       repsPerSet = [5, 3, 1];
       durationsPerSet = [50, 30, 10];
     } else if (exName.includes('warmup') && (isMcGill || isPyramid)) {
-      holdSecondsPerRep = 10;
+      holdSecondsPerRep = holdSecondsPerRep || 10;
       repsPerSet = [3];
       durationsPerSet = [30];
     }
@@ -254,6 +268,9 @@ export default function KinetixDashboard() {
     let formattedReps = '10';
     if (durationsPerSet && durationsPerSet.length > 0) {
       formattedReps = `${durationsPerSet[0]}s (${repsPerSet ? repsPerSet.join('-') : '5-3-1'} reps × 10s)`;
+    } else if (effectiveSecondsPerRep && (we.target_reps || ex.default_reps)) {
+      const r = we.target_reps || ex.default_reps;
+      formattedReps = `${r} reps (${effectiveSecondsPerRep}s/rep)`;
     } else if (isHold) {
       const dur = we.target_duration_seconds || we.target_time || 45;
       formattedReps = `${dur}s`;
@@ -271,12 +288,13 @@ export default function KinetixDashboard() {
       weight: 'Standard',
       restSeconds: rawRest,
       target_rest_seconds: rawRest,
-      target_duration_seconds: we.target_duration_seconds || (isHold ? (we.target_time || 45) : undefined),
-      target_reps: we.target_reps || undefined,
+      target_duration_seconds: we.target_duration_seconds || (isHold ? (we.target_time || 45) : (effectiveSecondsPerRep && (we.target_reps || ex.default_reps) ? (we.target_reps || ex.default_reps) * effectiveSecondsPerRep : undefined)),
+      target_reps: we.target_reps || ex.default_reps || undefined,
       hold_seconds_per_rep: holdSecondsPerRep,
+      seconds_per_rep: effectiveSecondsPerRep,
       reps_per_set: repsPerSet,
       durations_per_set: durationsPerSet,
-      tracking_type: isHold ? 'duration' : (we.tracking_type || 'reps'),
+      tracking_type: isTimedReps ? 'reps' : isHold ? 'duration' : (we.tracking_type || ex.tracking_type || 'reps'),
       equipment: ex.equipment || 'Bodyweight',
       muscle_group: ex.muscle_group || 'General',
       difficulty: ex.difficulty || 'Intermediate',
@@ -302,8 +320,8 @@ export default function KinetixDashboard() {
               worksessions (
                 id, name, modality, description,
                 worksession_exercises (
-                  id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
-                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
+                  id, order_index, target_sets, target_reps, tracking_type, seconds_per_rep, target_time, target_rest_seconds, target_duration_seconds, notes,
+                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps, seconds_per_rep, tracking_type)
                 )
               )
             )
@@ -313,7 +331,8 @@ export default function KinetixDashboard() {
         if (!planErr && userPlans) {
           mappedUserPlans = userPlans.map((p: any) => {
             const existing = DATABASE_PLANS.find((dp) => dp.id === p.id);
-            if (existing) return existing;
+            const hasLiveSessions = Array.isArray(p.plan_worksessions) && p.plan_worksessions.length > 0;
+            if (existing && !hasLiveSessions) return existing;
 
             const isRehab =
               (p.name || '').toLowerCase().includes('rehab') ||
@@ -404,8 +423,8 @@ export default function KinetixDashboard() {
               .select(`
                 id, name, modality, description,
                 worksession_exercises (
-                  id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
-                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
+                  id, order_index, target_sets, target_reps, tracking_type, seconds_per_rep, target_time, target_rest_seconds, target_duration_seconds, notes,
+                  exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps, seconds_per_rep, tracking_type)
                 )
               `)
               .in('id', wsIds);
@@ -923,6 +942,7 @@ export default function KinetixDashboard() {
         target_duration_seconds: (e as any).target_duration_seconds,
         target_reps: (e as any).target_reps,
         hold_seconds_per_rep: (e as any).hold_seconds_per_rep,
+        seconds_per_rep: (e as any).seconds_per_rep || (e as any).hold_seconds_per_rep,
         reps_per_set: (e as any).reps_per_set,
         durations_per_set: (e as any).durations_per_set,
         tracking_type: e.tracking_type || getExerciseTrackingType(e) || 'bodyweight',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext } from 'react';
+import React, { useState, useEffect, createContext, useCallback } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
@@ -79,15 +79,37 @@ export const TrainingProvider = ({ children, session }) => {
     saveActiveSession();
   }, [activeSessionMetadata, activeSessionState, activeSessionTimer]);
 
-  const updateActiveSessionMetadata = (updater) => {
+  const updateActiveSessionMetadata = useCallback((updater) => {
     setActiveSessionMetadata((prev) => {
+      let next;
       if (typeof updater === 'function') {
-        return updater(prev);
+        next = updater(prev);
+      } else if (!updater) {
+        next = null;
+      } else {
+        next = { ...(prev || {}), ...updater };
       }
-      if (!updater) return null;
-      return { ...(prev || {}), ...updater };
+
+      if (next === prev) return prev;
+      if (!prev && !next) return null;
+      if (prev && next && typeof prev === 'object' && typeof next === 'object') {
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(next);
+        if (prevKeys.length === nextKeys.length) {
+          let hasDiff = false;
+          for (let i = 0; i < nextKeys.length; i++) {
+            const k = nextKeys[i];
+            if (prev[k] !== next[k]) {
+              hasDiff = true;
+              break;
+            }
+          }
+          if (!hasDiff) return prev;
+        }
+      }
+      return next;
     });
-  };
+  }, []);
 
   useEffect(() => {
     const loadCachedWorkspaces = async () => {

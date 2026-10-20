@@ -78,6 +78,7 @@ export default function ExerciseEditorModal({
   const [muscleGroup, setMuscleGroup] = useState('General');
   const [equipment, setEquipment] = useState('Bodyweight');
   const [trackingType, setTrackingType] = useState<'reps' | 'time' | 'weight_reps'>('reps');
+  const [secondsPerRep, setSecondsPerRep] = useState<string>('');
   const [difficulty, setDifficulty] = useState('Intermediate');
   const [mechanics, setMechanics] = useState('Compound');
   const [instructions, setInstructions] = useState('');
@@ -97,6 +98,11 @@ export default function ExerciseEditorModal({
           ? 'weight_reps'
           : 'reps'
       );
+      setSecondsPerRep(
+        typeof (exercise as any).seconds_per_rep === 'number' && (exercise as any).seconds_per_rep > 0
+          ? String((exercise as any).seconds_per_rep)
+          : ''
+      );
       setDifficulty(exercise.difficulty || 'Intermediate');
       setMechanics(exercise.mechanics || 'Compound');
       setInstructions(exercise.instructions || '');
@@ -108,6 +114,7 @@ export default function ExerciseEditorModal({
       setMuscleGroup('General');
       setEquipment('Bodyweight');
       setTrackingType('reps');
+      setSecondsPerRep('');
       setDifficulty('Intermediate');
       setMechanics('Compound');
       setInstructions('');
@@ -123,12 +130,14 @@ export default function ExerciseEditorModal({
 
     setIsSubmitting(true);
     try {
+      const parsedSec = parseFloat(secondsPerRep);
       const payload: Partial<DatabaseExercise> = {
         name: name.trim(),
         category,
         muscle_group: muscleGroup.trim() || category,
         equipment: equipment.trim() || 'Bodyweight',
         tracking_type: trackingType,
+        seconds_per_rep: !isNaN(parsedSec) && parsedSec > 0 ? parsedSec : undefined,
         difficulty,
         mechanics,
         instructions: instructions.trim(),
@@ -342,6 +351,25 @@ export default function ExerciseEditorModal({
                   </Text>
                 </TouchableOpacity>
               </View>
+
+              {trackingType === 'reps' && (
+                <View style={{ marginTop: 10 }}>
+                  <Text style={[styles.label, { fontSize: 13, color: '#059669' }]}>
+                    Tempo: Seconds per Repetition (Optional)
+                  </Text>
+                  <TextInput
+                    style={[styles.textInput, { marginTop: 4 }]}
+                    value={secondsPerRep}
+                    onChangeText={setSecondsPerRep}
+                    placeholder="e.g. 4.5 for Cat-Cow, 10 for McGill / Bird-Dog"
+                    placeholderTextColor={KinetixTheme.colors.textMuted}
+                    keyboardType="numeric"
+                  />
+                  <Text style={{ fontSize: 11, color: KinetixTheme.colors.textMuted, marginTop: 4 }}>
+                    Guided pacer and sine wave will run at this cadence per rep.
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* Muscle Group / Target Joint */}

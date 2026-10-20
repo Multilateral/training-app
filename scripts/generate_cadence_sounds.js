@@ -64,7 +64,6 @@ console.log('Created cadence_down.wav');
 
 // 3. Rep Completion Ding: 2-tone pleasant harmonic ding (320ms)
 const repDingWav = createWavBuffer(sampleRate, 0.35, (t, i, total) => {
-  const progress = i / total;
   const attack = Math.min(1, t / 0.005);
   const decay = Math.exp(-t * 12);
   const envelope = attack * decay;
@@ -75,13 +74,48 @@ const repDingWav = createWavBuffer(sampleRate, 0.35, (t, i, total) => {
 fs.writeFileSync(path.join(soundsDir, 'rep_ding.wav'), repDingWav);
 console.log('Created rep_ding.wav');
 
-// 4. Metronome Tick: Subtle wooden click (30ms)
+// 4. Standard Metronome Tick: Subtle rhythm click (35ms, 1200Hz)
 const metronomeTickWav = createWavBuffer(sampleRate, 0.035, (t, i, total) => {
   const attack = Math.min(1, t / 0.002);
   const decay = Math.exp(-t * 90);
   const envelope = attack * decay;
-  const tone = Math.sin(2 * Math.PI * 1200 * t) * 0.25;
+  const tone = Math.sin(2 * Math.PI * 1200 * t) * 0.28;
   return tone * envelope;
 });
 fs.writeFileSync(path.join(soundsDir, 'metronome_tick.wav'), metronomeTickWav);
 console.log('Created metronome_tick.wav');
+
+// 5. Extend Point Beep: Higher pitch, crisp accented tone to cue direction reversal at extend/peak (50ms, 1750Hz)
+const metronomeExtendWav = createWavBuffer(sampleRate, 0.05, (t, i, total) => {
+  const attack = Math.min(1, t / 0.003);
+  const decay = Math.exp(-t * 60);
+  const envelope = attack * decay;
+  const tone1 = Math.sin(2 * Math.PI * 1750 * t) * 0.35;
+  const tone2 = Math.sin(2 * Math.PI * 2200 * t) * 0.12;
+  return (tone1 + tone2) * envelope;
+});
+fs.writeFileSync(path.join(soundsDir, 'metronome_extend.wav'), metronomeExtendWav);
+console.log('Created metronome_extend.wav');
+
+// 6. Return Point Beep: Lower pitch, resonant grounded tone to cue reversal at return/dip (55ms, 880Hz)
+const metronomeReturnWav = createWavBuffer(sampleRate, 0.055, (t, i, total) => {
+  const attack = Math.min(1, t / 0.003);
+  const decay = Math.exp(-t * 55);
+  const envelope = attack * decay;
+  const tone1 = Math.sin(2 * Math.PI * 880 * t) * 0.38;
+  const tone2 = Math.sin(2 * Math.PI * 1320 * t) * 0.15;
+  return (tone1 + tone2) * envelope;
+});
+fs.writeFileSync(path.join(soundsDir, 'metronome_return.wav'), metronomeReturnWav);
+console.log('Created metronome_return.wav');
+
+// 7. High-Pitch Warning Metronome Tick: Subtle pitch-shifted click for final seconds of a hold or prep (35ms, 1520Hz)
+const metronomeTickHighWav = createWavBuffer(sampleRate, 0.035, (t, i, total) => {
+  const attack = Math.min(1, t / 0.002);
+  const decay = Math.exp(-t * 90);
+  const envelope = attack * decay;
+  const tone = Math.sin(2 * Math.PI * 1520 * t) * 0.30;
+  return tone * envelope;
+});
+fs.writeFileSync(path.join(soundsDir, 'metronome_tick_high.wav'), metronomeTickHighWav);
+console.log('Created metronome_tick_high.wav');

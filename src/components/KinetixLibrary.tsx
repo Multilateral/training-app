@@ -56,6 +56,10 @@ export interface DatabaseExercise {
   video_thumbnail_url?: string;
   is_default?: boolean;
   tracking_type?: string;
+  seconds_per_rep?: number | null;
+  default_reps?: number;
+  default_duration_seconds?: number;
+  default_rest_seconds?: number;
 }
 
 type TrackMode = 'workout' | 'rehab' | 'exercises' | 'edit';
@@ -251,6 +255,7 @@ export default function KinetixLibrary() {
             muscle_group: payload.muscle_group,
             equipment: payload.equipment,
             tracking_type: payload.tracking_type,
+            seconds_per_rep: payload.seconds_per_rep !== undefined ? payload.seconds_per_rep : null,
             difficulty: payload.difficulty,
             mechanics: payload.mechanics,
             instructions: payload.instructions,
@@ -290,6 +295,7 @@ export default function KinetixLibrary() {
           muscle_group: payload.muscle_group || 'General',
           equipment: payload.equipment || 'Bodyweight',
           tracking_type: payload.tracking_type || 'reps',
+          seconds_per_rep: payload.seconds_per_rep !== undefined ? payload.seconds_per_rep : null,
           difficulty: payload.difficulty || 'Intermediate',
           mechanics: payload.mechanics || 'Compound',
           instructions: payload.instructions || '',
@@ -411,11 +417,25 @@ export default function KinetixLibrary() {
       // Helper to map DB worksession exercise preserving rest and hold-time rep pyramids
       const mapDbWorksessionExercise = (we: any) => {
         const ex = we.exercises || {};
+        const effectiveSecondsPerRep =
+          typeof we.seconds_per_rep === 'number'
+            ? we.seconds_per_rep
+            : typeof ex.seconds_per_rep === 'number'
+            ? ex.seconds_per_rep
+            : undefined;
+
+        const isTimedReps =
+          we.tracking_type === 'reps' ||
+          ex.tracking_type === 'reps' ||
+          Boolean(effectiveSecondsPerRep && (we.target_reps || ex.default_reps));
+
         const isHold =
-          we.tracking_type === 'time' ||
-          we.tracking_type === 'duration' ||
-          Boolean(we.target_time && we.target_time > 0) ||
-          Boolean(we.target_duration_seconds && we.target_duration_seconds > 0);
+          !isTimedReps &&
+          (we.tracking_type === 'time' ||
+            we.tracking_type === 'duration' ||
+            ex.tracking_type === 'time' ||
+            Boolean(we.target_time && we.target_time > 0) ||
+            Boolean(we.target_duration_seconds && we.target_duration_seconds > 0 && !effectiveSecondsPerRep));
 
         const rawRest =
           typeof we.target_rest_seconds === 'number'
@@ -432,16 +452,16 @@ export default function KinetixLibrary() {
         const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('50s, 30s') || cueLower.includes('5-3-1');
         const tSets = we.target_sets || 3;
 
-        let holdSecondsPerRep: number | undefined = we.hold_seconds_per_rep || undefined;
+        let holdSecondsPerRep: number | undefined = we.hold_seconds_per_rep || effectiveSecondsPerRep || undefined;
         let repsPerSet: number[] | undefined = we.reps_per_set || undefined;
         let durationsPerSet: number[] | undefined = we.durations_per_set || undefined;
 
         if ((isMcGill || isPyramid) && tSets >= 3 && !exName.includes('warmup')) {
-          holdSecondsPerRep = 10;
+          holdSecondsPerRep = holdSecondsPerRep || 10;
           repsPerSet = [5, 3, 1];
           durationsPerSet = [50, 30, 10];
         } else if (exName.includes('warmup') && (isMcGill || isPyramid)) {
-          holdSecondsPerRep = 10;
+          holdSecondsPerRep = holdSecondsPerRep || 10;
           repsPerSet = [3];
           durationsPerSet = [30];
         }
@@ -449,6 +469,9 @@ export default function KinetixLibrary() {
         let formattedReps = '10';
         if (durationsPerSet && durationsPerSet.length > 0) {
           formattedReps = `${durationsPerSet[0]}s (${repsPerSet ? repsPerSet.join('-') : '5-3-1'} reps × 10s)`;
+        } else if (effectiveSecondsPerRep && (we.target_reps || ex.default_reps)) {
+          const r = we.target_reps || ex.default_reps;
+          formattedReps = `${r} reps (${effectiveSecondsPerRep}s/rep)`;
         } else if (isHold) {
           const dur = we.target_duration_seconds || we.target_time || 45;
           formattedReps = `${dur}s`;
@@ -466,12 +489,13 @@ export default function KinetixLibrary() {
           weight: 'Standard',
           restSeconds: rawRest,
           target_rest_seconds: rawRest,
-          target_duration_seconds: we.target_duration_seconds || (isHold ? (we.target_time || 45) : undefined),
-          target_reps: we.target_reps || undefined,
+          target_duration_seconds: we.target_duration_seconds || (isHold ? (we.target_time || 45) : (effectiveSecondsPerRep && (we.target_reps || ex.default_reps) ? (we.target_reps || ex.default_reps) * effectiveSecondsPerRep : undefined)),
+          target_reps: we.target_reps || ex.default_reps || undefined,
           hold_seconds_per_rep: holdSecondsPerRep,
+          seconds_per_rep: effectiveSecondsPerRep,
           reps_per_set: repsPerSet,
           durations_per_set: durationsPerSet,
-          tracking_type: isHold ? 'duration' : (we.tracking_type || 'reps'),
+          tracking_type: isTimedReps ? 'reps' : isHold ? 'duration' : (we.tracking_type || ex.tracking_type || 'reps'),
           equipment: ex.equipment || 'Bodyweight',
           muscle_group: ex.muscle_group || 'General',
           difficulty: ex.difficulty || 'Intermediate',
@@ -488,8 +512,8 @@ export default function KinetixLibrary() {
             .select(`
               id, name, modality, description, created_at,
               worksession_exercises (
-                id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
-                exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
+                id, order_index, target_sets, target_reps, tracking_type, seconds_per_rep, target_time, target_rest_seconds, target_duration_seconds, notes,
+                exercises (id, name, category, equipment, muscle_group, instructions, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps, seconds_per_rep, tracking_type)
               )
             `)
             .order('created_at', { ascending: false });
@@ -498,31 +522,32 @@ export default function KinetixLibrary() {
             // merge user worksessions with standard database worksessions
             const mappedUserWs: DatabaseWorksessionCard[] = userWs.map((ws: any) => {
               const existing = DATABASE_WORKSESSIONS.find((d) => d.id === ws.id);
-              if (existing) return existing;
 
               const isRehab =
                 (ws.name || '').toLowerCase().includes('rehab') ||
                 (ws.name || '').toLowerCase().includes('recovery') ||
                 (ws.modality || '').toLowerCase().includes('rehab');
 
-              const exercises = (ws.worksession_exercises || [])
-                .slice()
-                .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
-                .map(mapDbWorksessionExercise);
+              const exercises = (ws.worksession_exercises && ws.worksession_exercises.length > 0)
+                ? (ws.worksession_exercises || [])
+                    .slice()
+                    .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                    .map(mapDbWorksessionExercise)
+                : (existing?.exercises || []);
 
               const totalSets = exercises.reduce((acc: number, e: any) => acc + (e.sets || 3), 0);
               return {
                 id: ws.id,
                 type: isRehab ? 'rehab' : 'workout',
-                category: ws.modality || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
-                title: ws.name,
-                filterTag: isRehab ? 'knee' : 'core',
-                description: ws.description || '',
+                category: ws.modality || existing?.category || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
+                title: ws.name || existing?.title || 'Worksession',
+                filterTag: existing?.filterTag || (isRehab ? 'knee' : 'core'),
+                description: ws.description || existing?.description || '',
                 metrics: {
-                  duration: `${Math.max(15, exercises.length * 8)} min`,
+                  duration: existing?.metrics?.duration || `${Math.max(15, exercises.length * 8)} min`,
                   sets: `${totalSets} Sets`,
                   reps: exercises[0] ? String(exercises[0].reps) : '8-12',
-                  load: isRehab ? 'Light' : 'Moderate',
+                  load: existing?.metrics?.load || (isRehab ? 'Light' : 'Moderate'),
                 },
                 exercises,
               };
@@ -549,8 +574,8 @@ export default function KinetixLibrary() {
                 worksessions (
                   id, name, modality, description,
                   worksession_exercises (
-                    id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
-                    exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
+                    id, order_index, target_sets, target_reps, tracking_type, seconds_per_rep, target_time, target_rest_seconds, target_duration_seconds, notes,
+                    exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps, seconds_per_rep, tracking_type)
                   )
                 )
               )
@@ -560,7 +585,8 @@ export default function KinetixLibrary() {
           if (!planErr && userPlans) {
             mappedUserPlans = userPlans.map((p: any) => {
               const existing = DATABASE_PLANS.find((dp) => dp.id === p.id);
-              if (existing) return existing;
+              const hasLiveSessions = Array.isArray(p.plan_worksessions) && p.plan_worksessions.length > 0;
+              if (existing && !hasLiveSessions) return existing;
 
               const isRehab =
                 (p.name || '').toLowerCase().includes('rehab') ||
@@ -651,8 +677,8 @@ export default function KinetixLibrary() {
                 .select(`
                   id, name, modality, description,
                   worksession_exercises (
-                    id, order_index, target_sets, target_reps, tracking_type, target_time, target_rest_seconds, target_duration_seconds, notes,
-                    exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps)
+                    id, order_index, target_sets, target_reps, tracking_type, seconds_per_rep, target_time, target_rest_seconds, target_duration_seconds, notes,
+                    exercises (id, name, category, equipment, muscle_group, instructions, description, difficulty, mechanics, default_rest_seconds, default_duration_seconds, default_reps, seconds_per_rep, tracking_type)
                   )
                 `)
                 .in('id', wsIds);
@@ -1000,6 +1026,7 @@ export default function KinetixLibrary() {
           target_duration_seconds: (e as any).target_duration_seconds,
           target_reps: (e as any).target_reps,
           hold_seconds_per_rep: (e as any).hold_seconds_per_rep,
+          seconds_per_rep: (e as any).seconds_per_rep || (e as any).hold_seconds_per_rep,
           reps_per_set: (e as any).reps_per_set,
           durations_per_set: (e as any).durations_per_set,
           trackingType: trackingMode,
@@ -1056,6 +1083,9 @@ export default function KinetixLibrary() {
           weight: rawType === 'time' ? '0 kg' : (exercise.equipment === 'Bodyweight' || rawType === 'reps' ? 'Bodyweight' : 'Standard'),
           restSeconds: typeof (exercise as any).default_rest_seconds === 'number' ? (exercise as any).default_rest_seconds : 60,
           target_rest_seconds: typeof (exercise as any).default_rest_seconds === 'number' ? (exercise as any).default_rest_seconds : 60,
+          target_reps: (exercise as any).default_reps || (rawType === 'reps' ? 10 : undefined),
+          target_duration_seconds: (exercise as any).default_duration_seconds,
+          seconds_per_rep: (exercise as any).seconds_per_rep,
           trackingType: trackingMode,
           tracking_type: rawType,
         },
@@ -1899,6 +1929,8 @@ export default function KinetixLibrary() {
                   ? { label: 'TIME', icon: 'timer-outline' as const, color: '#2563EB', bg: '#EFF6FF' }
                   : trackingType === 'weight_reps'
                   ? { label: 'WEIGHT + REPS', icon: 'barbell-outline' as const, color: '#7C3AED', bg: '#F5F3FF' }
+                  : exercise.seconds_per_rep
+                  ? { label: `REPS (${exercise.seconds_per_rep}s)`, icon: 'repeat-outline' as const, color: '#059669', bg: '#ECFDF5' }
                   : { label: 'REPS', icon: 'repeat-outline' as const, color: '#059669', bg: '#ECFDF5' };
 
               const badgeColor = isRehab ? KinetixTheme.colors.secondary : KinetixTheme.colors.primary;

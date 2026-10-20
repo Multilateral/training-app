@@ -70,6 +70,8 @@ export interface PlayerExercise {
   target_duration_seconds?: number;
   target_time?: number;
   hold_seconds_per_rep?: number;
+  reset_seconds_per_rep?: number;
+  seconds_per_rep?: number;
   reps_per_set?: number[];
   durations_per_set?: number[];
   tracking_type?: string;
@@ -88,6 +90,8 @@ export interface SetResultLog {
   completedAt: number;
 }
 
+export type AudioPacerMode = 'pulse' | 'tones' | 'metronome' | 'mute';
+
 export interface UseWorkoutPlayerOptions {
   exercises: PlayerExercise[];
   leadInDurationSeconds?: number;
@@ -99,7 +103,7 @@ export interface UseWorkoutPlayerOptions {
   initialTotalDurationMs?: number;
   initialWasAutoPaused?: boolean;
   initialCadenceMode?: 'auto' | 'free';
-  initialAudioPacerMode?: 'tones' | 'metronome' | 'mute';
+  initialAudioPacerMode?: AudioPacerMode;
   onSetCompleted?: (log: SetResultLog) => void;
   onWorkoutCompleted?: (allLogs: SetResultLog[], totalDurationSeconds: number) => void;
   onStateChange?: (snapshot: any) => void;
@@ -112,6 +116,9 @@ const CADENCE_UP_ASSET = require('../../assets/sounds/cadence_up.wav');
 const CADENCE_DOWN_ASSET = require('../../assets/sounds/cadence_down.wav');
 const REP_DING_ASSET = require('../../assets/sounds/rep_ding.wav');
 const METRONOME_TICK_ASSET = require('../../assets/sounds/metronome_tick.wav');
+const METRONOME_TICK_HIGH_ASSET = require('../../assets/sounds/metronome_tick_high.wav');
+const METRONOME_EXTEND_ASSET = require('../../assets/sounds/metronome_extend.wav');
+const METRONOME_RETURN_ASSET = require('../../assets/sounds/metronome_return.wav');
 
 export type SoundType =
   | 'pip'
@@ -119,7 +126,11 @@ export type SoundType =
   | 'cadence_up'
   | 'cadence_down'
   | 'rep_ding'
-  | 'metronome_tick';
+  | 'metronome_tick'
+  | 'metronome_tick_high'
+  | 'metronome_extend'
+  | 'metronome_return'
+  | 'cadence_pulse';
 
 const SOUND_ASSETS: Record<SoundType, any> = {
   pip: PIP_SOUND_ASSET,
@@ -128,6 +139,10 @@ const SOUND_ASSETS: Record<SoundType, any> = {
   cadence_down: CADENCE_DOWN_ASSET,
   rep_ding: REP_DING_ASSET,
   metronome_tick: METRONOME_TICK_ASSET,
+  metronome_tick_high: METRONOME_TICK_HIGH_ASSET,
+  metronome_extend: METRONOME_EXTEND_ASSET,
+  metronome_return: METRONOME_RETURN_ASSET,
+  cadence_pulse: METRONOME_TICK_ASSET,
 };
 
 export interface CadencePhase {
@@ -147,6 +162,12 @@ export interface CadenceProfile {
   totalDurationMs: number;
   repDurationMs: number;
   phases: CadencePhase[];
+  visualType?: 'sine_wave' | 'circle';
+  defaultAudioPacer?: AudioPacerMode;
+  waveProfile?: 'symmetric_sine' | 'isometric_hold' | 'skewed_tempo';
+  holdDurationMs?: number;
+  resetDurationMs?: number;
+  riseDurationMs?: number;
 }
 
 /**
@@ -172,11 +193,17 @@ export const resolveExerciseCadence = (
     cueLower.includes('rhythmic breathing')
   ) {
     const reps = targetReps > 0 ? targetReps : 10;
-    const durSec = targetDurationSeconds > 0 ? targetDurationSeconds : 45;
-    const totalMs = durSec * 1000;
-    const repMs = Math.round(totalMs / reps); // 4500ms
-    const phaseMs = Math.min(2000, Math.floor(repMs * 0.44)); // 2000ms
-    const resetMs = Math.max(0, repMs - phaseMs * 2); // 500ms transition
+    const secPerRep =
+      typeof ex.seconds_per_rep === 'number' && ex.seconds_per_rep > 0
+        ? ex.seconds_per_rep
+        : typeof ex.hold_seconds_per_rep === 'number' && ex.hold_seconds_per_rep > 0
+        ? ex.hold_seconds_per_rep
+        : targetDurationSeconds > 0 && reps > 0
+        ? targetDurationSeconds / reps
+        : 5.0;
+    const repMs = Math.round(secPerRep * 1000);
+    const totalMs = repMs * reps;
+    const halfMs = Math.round(repMs / 2);
 
     const phases: CadencePhase[] = [
       {
@@ -184,7 +211,7 @@ export const resolveExerciseCadence = (
         name: 'CAT (ARCH UP / FLEXION)',
         shortName: 'CAT',
         cue: 'Inhale deeply, tuck chin and round spine towards ceiling',
-        durationMs: phaseMs,
+        durationMs: halfMs,
         soundType: 'cadence_up',
         accentColor: '#0284C7',
       },
@@ -193,23 +220,11 @@ export const resolveExerciseCadence = (
         name: 'COW (DIP DOWN / EXTENSION)',
         shortName: 'COW',
         cue: 'Exhale slowly, lift gaze and drop belly toward the floor',
-        durationMs: phaseMs,
+        durationMs: repMs - halfMs,
         soundType: 'cadence_down',
         accentColor: '#10B981',
       },
     ];
-
-    if (resetMs >= 300) {
-      phases.push({
-        id: 'reset',
-        name: 'TRANSITION (NEUTRAL SPINE)',
-        shortName: 'TRANSITION',
-        cue: 'Return to neutral spine posture before next rep',
-        durationMs: resetMs,
-        soundType: 'none',
-        accentColor: '#64748B',
-      });
-    }
 
     return {
       enabled: true,
@@ -218,15 +233,22 @@ export const resolveExerciseCadence = (
       totalDurationMs: totalMs,
       repDurationMs: repMs,
       phases,
+      visualType: 'sine_wave',
+      defaultAudioPacer: 'metronome',
     };
   }
 
   // 2. Diaphragmatic / Box Breathing
   if (nameLower.includes('breath') || cueLower.includes('breathing')) {
     const reps = targetReps > 0 ? targetReps : 10;
-    const durSec = targetDurationSeconds > 0 ? targetDurationSeconds : 60;
-    const totalMs = durSec * 1000;
-    const repMs = Math.round(totalMs / reps);
+    const secPerRep =
+      typeof ex.seconds_per_rep === 'number' && ex.seconds_per_rep > 0
+        ? ex.seconds_per_rep
+        : targetDurationSeconds > 0 && reps > 0
+        ? targetDurationSeconds / reps
+        : 6.0;
+    const repMs = Math.round(secPerRep * 1000);
+    const totalMs = repMs * reps;
     const halfMs = Math.round(repMs / 2);
 
     return {
@@ -255,6 +277,8 @@ export const resolveExerciseCadence = (
           accentColor: '#10B981',
         },
       ],
+      visualType: 'sine_wave',
+      defaultAudioPacer: 'metronome',
     };
   }
 
@@ -265,12 +289,22 @@ export const resolveExerciseCadence = (
     (nameLower.includes('side plank') && cueLower.includes('pyramid'));
   if (isMcGill) {
     const reps = targetReps > 0 ? targetReps : setIndex === 0 ? 5 : setIndex === 1 ? 3 : 1;
-    const holdSec = ex.hold_seconds_per_rep || 10;
-    const durSec = targetDurationSeconds > 0 ? targetDurationSeconds : reps * holdSec;
-    const totalMs = durSec * 1000;
-    const repMs = Math.round(totalMs / reps);
-    const holdMs = Math.max(2000, repMs - 1500);
-    const resetMs = repMs - holdMs;
+    const holdSec =
+      typeof ex.hold_seconds_per_rep === 'number' && ex.hold_seconds_per_rep > 0
+        ? ex.hold_seconds_per_rep
+        : 10.0;
+    const resetSec =
+      typeof ex.reset_seconds_per_rep === 'number' && ex.reset_seconds_per_rep >= 0
+        ? ex.reset_seconds_per_rep
+        : 2.0; // Default 2.0s switch sides / release duration
+    const secPerRep =
+      typeof ex.seconds_per_rep === 'number' && ex.seconds_per_rep > 0
+        ? ex.seconds_per_rep
+        : holdSec + resetSec;
+    const repMs = Math.round(secPerRep * 1000);
+    const holdMs = Math.round(holdSec * 1000);
+    const resetMs = Math.max(500, repMs - holdMs);
+    const totalMs = repMs * reps;
 
     return {
       enabled: true,
@@ -278,24 +312,30 @@ export const resolveExerciseCadence = (
       totalReps: reps,
       totalDurationMs: totalMs,
       repDurationMs: repMs,
+      waveProfile: 'isometric_hold',
+      holdDurationMs: holdMs,
+      resetDurationMs: resetMs,
+      riseDurationMs: 1500,
+      visualType: 'sine_wave',
+      defaultAudioPacer: 'metronome',
       phases: [
         {
-          id: 'hold',
-          name: 'HOLD ISOMETRIC',
+          id: 'extend_hold',
+          name: 'EXTEND & HOLD',
           shortName: 'HOLD',
-          cue: 'Maintain rigid core stiffness, steady breathing',
+          cue: 'Reach long through fingertips and heel, maintain rigid core stiffness',
           durationMs: holdMs,
           soundType: 'cadence_up',
-          accentColor: '#D97706',
+          accentColor: '#0284C7',
         },
         {
-          id: 'reset',
-          name: 'RESET / SWITCH',
-          shortName: 'RESET',
-          cue: 'Brief reset and prepare for next hold',
+          id: 'return_reset',
+          name: 'RELEASE & SWITCH',
+          shortName: 'SWITCH',
+          cue: 'Smooth controlled return and switch sides for next rep',
           durationMs: resetMs,
           soundType: 'cadence_down',
-          accentColor: '#64748B',
+          accentColor: '#10B981',
         },
       ],
     };
@@ -342,40 +382,90 @@ export const resolveExerciseCadence = (
     };
   }
 
-  // 5. Generic Paced Reps: Any duration exercise with targetReps > 1 where rep duration is >= 2.5s
-  if (targetDurationSeconds > 0 && targetReps > 1) {
-    const totalMs = targetDurationSeconds * 1000;
-    const repMs = Math.round(totalMs / targetReps);
-    if (repMs >= 2500 && repMs <= 30000) {
-      const halfMs = Math.round(repMs / 2);
-      return {
-        enabled: true,
-        exerciseName: ex.name,
-        totalReps: targetReps,
-        totalDurationMs: totalMs,
-        repDurationMs: repMs,
-        phases: [
-          {
-            id: 'phase_1',
-            name: 'CONCENTRIC / EXTEND',
-            shortName: 'PHASE 1',
-            cue: 'Controlled movement in first direction',
-            durationMs: halfMs,
-            soundType: 'cadence_up',
-            accentColor: '#0284C7',
-          },
-          {
-            id: 'phase_2',
-            name: 'ECCENTRIC / RETURN',
-            shortName: 'PHASE 2',
-            cue: 'Controlled return to starting position',
-            durationMs: repMs - halfMs,
-            soundType: 'cadence_down',
-            accentColor: '#10B981',
-          },
-        ],
-      };
-    }
+  // 5. Generic Paced Reps: Any exercise with seconds_per_rep / hold_seconds_per_rep or targetDurationSeconds with targetReps
+  const genericSecPerRep =
+    typeof ex.seconds_per_rep === 'number' && ex.seconds_per_rep > 0
+      ? ex.seconds_per_rep
+      : typeof ex.hold_seconds_per_rep === 'number' && ex.hold_seconds_per_rep > 0
+      ? ex.hold_seconds_per_rep
+      : targetDurationSeconds > 0 && targetReps > 0
+      ? targetDurationSeconds / targetReps
+      : 0;
+
+  if (genericSecPerRep >= 2.0 && genericSecPerRep <= 60) {
+    const reps = targetReps > 0 ? targetReps : 10;
+    const repMs = Math.round(genericSecPerRep * 1000);
+    const totalMs = repMs * reps;
+    const halfMs = Math.round(repMs / 2);
+
+    return {
+      enabled: true,
+      exerciseName: ex.name,
+      totalReps: reps,
+      totalDurationMs: totalMs,
+      repDurationMs: repMs,
+      phases: [
+        {
+          id: 'concentric_extend',
+          name: 'CONCENTRIC / EXTEND',
+          shortName: 'EXTEND',
+          cue: 'Controlled extension towards peak position',
+          durationMs: halfMs,
+          soundType: 'cadence_up',
+          accentColor: '#0284C7',
+        },
+        {
+          id: 'eccentric_return',
+          name: 'ECCENTRIC / RETURN',
+          shortName: 'RETURN',
+          cue: 'Smooth controlled return to starting position',
+          durationMs: repMs - halfMs,
+          soundType: 'cadence_down',
+          accentColor: '#10B981',
+        },
+      ],
+      visualType: 'sine_wave',
+      defaultAudioPacer: 'metronome',
+    };
+  }
+
+  // 6. Pure Duration / Isometric Exercises (e.g. Front Plank, Wall Sit, Dead Bug Hold, Side Plank)
+  // Adaptive diaphragmatic breathing & core stabilization wave
+  if (targetDurationSeconds > 0) {
+    const durSec = targetDurationSeconds;
+    // Calculate clinical diaphragmatic breathing harmonic (4.0s - 6.0s cycle)
+    const nBreaths = Math.max(1, Math.round(durSec / 5.0));
+    const cycleMs = Math.round((durSec * 1000) / nBreaths);
+    const halfCycleMs = Math.round(cycleMs / 2);
+    return {
+      enabled: true,
+      exerciseName: ex.name,
+      totalReps: nBreaths,
+      totalDurationMs: durSec * 1000,
+      repDurationMs: cycleMs,
+      visualType: 'sine_wave',
+      defaultAudioPacer: 'metronome',
+      phases: [
+        {
+          id: 'inhale_brace',
+          name: 'INHALE & BRACE CORE',
+          shortName: 'BRACE',
+          cue: 'Inhale into ribs 360°, maintain rigid abdominal brace',
+          durationMs: halfCycleMs,
+          soundType: 'cadence_up',
+          accentColor: '#0284C7',
+        },
+        {
+          id: 'exhale_stabilize',
+          name: 'EXHALE & STABILIZE',
+          shortName: 'STABILIZE',
+          cue: 'Slow continuous exhale over core brace, stabilize pelvis',
+          durationMs: cycleMs - halfCycleMs,
+          soundType: 'cadence_down',
+          accentColor: '#10B981',
+        },
+      ],
+    };
   }
 
   return null;
@@ -389,35 +479,98 @@ export const resolveExerciseCadence = (
  * - Stuart McGill descending pyramid (Set 1: 5 reps = 50s, Set 2: 3 reps = 30s, Set 3: 1 rep = 10s)
  * - Explicit `target_duration_seconds` or `target_time`
  */
+/**
+ * Resolves the target reps for a specific set of an exercise.
+ */
+export const getExerciseSetReps = (
+  ex: PlayerExercise | undefined,
+  setIndex: number
+): number => {
+  if (!ex) return 10;
+
+  // 1. Explicit reps_per_set array
+  if (Array.isArray(ex.reps_per_set) && typeof ex.reps_per_set[setIndex] === 'number') {
+    return ex.reps_per_set[setIndex];
+  }
+
+  // 2. Explicit durations_per_set with hold time
+  if (Array.isArray(ex.durations_per_set) && typeof ex.durations_per_set[setIndex] === 'number') {
+    const holdTime = ex.seconds_per_rep || ex.hold_seconds_per_rep || 10;
+    return Math.max(1, Math.round(ex.durations_per_set[setIndex] / holdTime));
+  }
+
+  // 3. Stuart McGill protocol pyramid
+  const nameLower = (ex.name || '').toLowerCase();
+  const cueLower = (ex.cue || '').toLowerCase();
+  const isMcGill = nameLower.includes('mcgill') || nameLower.includes('bird-dog');
+  const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('5-3-1');
+  const tSets = ex.totalSets || ex.sets || 3;
+
+  if ((isMcGill || isPyramid) && tSets >= 3 && !nameLower.includes('warmup')) {
+    const mcgillReps = [5, 3, 1];
+    if (setIndex < mcgillReps.length) {
+      return mcgillReps[setIndex];
+    }
+  }
+
+  if (typeof ex.target_reps === 'number' && ex.target_reps > 0) return ex.target_reps;
+  const parsedDigits = parseInt(String(ex.reps || '').replace(/[^0-9]/g, ''));
+  if (!isNaN(parsedDigits) && parsedDigits > 0) return parsedDigits;
+  return 10;
+};
+
+/**
+ * Resolves target work duration in seconds for timed or paced exercises.
+ * - Explicit seconds_per_rep with target_reps
+ * - Stuart McGill descending pyramid (Set 1: 5 reps = 50s, Set 2: 3 reps = 30s, Set 3: 1 rep = 10s)
+ * - Explicit target_duration_seconds or target_time
+ */
 export const getExerciseSetDuration = (
   ex: PlayerExercise | undefined,
   setIndex: number
 ): number => {
   if (!ex) return 45;
 
+  const holdSec = ex.hold_seconds_per_rep;
+  const resetSec = typeof ex.reset_seconds_per_rep === 'number' ? ex.reset_seconds_per_rep : (holdSec ? 2 : 0);
+  const secPerRep =
+    typeof ex.seconds_per_rep === 'number' && ex.seconds_per_rep > 0
+      ? ex.seconds_per_rep
+      : holdSec
+      ? holdSec + resetSec
+      : undefined;
+
+  // 0. Explicit seconds_per_rep with target reps
+  if (typeof secPerRep === 'number' && secPerRep > 0) {
+    const reps = getExerciseSetReps(ex, setIndex);
+    if (reps > 0) {
+      return Math.round(reps * secPerRep);
+    }
+  }
+
   // 1. Explicit durations_per_set array
   if (Array.isArray(ex.durations_per_set) && typeof ex.durations_per_set[setIndex] === 'number') {
     return ex.durations_per_set[setIndex];
   }
 
-  // 2. Explicit reps_per_set with hold time
+  // 2. Explicit reps_per_set with hold/rep time
   if (Array.isArray(ex.reps_per_set) && typeof ex.reps_per_set[setIndex] === 'number') {
-    const holdTime = ex.hold_seconds_per_rep || 10;
-    return ex.reps_per_set[setIndex] * holdTime;
+    const repTime = secPerRep || 12;
+    return ex.reps_per_set[setIndex] * repTime;
   }
 
-  // 3. Stuart McGill protocol or descending pyramid hold
+  // 3. Stuart McGill protocol or descending pyramid hold (Default 10s hold + 2s switch = 12s per rep)
   const nameLower = (ex.name || '').toLowerCase();
   const cueLower = (ex.cue || '').toLowerCase();
   const isMcGill = nameLower.includes('mcgill') || nameLower.includes('bird-dog');
-  const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('50s, 30s') || cueLower.includes('5-3-1');
+  const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('5-3-1');
   const tSets = ex.totalSets || ex.sets || 3;
 
   if ((isMcGill || isPyramid) && tSets >= 3 && !nameLower.includes('warmup')) {
-    // Standard 5-3-1 McGill descending pyramid (50s, 30s, 10s)
-    const mcgillPyramidDurations = [50, 30, 10];
-    if (setIndex < mcgillPyramidDurations.length) {
-      return mcgillPyramidDurations[setIndex];
+    const mcgillReps = [5, 3, 1];
+    const repTime = secPerRep || 12;
+    if (setIndex < mcgillReps.length) {
+      return mcgillReps[setIndex] * repTime;
     }
   }
 
@@ -444,46 +597,6 @@ export const getExerciseSetDuration = (
 };
 
 /**
- * Resolves the target reps for a specific set of an exercise.
- */
-export const getExerciseSetReps = (
-  ex: PlayerExercise | undefined,
-  setIndex: number
-): number => {
-  if (!ex) return 10;
-
-  // 1. Explicit reps_per_set array
-  if (Array.isArray(ex.reps_per_set) && typeof ex.reps_per_set[setIndex] === 'number') {
-    return ex.reps_per_set[setIndex];
-  }
-
-  // 2. Explicit durations_per_set with hold time
-  if (Array.isArray(ex.durations_per_set) && typeof ex.durations_per_set[setIndex] === 'number') {
-    const holdTime = ex.hold_seconds_per_rep || 10;
-    return Math.max(1, Math.round(ex.durations_per_set[setIndex] / holdTime));
-  }
-
-  // 3. Stuart McGill protocol pyramid
-  const nameLower = (ex.name || '').toLowerCase();
-  const cueLower = (ex.cue || '').toLowerCase();
-  const isMcGill = nameLower.includes('mcgill') || nameLower.includes('bird-dog');
-  const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('5-3-1');
-  const tSets = ex.totalSets || ex.sets || 3;
-
-  if ((isMcGill || isPyramid) && tSets >= 3 && !nameLower.includes('warmup')) {
-    const mcgillReps = [5, 3, 1];
-    if (setIndex < mcgillReps.length) {
-      return mcgillReps[setIndex];
-    }
-  }
-
-  if (typeof ex.target_reps === 'number' && ex.target_reps > 0) return ex.target_reps;
-  const parsedDigits = parseInt(String(ex.reps || '').replace(/[^0-9]/g, ''));
-  if (!isNaN(parsedDigits) && parsedDigits > 0) return parsedDigits;
-  return 10;
-};
-
-/**
  * Resolves the target rest seconds for an exercise.
  * Accurately honors 0 seconds rest (e.g. Diaphragmatic Breathing or continuous transitions).
  */
@@ -507,7 +620,7 @@ export function useWorkoutPlayer({
   initialTotalDurationMs,
   initialWasAutoPaused = false,
   initialCadenceMode = 'auto',
-  initialAudioPacerMode = 'tones',
+  initialAudioPacerMode = 'metronome',
   onSetCompleted,
   onWorkoutCompleted,
   onStateChange,
@@ -547,6 +660,9 @@ export function useWorkoutPlayer({
     initialState === 'PAUSED' ? initialDurationSeconds * 1000 : 0
   );
   const timerIntervalRef = useRef<any>(null);
+  const restTransitionTimeoutRef = useRef<any>(null);
+  const isRestTransitioningRef = useRef<boolean>(false);
+  const [isRestTransitioning, setIsRestTransitioning] = useState<boolean>(false);
 
   // Time remaining & progress states for UI
   const [secondsRemaining, setSecondsRemaining] = useState<number>(initialDurationSeconds);
@@ -572,6 +688,10 @@ export function useWorkoutPlayer({
     cadence_down: null,
     rep_ding: null,
     metronome_tick: null,
+    metronome_tick_high: null,
+    metronome_extend: null,
+    metronome_return: null,
+    cadence_pulse: null,
   });
   const soundUrisRef = useRef<Record<SoundType, string | null>>({
     pip: null,
@@ -580,7 +700,17 @@ export function useWorkoutPlayer({
     cadence_down: null,
     rep_ding: null,
     metronome_tick: null,
+    metronome_tick_high: null,
+    metronome_extend: null,
+    metronome_return: null,
+    cadence_pulse: null,
   });
+  // Dedicated pre-loaded player pool for metronome_tick for instantaneous zero-latency playback
+  const tickPlayersPoolRef = useRef<any[]>([]);
+  const tickPoolIndexRef = useRef<number>(0);
+  // Dedicated pre-loaded player pool for warning pitch metronome_tick_high (1520Hz)
+  const tickHighPlayersPoolRef = useRef<any[]>([]);
+  const tickHighPoolIndexRef = useRef<number>(0);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
 
   // Initialize native audio session (silent mode bypass on iOS and mixing with other apps)
@@ -642,6 +772,40 @@ export function useWorkoutPlayer({
               console.log(`[useWorkoutPlayer] Player pre-creation error for ${key}:`, pErr);
             }
           });
+
+          // Preload pool of 3 dedicated players for metronome_tick to achieve zero-latency playback
+          const tickSrc = soundUrisRef.current['metronome_tick'] || SOUND_ASSETS['metronome_tick'];
+          if (tickSrc) {
+            try {
+              tickPlayersPoolRef.current = [
+                createAudioPlayer(tickSrc),
+                createAudioPlayer(tickSrc),
+                createAudioPlayer(tickSrc),
+              ];
+              tickPlayersPoolRef.current.forEach((p) => {
+                if (p) p.volume = 1.0;
+              });
+            } catch (poolErr) {
+              console.log('[useWorkoutPlayer] Tick pool creation error:', poolErr);
+            }
+          }
+
+          // Preload pool of 3 dedicated players for metronome_tick_high to achieve zero-latency playback
+          const tickHighSrc = soundUrisRef.current['metronome_tick_high'] || SOUND_ASSETS['metronome_tick_high'];
+          if (tickHighSrc) {
+            try {
+              tickHighPlayersPoolRef.current = [
+                createAudioPlayer(tickHighSrc),
+                createAudioPlayer(tickHighSrc),
+                createAudioPlayer(tickHighSrc),
+              ];
+              tickHighPlayersPoolRef.current.forEach((p) => {
+                if (p) p.volume = 1.0;
+              });
+            } catch (poolErr) {
+              console.log('[useWorkoutPlayer] High tick pool creation error:', poolErr);
+            }
+          }
           console.log('[useWorkoutPlayer] expo-audio players pre-created');
         }
       } catch (err) {
@@ -661,6 +825,10 @@ export function useWorkoutPlayer({
           soundPlayersRef.current[key] = null;
         } catch {}
       });
+      if (restTransitionTimeoutRef.current) {
+        clearTimeout(restTransitionTimeoutRef.current);
+        restTransitionTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -706,7 +874,7 @@ export function useWorkoutPlayer({
 
   // Cadence Pacing State
   const [cadenceMode, setCadenceMode] = useState<'auto' | 'free'>(initialCadenceMode);
-  const [audioPacerMode, setAudioPacerMode] = useState<'tones' | 'metronome' | 'mute'>(initialAudioPacerMode);
+  const [audioPacerMode, setAudioPacerMode] = useState<AudioPacerMode>(initialAudioPacerMode);
 
   const cadenceProfile = resolveExerciseCadence(
     currentExercise,
@@ -730,6 +898,7 @@ export function useWorkoutPlayer({
   );
   const [cadencePhaseProgress, setCadencePhaseProgress] = useState<number>(0);
   const [cadenceRepProgress, setCadenceRepProgress] = useState<number>(0);
+  const [elapsedWorkMs, setElapsedWorkMs] = useState<number>(0);
 
   // Synchronized refs for cadence engine loop
   const stateRef = useRef<WorkoutState>(state);
@@ -747,14 +916,16 @@ export function useWorkoutPlayer({
     cadenceModeRef.current = cadenceMode;
   }, [cadenceMode]);
 
-  const audioPacerModeRef = useRef<'tones' | 'metronome' | 'mute'>(audioPacerMode);
+  const audioPacerModeRef = useRef<AudioPacerMode>(audioPacerMode);
   useEffect(() => {
     audioPacerModeRef.current = audioPacerMode;
   }, [audioPacerMode]);
 
   const lastCompletedRepIndexRef = useRef<number>(0);
   const lastPlayedPhaseKeyRef = useRef<string>('');
+  const lastPeakRepRef = useRef<number>(-1);
   const lastMetronomeSecRef = useRef<number>(-1);
+  const lastBeepMsRef = useRef<number>(-1);
 
   // Update cadence phase defaults when exercise/set changes
   useEffect(() => {
@@ -767,8 +938,17 @@ export function useWorkoutPlayer({
     }
     lastCompletedRepIndexRef.current = 0;
     lastPlayedPhaseKeyRef.current = '';
+    lastPeakRepRef.current = -1;
     lastMetronomeSecRef.current = -1;
+    lastBeepMsRef.current = -1;
   }, [currentExerciseIndex, currentSetIndex]);
+
+  // Synchronize exercise-specific default audio pacer (e.g. Cat-Cow -> 'pulse')
+  useEffect(() => {
+    if (cadenceProfile?.defaultAudioPacer) {
+      setAudioPacerMode(cadenceProfile.defaultAudioPacer);
+    }
+  }, [currentExerciseIndex, cadenceProfile?.defaultAudioPacer]);
 
   // Sensory feedback helpers
   const playSound = useCallback(
@@ -860,10 +1040,54 @@ export function useWorkoutPlayer({
               gain.connect(ctx.destination);
               osc.type = 'sine';
               osc.frequency.setValueAtTime(1200, ctx.currentTime);
-              gain.gain.setValueAtTime(0.2, ctx.currentTime);
-              gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.03);
+              gain.gain.setValueAtTime(0.25, ctx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.035);
               osc.start(ctx.currentTime);
-              osc.stop(ctx.currentTime + 0.035);
+              osc.stop(ctx.currentTime + 0.04);
+              return;
+            }
+
+            if (type === 'metronome_tick_high') {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(1520, ctx.currentTime);
+              gain.gain.setValueAtTime(0.25, ctx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.035);
+              osc.start(ctx.currentTime);
+              osc.stop(ctx.currentTime + 0.04);
+              return;
+            }
+
+            if (type === 'metronome_extend') {
+              // Higher, brighter accented tone at the extend/peak point (1750Hz)
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(1750, ctx.currentTime);
+              gain.gain.setValueAtTime(0.32, ctx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.048);
+              osc.start(ctx.currentTime);
+              osc.stop(ctx.currentTime + 0.05);
+              return;
+            }
+
+            if (type === 'metronome_return') {
+              // Lower, grounding resonant tone at the return/dip point (880Hz)
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(880, ctx.currentTime);
+              gain.gain.setValueAtTime(0.34, ctx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.052);
+              osc.start(ctx.currentTime);
+              osc.stop(ctx.currentTime + 0.055);
               return;
             }
 
@@ -893,6 +1117,45 @@ export function useWorkoutPlayer({
       // Modern expo-audio playback (Expo SDK 57)
       if (nativeAudioModule?.type === 'expo-audio' && nativeAudioModule.createPlayer) {
         try {
+          // Zero-latency round-robin pool for fast, high-frequency metronome ticks
+          if (type === 'metronome_tick' && tickPlayersPoolRef.current.length > 0) {
+            const pool = tickPlayersPoolRef.current;
+            const idx = tickPoolIndexRef.current;
+            tickPoolIndexRef.current = (idx + 1) % pool.length;
+            const p = pool[idx];
+            if (p) {
+              if (p.currentTime > 0) {
+                p.seekTo(0).then(() => p.play()).catch(() => p.play());
+              } else {
+                p.play();
+              }
+              // Immediately schedule zeroing out position in background ready for next cycle
+              setTimeout(() => {
+                p.seekTo(0).catch(() => {});
+              }, 60);
+              return;
+            }
+          }
+
+          // Zero-latency round-robin pool for warning metronome_tick_high ticks
+          if (type === 'metronome_tick_high' && tickHighPlayersPoolRef.current.length > 0) {
+            const pool = tickHighPlayersPoolRef.current;
+            const idx = tickHighPoolIndexRef.current;
+            tickHighPoolIndexRef.current = (idx + 1) % pool.length;
+            const p = pool[idx];
+            if (p) {
+              if (p.currentTime > 0) {
+                p.seekTo(0).then(() => p.play()).catch(() => p.play());
+              } else {
+                p.play();
+              }
+              setTimeout(() => {
+                p.seekTo(0).catch(() => {});
+              }, 60);
+              return;
+            }
+          }
+
           let player = soundPlayersRef.current[type];
           if (!player) {
             const uri = soundUrisRef.current[type] || SOUND_ASSETS[type];
@@ -977,6 +1240,13 @@ export function useWorkoutPlayer({
       totalDurationMsRef.current = totalDurationMsOverride || durationMs;
       endTimeRef.current = customEndTime || Date.now() + durationMs;
 
+      if (!customEndTime && !totalDurationMsOverride) {
+        lastCompletedRepIndexRef.current = 0;
+        lastPlayedPhaseKeyRef.current = '';
+        lastMetronomeSecRef.current = -1;
+        lastBeepMsRef.current = -1;
+      }
+
       const currentRemainingMs = Math.max(0, endTimeRef.current - Date.now());
       const initialRemainingSec = Math.ceil(currentRemainingMs / 1000);
       setSecondsRemaining(initialRemainingSec);
@@ -987,6 +1257,20 @@ export function useWorkoutPlayer({
       );
 
       let lastReportedSec = initialRemainingSec;
+
+      // When starting a countdown (e.g. 5s Lead-In or 5s Rest Prep),
+      // play the first tick immediately on the exact first second (e.g. 5)!
+      if (
+        !customEndTime &&
+        (stateRef.current === 'LEAD_IN' || stateRef.current === 'RESTING') &&
+        initialRemainingSec <= 5 &&
+        initialRemainingSec > 0
+      ) {
+        triggerHaptic('light');
+        if (audioPacerModeRef.current !== 'mute') {
+          playSound('metronome_tick');
+        }
+      }
 
       timerIntervalRef.current = setInterval(() => {
         if (!endTimeRef.current) return;
@@ -1001,16 +1285,18 @@ export function useWorkoutPlayer({
         setSecondsRemaining(remainingSec);
         setProgress(calculatedProgress);
 
-        // Sensory tick on countdown numbers (3, 2, 1) during lead-in or rest
+        // Sensory tick on countdown numbers (5, 4, 3, 2, 1) during lead-in or rest prep
         if (remainingSec !== lastReportedSec) {
           lastReportedSec = remainingSec;
           if (
-            remainingSec <= 3 &&
+            remainingSec <= 5 &&
             remainingSec > 0 &&
             (stateRef.current === 'LEAD_IN' || stateRef.current === 'RESTING')
           ) {
             triggerHaptic('light');
-            playSound('pip');
+            if (audioPacerModeRef.current !== 'mute') {
+              playSound('metronome_tick');
+            }
           }
         }
 
@@ -1055,33 +1341,98 @@ export function useWorkoutPlayer({
           setCurrentCadencePhase(currentPhase);
           setCadencePhaseProgress(phaseProg);
           setCadenceRepProgress(repProg);
+          setElapsedWorkMs(elapsedWorkMs);
           setCadencePhaseSecondsRemaining(Number(phaseSec.toFixed(1)));
 
-          // Rep completion ding when repIndex advances!
+          // Rep index tracking
           if (repIndex > lastCompletedRepIndexRef.current) {
             lastCompletedRepIndexRef.current = repIndex;
-            if (audioPacerModeRef.current !== 'mute') {
+            if (audioPacerModeRef.current === 'tones') {
               playSound('rep_ding');
               triggerHaptic('heavy');
             }
           }
 
-          // Phase transition sound
-          const phaseKey = `${repIndex}_${foundPhaseIndex}`;
-          if (lastPlayedPhaseKeyRef.current !== phaseKey) {
-            lastPlayedPhaseKeyRef.current = phaseKey;
-            if (audioPacerModeRef.current === 'tones' && currentPhase.soundType !== 'none') {
-              playSound(currentPhase.soundType);
-              triggerHaptic('light');
-            }
-          }
-
-          // Metronome tick
+          // Active Cadence Audio Pacer:
+          // In 'metronome' (Tick) mode: steady rhythmic ticks, with modified beeps
+          // specifically at the EXTEND point (peak/crest reversal) and RETURN point (base reversal),
+          // with a subtle pitch change (metronome_tick_high) on the final countdown seconds of each phase.
           if (audioPacerModeRef.current === 'metronome') {
+            const isIsometricHoldProfile = profile.waveProfile === 'isometric_hold';
+            const riseMs = profile.riseDurationMs || 1500;
+
+            if (isIsometricHoldProfile) {
+              // 1. Isometric Hold Choreography:
+              const phaseKey = `${repIndex}_${foundPhaseIndex}`;
+              if (lastPlayedPhaseKeyRef.current !== phaseKey) {
+                lastPlayedPhaseKeyRef.current = phaseKey;
+                lastBeepMsRef.current = elapsedWorkMs;
+
+                if (foundPhaseIndex === 0) {
+                  // Rep start (lift & engage from base)
+                  playSound('metronome_return');
+                  triggerHaptic('light');
+                } else if (foundPhaseIndex === 1) {
+                  // End of hold: start release & switch sides
+                  playSound('metronome_return');
+                  triggerHaptic('light');
+                }
+              }
+
+              // Peak Extend trigger at completion of rise (e.g. at 1.5s):
+              // Accented high beep signaling full extension reached and isometric hold begins
+              if (repElapsedMs >= riseMs && lastPeakRepRef.current !== repIndex && foundPhaseIndex === 0) {
+                lastPeakRepRef.current = repIndex;
+                lastBeepMsRef.current = elapsedWorkMs;
+                playSound('metronome_extend');
+                triggerHaptic('light');
+              }
+            } else {
+              // 2. Symmetric Sine / Standard Wave Choreography:
+              const phaseKey = `${repIndex}_${foundPhaseIndex}`;
+              if (lastPlayedPhaseKeyRef.current !== phaseKey) {
+                lastPlayedPhaseKeyRef.current = phaseKey;
+                lastBeepMsRef.current = elapsedWorkMs;
+
+                if (foundPhaseIndex === 1) {
+                  // EXTEND POINT: Peak reversal (e.g. Cat Arch Crest / Concentric peak)
+                  // Higher-pitched crisp accented beep so user knows to reverse direction
+                  playSound('metronome_extend');
+                  triggerHaptic('light');
+                } else if (foundPhaseIndex === 0) {
+                  // RETURN POINT: Base reversal (e.g. Cow Dip Base / Starting position)
+                  // Distinct grounded resonant beep so user knows to reverse direction and extend
+                  playSound('metronome_return');
+                  triggerHaptic('light');
+                }
+              }
+            }
+
+            // Intermediate steady rhythm clicks on each second between extend and return points
             const currentSecondFloor = Math.floor(elapsedWorkMs / 1000);
             if (currentSecondFloor !== lastMetronomeSecRef.current && currentSecondFloor > 0) {
               lastMetronomeSecRef.current = currentSecondFloor;
-              playSound('metronome_tick');
+              const msSinceLastBeep = elapsedWorkMs - lastBeepMsRef.current;
+              const msToNextPhase = currentPhase.durationMs - phaseElapsedMs;
+              // Avoid playing a regular click if an extend or return beep just occurred or is about to occur (< 280ms)
+              if (msSinceLastBeep >= 280 && msToNextPhase >= 280) {
+                // Subtle pitch change for the last 2 seconds before the phase ends
+                const isWarningSecond = msToNextPhase <= 2200 && msToNextPhase > 300;
+                if (isWarningSecond) {
+                  playSound('metronome_tick_high');
+                } else {
+                  playSound('metronome_tick');
+                }
+              }
+            }
+          } else if (audioPacerModeRef.current === 'tones') {
+            const phaseKey = `${repIndex}_${foundPhaseIndex}`;
+            if (lastPlayedPhaseKeyRef.current !== phaseKey) {
+              lastPlayedPhaseKeyRef.current = phaseKey;
+              if (currentPhase.soundType !== 'none') {
+                playSound(currentPhase.soundType);
+                triggerHaptic('light');
+              }
             }
           }
         }
@@ -1092,7 +1443,7 @@ export function useWorkoutPlayer({
           endTimeRef.current = null;
           onComplete();
         }
-      }, 50);
+      }, 25);
     },
     [playSound, triggerHaptic]
   );
@@ -1127,8 +1478,18 @@ export function useWorkoutPlayer({
       'change',
       (nextAppState: AppStateStatus) => {
         if (nextAppState === 'background' || nextAppState === 'inactive') {
-          // If active work or countdown in progress, auto-pause!
-          if (stateRef.current === 'ACTIVE_WORK' || stateRef.current === 'LEAD_IN') {
+          if (isRestTransitioningRef.current) {
+            if (restTransitionTimeoutRef.current) {
+              clearTimeout(restTransitionTimeoutRef.current);
+              restTransitionTimeoutRef.current = null;
+            }
+            isRestTransitioningRef.current = false;
+            setIsRestTransitioning(false);
+            setPreviousState('ACTIVE_WORK');
+            wasAutoPausedRef.current = true;
+            setWasAutoPaused(true);
+            setState('PAUSED');
+          } else if (stateRef.current === 'ACTIVE_WORK' || stateRef.current === 'LEAD_IN') {
             if (endTimeRef.current) {
               pausedRemainingMsRef.current = Math.max(0, endTimeRef.current - Date.now());
             }
@@ -1203,7 +1564,9 @@ export function useWorkoutPlayer({
 
     lastCompletedRepIndexRef.current = 0;
     lastPlayedPhaseKeyRef.current = '';
+    lastPeakRepRef.current = -1;
     lastMetronomeSecRef.current = -1;
+    lastBeepMsRef.current = -1;
     setCurrentRepNumber(1);
     if (cadenceProfileRef.current) {
       setCurrentCadencePhase(cadenceProfileRef.current.phases[0] || null);
@@ -1214,7 +1577,15 @@ export function useWorkoutPlayer({
       setCadenceRepProgress(0);
     }
 
-    if (currentTrackingType === 'duration') {
+    setElapsedWorkMs(0);
+
+    const hasActiveCadence = Boolean(
+      cadenceProfileRef.current &&
+      cadenceProfileRef.current.enabled &&
+      cadenceModeRef.current === 'auto'
+    );
+
+    if (currentTrackingType === 'duration' || hasActiveCadence) {
       const workDurationMs = targetDurationSeconds * 1000;
       startIntervalTimer(workDurationMs, () => handleWorkCompleteRef.current());
     } else {
@@ -1225,11 +1596,18 @@ export function useWorkoutPlayer({
     }
   }, [currentTrackingType, targetDurationSeconds, triggerHaptic, playSound, startIntervalTimer]);
 
-  // 2. ACTIVE_WORK -> RESTING
+  // 2. ACTIVE_WORK -> RESTING (or COMPLETED if final set of entire worksession)
   const handleWorkComplete = useCallback(
     (customReps?: number, customWeight?: number) => {
       triggerHaptic('success');
       playSound('chime');
+
+      const curExIdx = currentExerciseIndexRef.current;
+      const curSetIdx = currentSetIndexRef.current;
+      const ex = exercises[curExIdx] || exercises[0];
+      const tSets = ex?.totalSets || ex?.sets || 3;
+      const isLastSetOfEx = curSetIdx + 1 >= tSets;
+      const isLastExOfWorkout = curExIdx + 1 >= exercises.length;
 
       const repsToLog = typeof customReps === 'number' ? customReps : actualReps;
       const weightToLog = typeof customWeight === 'number' ? customWeight : actualWeight;
@@ -1237,17 +1615,31 @@ export function useWorkoutPlayer({
         currentTrackingType === 'duration' ? targetDurationSeconds : 0;
 
       const newLog: SetResultLog = {
-        exerciseIndex: currentExerciseIndex,
+        exerciseIndex: curExIdx,
         exerciseName: currentExercise?.name || 'Exercise',
-        setNumber: currentSetIndex + 1,
+        setNumber: curSetIdx + 1,
         reps: repsToLog,
         weight: weightToLog,
         durationSeconds: durationLogged,
         completedAt: Date.now(),
       };
 
-      setLoggedSets((prev) => [...prev, newLog]);
+      const updatedLogs = [...loggedSets, newLog];
+      setLoggedSets(updatedLogs);
       if (onSetCompleted) onSetCompleted(newLog);
+
+      // If this was the final set of the entire worksession, do NOT run rest timer!
+      // Immediately transition to COMPLETED and invoke completion callback to save session.
+      if (isLastSetOfEx && isLastExOfWorkout) {
+        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+        endTimeRef.current = null;
+        setState('COMPLETED');
+        if (onWorkoutCompleted) {
+          onWorkoutCompleted(updatedLogs, workoutElapsedSeconds);
+        }
+        return;
+      }
 
       if (targetRestSeconds <= 0) {
         // Zero rest time configured: immediately advance to next set or exercise
@@ -1262,23 +1654,26 @@ export function useWorkoutPlayer({
     [
       triggerHaptic,
       playSound,
+      exercises,
       actualReps,
       actualWeight,
       currentTrackingType,
       targetDurationSeconds,
-      currentExerciseIndex,
       currentExercise?.name,
-      currentSetIndex,
       onSetCompleted,
       targetRestSeconds,
       startIntervalTimer,
+      onWorkoutCompleted,
+      loggedSets,
+      workoutElapsedSeconds,
     ]
   );
 
   // 3. RESTING -> NEXT SET / NEXT EXERCISE / COMPLETED
+  // Note: 5s prep is included in the final 5s of RESTING.
+  // A clean 1-second pause is held after rest completes so chime and rep start audio don't clash.
   const handleRestComplete = useCallback((autoPauseNext: boolean = false) => {
-    triggerHaptic('heavy');
-    playSound('chime');
+    if (isRestTransitioningRef.current) return;
 
     const curExIdx = currentExerciseIndexRef.current;
     const curSetIdx = currentSetIndexRef.current;
@@ -1288,60 +1683,115 @@ export function useWorkoutPlayer({
     const isLastSetOfEx = curSetIdx + 1 >= tSets;
     const isLastExOfWorkout = curExIdx + 1 >= exercises.length;
 
-    const shouldPause = autoPauseNext || (AppState.currentState !== 'active');
-
-    if (!isLastSetOfEx) {
-      // Advance to next set of current exercise
-      setCurrentSetIndex(curSetIdx + 1);
-      if (shouldPause) {
-        setState('PAUSED');
-        setPreviousState('LEAD_IN');
-        wasAutoPausedRef.current = true;
-        setWasAutoPaused(true);
-        pausedRemainingMsRef.current = leadInDurationSeconds * 1000;
-        setSecondsRemaining(leadInDurationSeconds);
-        setProgress(0);
-        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      } else {
-        setState('LEAD_IN');
-        startIntervalTimer(leadInDurationSeconds * 1000, () => handleLeadInCompleteRef.current());
-      }
-    } else if (!isLastExOfWorkout) {
-      // Advance to next exercise
-      setCurrentExerciseIndex(curExIdx + 1);
-      setCurrentSetIndex(0);
-      if (shouldPause) {
-        setState('PAUSED');
-        setPreviousState('LEAD_IN');
-        wasAutoPausedRef.current = true;
-        setWasAutoPaused(true);
-        pausedRemainingMsRef.current = leadInDurationSeconds * 1000;
-        setSecondsRemaining(leadInDurationSeconds);
-        setProgress(0);
-        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      } else {
-        setState('LEAD_IN');
-        startIntervalTimer(leadInDurationSeconds * 1000, () => handleLeadInCompleteRef.current());
-      }
-    } else {
+    if (isLastSetOfEx && isLastExOfWorkout) {
       // All exercises & sets finished!
       setState('COMPLETED');
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+      endTimeRef.current = null;
       if (onWorkoutCompleted) {
         onWorkoutCompleted(loggedSets, workoutElapsedSeconds);
       }
+      return;
+    }
+
+    triggerHaptic('heavy');
+    playSound('chime');
+
+    const shouldPause = autoPauseNext || (AppState.currentState !== 'active');
+
+    const nextExIdx = isLastSetOfEx ? curExIdx + 1 : curExIdx;
+    const nextSetIdx = isLastSetOfEx ? 0 : curSetIdx + 1;
+
+    setCurrentExerciseIndex(nextExIdx);
+    setCurrentSetIndex(nextSetIdx);
+    currentExerciseIndexRef.current = nextExIdx;
+    currentSetIndexRef.current = nextSetIdx;
+
+    const nextEx = exercises[nextExIdx] || exercises[0];
+    const nextTrackingType = resolveTrackingType(nextEx);
+    const nextDuration = getExerciseSetDuration(nextEx, nextSetIdx);
+    const nextReps = getExerciseSetReps(nextEx, nextSetIdx);
+    const nextCadenceProfile = resolveExerciseCadence(
+      nextEx,
+      nextSetIdx,
+      nextDuration,
+      nextReps
+    );
+
+    // Reset cadence pointers for the upcoming set
+    lastCompletedRepIndexRef.current = 0;
+    lastPlayedPhaseKeyRef.current = '';
+    lastPeakRepRef.current = -1;
+    lastMetronomeSecRef.current = -1;
+    lastBeepMsRef.current = -1;
+    setCurrentRepNumber(1);
+    if (nextCadenceProfile) {
+      setCurrentCadencePhase(nextCadenceProfile.phases[0] || null);
+      setCadencePhaseSecondsRemaining(
+        (nextCadenceProfile.phases[0]?.durationMs || 0) / 1000
+      );
+      setCadencePhaseProgress(0);
+      setCadenceRepProgress(0);
+    }
+    setElapsedWorkMs(0);
+
+    if (shouldPause) {
+      setState('PAUSED');
+      setPreviousState('ACTIVE_WORK');
+      wasAutoPausedRef.current = true;
+      setWasAutoPaused(true);
+      pausedRemainingMsRef.current = nextDuration * 1000;
+      setSecondsRemaining(nextDuration);
+      setProgress(0);
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    } else {
+      // Hold a short 1-second pause after rest completes so chime and rep start audio don't clash
+      setSecondsRemaining(0);
+      setProgress(1);
+      setIsRestTransitioning(true);
+      isRestTransitioningRef.current = true;
+
+      if (restTransitionTimeoutRef.current) {
+        clearTimeout(restTransitionTimeoutRef.current);
+      }
+
+      restTransitionTimeoutRef.current = setTimeout(() => {
+        restTransitionTimeoutRef.current = null;
+        isRestTransitioningRef.current = false;
+        setIsRestTransitioning(false);
+
+        // Advance directly to ACTIVE_WORK
+        setState('ACTIVE_WORK');
+
+        const hasActiveCadence = Boolean(
+          nextCadenceProfile &&
+          nextCadenceProfile.enabled &&
+          cadenceModeRef.current === 'auto'
+        );
+
+        if (nextTrackingType === 'duration' || hasActiveCadence) {
+          const workDurationMs = nextDuration * 1000;
+          startIntervalTimer(workDurationMs, () => handleWorkCompleteRef.current());
+        } else {
+          if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+          timerIntervalRef.current = null;
+          endTimeRef.current = null;
+          setSecondsRemaining(nextDuration);
+          setProgress(0);
+        }
+      }, 1000);
     }
   }, [
     exercises,
     triggerHaptic,
     playSound,
-    leadInDurationSeconds,
     startIntervalTimer,
     onWorkoutCompleted,
     loggedSets,
     workoutElapsedSeconds,
+    resolveTrackingType,
   ]);
 
   // Keep callback refs synchronized for cyclic state machine invocations
@@ -1355,6 +1805,7 @@ export function useWorkoutPlayer({
   const startWorkout = useCallback(() => {
     if (state === 'READY') {
       workoutStartTimestampRef.current = Date.now();
+      stateRef.current = 'LEAD_IN';
       setState('LEAD_IN');
       startIntervalTimer(leadInDurationSeconds * 1000, handleLeadInComplete);
     }
@@ -1362,21 +1813,35 @@ export function useWorkoutPlayer({
 
   const startGuidedSet = useCallback(() => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    stateRef.current = 'LEAD_IN';
     setState('LEAD_IN');
     startIntervalTimer(leadInDurationSeconds * 1000, handleLeadInComplete);
   }, [leadInDurationSeconds, startIntervalTimer, handleLeadInComplete]);
 
   const resetGuided = useCallback(() => {
+    if (restTransitionTimeoutRef.current) {
+      clearTimeout(restTransitionTimeoutRef.current);
+      restTransitionTimeoutRef.current = null;
+    }
+    isRestTransitioningRef.current = false;
+    setIsRestTransitioning(false);
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     timerIntervalRef.current = null;
     endTimeRef.current = null;
     setState('READY');
     setSecondsRemaining(leadInDurationSeconds);
     setProgress(0);
+    setElapsedWorkMs(0);
   }, [leadInDurationSeconds]);
 
   const syncPosition = useCallback(
     (exerciseIndex: number, setIndex: number) => {
+      if (restTransitionTimeoutRef.current) {
+        clearTimeout(restTransitionTimeoutRef.current);
+        restTransitionTimeoutRef.current = null;
+      }
+      isRestTransitioningRef.current = false;
+      setIsRestTransitioning(false);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
       endTimeRef.current = null;
@@ -1385,6 +1850,7 @@ export function useWorkoutPlayer({
       setState('READY');
       setSecondsRemaining(leadInDurationSeconds);
       setProgress(0);
+      setElapsedWorkMs(0);
     },
     [leadInDurationSeconds]
   );
@@ -1392,6 +1858,19 @@ export function useWorkoutPlayer({
   const pause = useCallback((isAuto: any = false) => {
     const isAutoBool = typeof isAuto === 'boolean' ? isAuto : false;
     if (state === 'PAUSED' || state === 'COMPLETED' || state === 'READY') return;
+    if (isRestTransitioningRef.current) {
+      if (restTransitionTimeoutRef.current) {
+        clearTimeout(restTransitionTimeoutRef.current);
+        restTransitionTimeoutRef.current = null;
+      }
+      isRestTransitioningRef.current = false;
+      setIsRestTransitioning(false);
+      setPreviousState('ACTIVE_WORK');
+      wasAutoPausedRef.current = isAutoBool;
+      setWasAutoPaused(isAutoBool);
+      setState('PAUSED');
+      return;
+    }
     if (endTimeRef.current) {
       pausedRemainingMsRef.current = Math.max(0, endTimeRef.current - Date.now());
     }
@@ -1413,7 +1892,15 @@ export function useWorkoutPlayer({
 
     if (nextState === 'LEAD_IN') {
       startIntervalTimer(remainingMs, handleLeadInComplete);
-    } else if (nextState === 'ACTIVE_WORK' && currentTrackingType === 'duration') {
+    } else if (
+      nextState === 'ACTIVE_WORK' &&
+      (currentTrackingType === 'duration' ||
+        Boolean(
+          cadenceProfileRef.current &&
+          cadenceProfileRef.current.enabled &&
+          cadenceModeRef.current === 'auto'
+        ))
+    ) {
       startIntervalTimer(remainingMs, handleWorkComplete);
     } else if (nextState === 'RESTING') {
       startIntervalTimer(remainingMs, () => handleRestComplete(false));
@@ -1447,25 +1934,37 @@ export function useWorkoutPlayer({
 
   const skipRest = useCallback(() => {
     if (state === 'RESTING') {
+      if (isRestTransitioningRef.current) return;
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       handleRestComplete();
     }
   }, [state, handleRestComplete]);
 
   const addRestSeconds = useCallback((extraSeconds: number) => {
+    if (isRestTransitioningRef.current) {
+      if (restTransitionTimeoutRef.current) {
+        clearTimeout(restTransitionTimeoutRef.current);
+        restTransitionTimeoutRef.current = null;
+      }
+      isRestTransitioningRef.current = false;
+      setIsRestTransitioning(false);
+      startIntervalTimer(extraSeconds * 1000, () => handleRestCompleteRef.current());
+      return;
+    }
     if (endTimeRef.current) {
       endTimeRef.current += extraSeconds * 1000;
       totalDurationMsRef.current += extraSeconds * 1000;
       const remainingMs = Math.max(0, endTimeRef.current - Date.now());
       setSecondsRemaining(Math.ceil(remainingMs / 1000));
     }
-  }, []);
+  }, [startIntervalTimer]);
 
   const nextExercise = useCallback(() => {
     if (currentExerciseIndex < exercises.length - 1) {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       setCurrentExerciseIndex((prev) => prev + 1);
       setCurrentSetIndex(0);
+      stateRef.current = 'LEAD_IN';
       setState('LEAD_IN');
       startIntervalTimer(leadInDurationSeconds * 1000, handleLeadInComplete);
     }
@@ -1476,6 +1975,7 @@ export function useWorkoutPlayer({
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       setCurrentExerciseIndex((prev) => prev - 1);
       setCurrentSetIndex(0);
+      stateRef.current = 'LEAD_IN';
       setState('LEAD_IN');
       startIntervalTimer(leadInDurationSeconds * 1000, handleLeadInComplete);
     }
@@ -1522,6 +2022,11 @@ export function useWorkoutPlayer({
     isPaused: state === 'PAUSED',
     isActive: state !== 'READY' && state !== 'COMPLETED',
     isResting: state === 'RESTING',
+    isRestPrepPeriod:
+      (state === 'RESTING' || (state === 'PAUSED' && previousState === 'RESTING')) &&
+      secondsRemaining <= 5 &&
+      secondsRemaining > 0,
+    isRestTransitioning,
     isWork: state === 'ACTIVE_WORK',
     isLeadIn: state === 'LEAD_IN',
     isCompleted: state === 'COMPLETED',
@@ -1572,6 +2077,7 @@ export function useWorkoutPlayer({
     cadencePhaseSecondsRemaining,
     cadencePhaseProgress,
     cadenceRepProgress,
+    elapsedWorkMs,
 
     // Completed logs
     loggedSets,

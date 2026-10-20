@@ -824,21 +824,29 @@ export const getExerciseVideoThumbnail = (exercise) => {
 export const getExerciseTrackingType = (exercise) => {
   if (!exercise) return 'weight_reps';
 
-  const n = (exercise.name || '').toLowerCase();
-  if (n.includes('cat-cow') || n.includes('cat cow')) {
-    return 'time';
-  }
-
-  // Explicit tracking type field
+  // 1. Explicit tracking type field has highest precedence
   const explicit = exercise.tracking_type || exercise.trackingType;
   if (explicit === 'time' || explicit === 'duration') return 'time';
   if (explicit === 'weight_reps') return 'weight_reps';
-  if (explicit === 'bodyweight' || explicit === 'reps') return 'bodyweight';
+  if (explicit === 'reps' || explicit === 'bodyweight') return 'reps';
   if (explicit === 'manual') return 'manual';
 
+  const n = (exercise.name || '').toLowerCase();
   const c = (exercise.category || '').toLowerCase();
   const eq = (exercise.equipment || '').toLowerCase();
   const m = (exercise.mechanics || '').toLowerCase();
+
+  // 2. Tempo-regulated repetition exercises (Cat-Cow, Bird-Dog, McGill Curl-up, etc.)
+  if (
+    exercise.seconds_per_rep ||
+    exercise.hold_seconds_per_rep ||
+    n.includes('cat-cow') ||
+    n.includes('cat cow') ||
+    n.includes('bird-dog') ||
+    n.includes('mcgill')
+  ) {
+    return 'reps';
+  }
 
   // 0. Manual / Hours log (Collective Sports, sport matches, outdoor activities)
   if (
@@ -861,7 +869,7 @@ export const getExerciseTrackingType = (exercise) => {
     return 'manual';
   }
 
-  // 1. Time-related (holds, isometrics, planks, yoga poses, duration-based)
+  // 1. Time-related (pure holds, isometrics, static planks, yoga poses)
   if (
     n.includes('hold') ||
     n.includes('plank') ||
@@ -871,8 +879,6 @@ export const getExerciseTrackingType = (exercise) => {
     n.includes('spanish squat') ||
     n.includes('balance') ||
     n.includes('deadbug') ||
-    n.includes('bird-dog') ||
-    n.includes('cat-cow') ||
     n.includes('alphabet') ||
     c === 'yoga' ||
     n.includes('pose') ||

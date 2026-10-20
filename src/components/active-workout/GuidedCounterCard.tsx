@@ -10,12 +10,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { KinetixTheme } from '../../constants/theme';
 import CircularProgressRing from './CircularProgressRing';
+import SineWaveCadenceVisualizer from './SineWaveCadenceVisualizer';
 import {
   WorkoutState,
   ExerciseTrackingType,
   PlayerExercise,
   CadenceProfile,
   CadencePhase,
+  AudioPacerMode,
 } from '../../hooks/useWorkoutPlayer';
 
 interface GuidedCounterCardProps {
@@ -49,19 +51,21 @@ interface GuidedCounterCardProps {
   skipRest: () => void;
   addRestSeconds: (seconds: number) => void;
   onOpenTargetModal?: () => void;
+  isRestTransitioning?: boolean;
 
   // Cadence Pacing Additions:
   isCadenceActive?: boolean;
   cadenceProfile?: CadenceProfile | null;
   cadenceMode?: 'auto' | 'free';
   setCadenceMode?: (mode: 'auto' | 'free') => void;
-  audioPacerMode?: 'tones' | 'metronome' | 'mute';
-  setAudioPacerMode?: (mode: 'tones' | 'metronome' | 'mute') => void;
+  audioPacerMode?: AudioPacerMode;
+  setAudioPacerMode?: (mode: AudioPacerMode) => void;
   currentRepNumber?: number;
   currentCadencePhase?: CadencePhase | null;
   cadencePhaseSecondsRemaining?: number;
   cadencePhaseProgress?: number;
   cadenceRepProgress?: number;
+  elapsedWorkMs?: number;
 }
 
 export default function GuidedCounterCard({
@@ -95,18 +99,20 @@ export default function GuidedCounterCard({
   skipRest,
   addRestSeconds,
   onOpenTargetModal,
+  isRestTransitioning = false,
 
   isCadenceActive = false,
   cadenceProfile = null,
   cadenceMode = 'auto',
   setCadenceMode,
-  audioPacerMode = 'tones',
+  audioPacerMode = 'metronome',
   setAudioPacerMode,
   currentRepNumber = 1,
   currentCadencePhase = null,
   cadencePhaseSecondsRemaining = 0,
   cadencePhaseProgress = 0,
   cadenceRepProgress = 0,
+  elapsedWorkMs = 0,
 }: GuidedCounterCardProps) {
   // Format MM:SS helper
   const formatTimer = (seconds: number) => {
@@ -158,7 +164,7 @@ export default function GuidedCounterCard({
               state === 'READY' && styles.statePillReady,
               state === 'LEAD_IN' && styles.statePillLeadIn,
               state === 'ACTIVE_WORK' && styles.statePillWork,
-              state === 'RESTING' && styles.statePillRest,
+              state === 'RESTING' && (secondsRemaining <= 5 && !isPaused ? styles.statePillLeadIn : styles.statePillRest),
               state === 'PAUSED' && styles.statePillPaused,
             ]}
           >
@@ -168,7 +174,14 @@ export default function GuidedCounterCard({
                 state === 'READY' && { backgroundColor: '#64748B' },
                 state === 'LEAD_IN' && { backgroundColor: '#F59E0B' },
                 state === 'ACTIVE_WORK' && { backgroundColor: '#0284C7' },
-                state === 'RESTING' && { backgroundColor: '#10B981' },
+                state === 'RESTING' && {
+                  backgroundColor:
+                    isRestTransitioning || secondsRemaining === 0
+                      ? '#10B981'
+                      : secondsRemaining <= 5 && !isPaused
+                      ? '#F59E0B'
+                      : '#10B981',
+                },
                 state === 'PAUSED' && { backgroundColor: '#EF4444' },
               ]}
             />
@@ -178,14 +191,26 @@ export default function GuidedCounterCard({
                 state === 'READY' && { color: '#475569' },
                 state === 'LEAD_IN' && { color: '#D97706' },
                 state === 'ACTIVE_WORK' && { color: '#0369A1' },
-                state === 'RESTING' && { color: '#047857' },
+                state === 'RESTING' && {
+                  color:
+                    isRestTransitioning || secondsRemaining === 0
+                      ? '#047857'
+                      : secondsRemaining <= 5 && !isPaused
+                      ? '#D97706'
+                      : '#047857',
+                },
                 state === 'PAUSED' && { color: '#B91C1C' },
               ]}
             >
               {state === 'READY' && 'GUIDED READY'}
               {state === 'LEAD_IN' && 'GETTING READY'}
               {state === 'ACTIVE_WORK' && (trackingType === 'duration' ? 'HOLD ACTIVE' : 'ACTIVE SET')}
-              {state === 'RESTING' && 'REST & RECOVER'}
+              {state === 'RESTING' &&
+                (isRestTransitioning || secondsRemaining === 0
+                  ? 'STARTING SET'
+                  : secondsRemaining <= 5 && !isPaused
+                  ? 'PREP FOR SET'
+                  : 'REST & RECOVER')}
               {state === 'PAUSED' && 'PAUSED'}
             </Text>
           </View>
@@ -223,7 +248,9 @@ export default function GuidedCounterCard({
                   color={KinetixTheme.colors.primary}
                 />
                 <Text style={styles.targetPillText}>
-                  {trackingType === 'duration'
+                  {currentExercise?.seconds_per_rep && currentExercise.seconds_per_rep > 0
+                    ? `Target: ${targetReps} reps (${currentExercise.seconds_per_rep}s/rep)`
+                    : trackingType === 'duration'
                     ? `Target: ${targetDurationSeconds}s Hold`
                     : `Target: ${targetReps} reps${trackingType === 'weight_reps' && targetWeight > 0 ? ` @ ${targetWeight}kg` : ''}`}
                 </Text>
@@ -279,7 +306,7 @@ export default function GuidedCounterCard({
           <CircularProgressRing
             size={160}
             strokeWidth={10}
-            progress={1 - secondsRemaining / 5}
+            progress={progress}
             color="#F59E0B"
             backgroundColor="#FEF3C7"
           >
@@ -308,94 +335,97 @@ export default function GuidedCounterCard({
       {/* 3. STATE: ACTIVE_WORK */}
       {(state === 'ACTIVE_WORK' || (state === 'PAUSED' && (previousState === 'ACTIVE_WORK' || !previousState))) && (
         <View style={styles.activeWorkContent}>
+          {/* Top Cadence Toolbar: Mode & Audio Controls (Always visible when exercise supports cadence!) */}
+          {Boolean(cadenceProfile) && (
+            <View style={styles.cadenceToolbar}>
+              <TouchableOpacity
+                style={[
+                  styles.cadenceModeToggleBtn,
+                  cadenceMode !== 'auto' && styles.cadenceModeToggleBtnInactive,
+                ]}
+                onPress={() => setCadenceMode && setCadenceMode(cadenceMode === 'auto' ? 'free' : 'auto')}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.cadenceActiveDot,
+                    cadenceMode !== 'auto' && styles.cadenceInactiveDot,
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.cadenceModeToggleText,
+                    cadenceMode !== 'auto' && styles.cadenceModeToggleTextInactive,
+                  ]}
+                >
+                  {cadenceMode === 'auto' ? 'Auto Pacer Active' : 'Auto Pacer Paused'}
+                </Text>
+                <Ionicons
+                  name={cadenceMode === 'auto' ? 'swap-horizontal' : 'play-circle'}
+                  size={12}
+                  color={cadenceMode === 'auto' ? '#0369A1' : '#64748B'}
+                />
+              </TouchableOpacity>
+
+              {/* Audio Pacer Mode: Tick Sound (active) or Mute */}
+              <View
+                style={[
+                  styles.audioPacerButtonGroup,
+                  cadenceMode !== 'auto' && { opacity: 0.5 },
+                ]}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.audioPacerBtn,
+                    audioPacerMode === 'metronome' && styles.audioPacerBtnActive,
+                  ]}
+                  onPress={() => setAudioPacerMode && setAudioPacerMode('metronome')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="timer-outline"
+                    size={12}
+                    color={audioPacerMode === 'metronome' ? '#0369A1' : '#64748B'}
+                  />
+                  <Text
+                    style={[
+                      styles.audioPacerBtnText,
+                      audioPacerMode === 'metronome' && styles.audioPacerBtnTextActive,
+                    ]}
+                  >
+                    Tick Sound
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.audioPacerBtn,
+                    audioPacerMode === 'mute' && styles.audioPacerBtnActive,
+                  ]}
+                  onPress={() => setAudioPacerMode && setAudioPacerMode('mute')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="volume-mute-outline"
+                    size={12}
+                    color={audioPacerMode === 'mute' ? '#0369A1' : '#64748B'}
+                  />
+                  <Text
+                    style={[
+                      styles.audioPacerBtnText,
+                      audioPacerMode === 'mute' && styles.audioPacerBtnTextActive,
+                    ]}
+                  >
+                    Mute
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           {isCadenceActive && cadenceProfile ? (
             /* Assisted Cadence Pacing View */
             <View style={styles.cadenceWorkView}>
-              {/* Top Cadence Toolbar: Mode & Audio Controls */}
-              <View style={styles.cadenceToolbar}>
-                <TouchableOpacity
-                  style={styles.cadenceModeToggleBtn}
-                  onPress={() => setCadenceMode && setCadenceMode(cadenceMode === 'auto' ? 'free' : 'auto')}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.cadenceActiveDot} />
-                  <Text style={styles.cadenceModeToggleText}>Auto Pacer Active</Text>
-                  <Ionicons name="swap-horizontal" size={12} color="#0369A1" />
-                </TouchableOpacity>
-
-                {/* Audio Pacer Mode Selector */}
-                <View style={styles.audioPacerButtonGroup}>
-                  <TouchableOpacity
-                    style={[
-                      styles.audioPacerBtn,
-                      audioPacerMode === 'tones' && styles.audioPacerBtnActive,
-                    ]}
-                    onPress={() => setAudioPacerMode && setAudioPacerMode('tones')}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons
-                      name="musical-notes"
-                      size={12}
-                      color={audioPacerMode === 'tones' ? '#0369A1' : '#64748B'}
-                    />
-                    <Text
-                      style={[
-                        styles.audioPacerBtnText,
-                        audioPacerMode === 'tones' && styles.audioPacerBtnTextActive,
-                      ]}
-                    >
-                      Tones
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.audioPacerBtn,
-                      audioPacerMode === 'metronome' && styles.audioPacerBtnActive,
-                    ]}
-                    onPress={() => setAudioPacerMode && setAudioPacerMode('metronome')}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons
-                      name="timer-outline"
-                      size={12}
-                      color={audioPacerMode === 'metronome' ? '#0369A1' : '#64748B'}
-                    />
-                    <Text
-                      style={[
-                        styles.audioPacerBtnText,
-                        audioPacerMode === 'metronome' && styles.audioPacerBtnTextActive,
-                      ]}
-                    >
-                      Tick
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.audioPacerBtn,
-                      audioPacerMode === 'mute' && styles.audioPacerBtnActive,
-                    ]}
-                    onPress={() => setAudioPacerMode && setAudioPacerMode('mute')}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons
-                      name="volume-mute-outline"
-                      size={12}
-                      color={audioPacerMode === 'mute' ? '#0369A1' : '#64748B'}
-                    />
-                    <Text
-                      style={[
-                        styles.audioPacerBtnText,
-                        audioPacerMode === 'mute' && styles.audioPacerBtnTextActive,
-                      ]}
-                    >
-                      Mute
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
               {/* Rep Tracker & Segmented Bar */}
               <View style={styles.repTrackerCard}>
                 <View style={styles.repTrackerHeader}>
@@ -427,60 +457,81 @@ export default function GuidedCounterCard({
                 </View>
               </View>
 
-              {/* Circular Progress Ring for Cadence */}
-              <CircularProgressRing
-                size={190}
-                strokeWidth={12}
-                progress={progress}
-                color={currentCadencePhase?.accentColor || KinetixTheme.colors.primary}
-                backgroundColor="#E2E8F0"
-              >
-                <View style={styles.cadenceRingCenter}>
-                  {/* Phase Pill */}
-                  <View
-                    style={[
-                      styles.cadencePhaseBadge,
-                      {
-                        backgroundColor: (currentCadencePhase?.accentColor || '#0284C7') + '18',
-                        borderColor: (currentCadencePhase?.accentColor || '#0284C7') + '40',
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.cadencePhaseBadgeText,
-                        { color: currentCadencePhase?.accentColor || '#0284C7' },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {currentCadencePhase?.name || 'PACED CADENCE'}
-                    </Text>
-                  </View>
-
-                  {/* Phase Countdown Digits */}
-                  <View style={styles.timerRow}>
-                    <Text style={styles.cadencePhaseDigits} numberOfLines={1}>
-                      {cadencePhaseSecondsRemaining.toFixed(1)}s
-                    </Text>
-                  </View>
-                  <Text style={styles.cadencePhaseSub}>PHASE CADENCE</Text>
-                  <Text style={styles.cadenceSetTimeSmall}>
-                    Set: {formatTimer(secondsRemaining)}
-                  </Text>
-                </View>
-              </CircularProgressRing>
-
-              {/* Biofeedback Prompt & Instruction */}
-              <View style={styles.cadenceCueBox}>
-                <Ionicons
-                  name={currentCadencePhase?.soundType === 'cadence_up' ? 'arrow-up-circle' : 'arrow-down-circle'}
-                  size={16}
-                  color={currentCadencePhase?.accentColor || '#16A34A'}
+              {/* Cadence Visualizer: Sine Wave for continuous flow (Cat-Cow) or Circular Ring for Holds */}
+              {cadenceProfile.visualType === 'sine_wave' ? (
+                <SineWaveCadenceVisualizer
+                  elapsedWorkMs={elapsedWorkMs}
+                  repProgress={cadenceRepProgress}
+                  currentRepNumber={currentRepNumber}
+                  totalReps={cadenceProfile.totalReps}
+                  repDurationMs={cadenceProfile.repDurationMs}
+                  secondsRemaining={secondsRemaining}
+                  isPaused={isPaused}
+                  exerciseName={currentExercise?.name}
+                  trackingType={trackingType}
+                  audioPacerMode={audioPacerMode}
+                  waveProfile={cadenceProfile.waveProfile}
+                  holdDurationMs={cadenceProfile.holdDurationMs}
+                  resetDurationMs={cadenceProfile.resetDurationMs}
+                  riseDurationMs={cadenceProfile.riseDurationMs}
                 />
-                <Text style={styles.cadenceCueText}>
-                  {currentCadencePhase?.cue || currentExercise?.cue}
-                </Text>
-              </View>
+              ) : (
+                <>
+                  <CircularProgressRing
+                    size={190}
+                    strokeWidth={12}
+                    progress={progress}
+                    color={currentCadencePhase?.accentColor || KinetixTheme.colors.primary}
+                    backgroundColor="#E2E8F0"
+                  >
+                    <View style={styles.cadenceRingCenter}>
+                      {/* Phase Pill */}
+                      <View
+                        style={[
+                          styles.cadencePhaseBadge,
+                          {
+                            backgroundColor: (currentCadencePhase?.accentColor || '#0284C7') + '18',
+                            borderColor: (currentCadencePhase?.accentColor || '#0284C7') + '40',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.cadencePhaseBadgeText,
+                            { color: currentCadencePhase?.accentColor || '#0284C7' },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {currentCadencePhase?.name || 'PACED CADENCE'}
+                        </Text>
+                      </View>
+
+                      {/* Phase Countdown Digits */}
+                      <View style={styles.timerRow}>
+                        <Text style={styles.cadencePhaseDigits} numberOfLines={1}>
+                          {cadencePhaseSecondsRemaining.toFixed(1)}s
+                        </Text>
+                      </View>
+                      <Text style={styles.cadencePhaseSub}>PHASE CADENCE</Text>
+                      <Text style={styles.cadenceSetTimeSmall}>
+                        Set: {formatTimer(secondsRemaining)}
+                      </Text>
+                    </View>
+                  </CircularProgressRing>
+
+                  {/* Biofeedback Prompt & Instruction */}
+                  <View style={styles.cadenceCueBox}>
+                    <Ionicons
+                      name={currentCadencePhase?.soundType === 'cadence_up' ? 'arrow-up-circle' : 'arrow-down-circle'}
+                      size={16}
+                      color={currentCadencePhase?.accentColor || '#16A34A'}
+                    />
+                    <Text style={styles.cadenceCueText}>
+                      {currentCadencePhase?.cue || currentExercise?.cue}
+                    </Text>
+                  </View>
+                </>
+              )}
 
               {/* Action Buttons */}
               <View style={styles.workActionRow}>
@@ -570,13 +621,30 @@ export default function GuidedCounterCard({
           ) : (
             /* Reps & Load Interactive Guided View */
             <View style={styles.repsWorkView}>
-              {/* Cadence Tempo Pulse Banner */}
-              <Animated.View style={[styles.cadencePill, { transform: [{ scale: cadenceScale }] }]}>
-                <Ionicons name="pulse" size={16} color={KinetixTheme.colors.primary} />
-                <Text style={styles.cadencePillText}>
-                  Paced Tempo: Steady & Controlled Form
-                </Text>
-              </Animated.View>
+              {/* Cadence Tempo Pulse Banner / Re-enable prompt */}
+              {cadenceProfile ? (
+                <TouchableOpacity
+                  style={[
+                    styles.cadencePill,
+                    { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1 },
+                  ]}
+                  onPress={() => setCadenceMode && setCadenceMode('auto')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="pulse" size={16} color="#0284C7" />
+                  <Text style={[styles.cadencePillText, { color: '#0369A1', fontWeight: '800' }]}>
+                    Auto Pacer Paused • Tap to Reactivate Wave Pacer
+                  </Text>
+                  <Ionicons name="play-circle" size={16} color="#0284C7" />
+                </TouchableOpacity>
+              ) : (
+                <Animated.View style={[styles.cadencePill, { transform: [{ scale: cadenceScale }] }]}>
+                  <Ionicons name="pulse" size={16} color={KinetixTheme.colors.primary} />
+                  <Text style={styles.cadencePillText}>
+                    Paced Tempo: Steady & Controlled Form
+                  </Text>
+                </Animated.View>
+              )}
 
               {/* Reps and Load Selectors */}
               <View style={styles.stepperContainer}>
@@ -652,29 +720,90 @@ export default function GuidedCounterCard({
             size={180}
             strokeWidth={12}
             progress={progress}
-            color="#10B981"
-            backgroundColor="#D1FAE5"
+            color={
+              isRestTransitioning || secondsRemaining === 0
+                ? '#10B981'
+                : secondsRemaining <= 5 && !isPaused
+                ? '#F59E0B'
+                : '#10B981'
+            }
+            backgroundColor={
+              isRestTransitioning || secondsRemaining === 0
+                ? '#D1FAE5'
+                : secondsRemaining <= 5 && !isPaused
+                ? '#FEF3C7'
+                : '#D1FAE5'
+            }
           >
             <View style={styles.restRingCenter}>
               <View style={styles.timerRow}>
-                <Text style={styles.restDigits} numberOfLines={1}>
-                  {formatTimer(secondsRemaining)}
+                <Text
+                  style={[
+                    styles.restDigits,
+                    (isRestTransitioning || secondsRemaining === 0)
+                      ? { color: '#059669', fontSize: 32 }
+                      : (secondsRemaining <= 5 && !isPaused && { color: '#D97706' }),
+                  ]}
+                  numberOfLines={1}
+                >
+                  {isRestTransitioning || secondsRemaining === 0 ? 'GO!' : formatTimer(secondsRemaining)}
                 </Text>
               </View>
-              <Text style={styles.restRingLabel}>RECOVERY REST</Text>
+              <Text
+                style={[
+                  styles.restRingLabel,
+                  (isRestTransitioning || secondsRemaining === 0)
+                    ? { color: '#047857', fontWeight: '900', letterSpacing: 0.5 }
+                    : (secondsRemaining <= 5 && !isPaused && { color: '#D97706', fontWeight: '800' }),
+                ]}
+              >
+                {(isRestTransitioning || secondsRemaining === 0)
+                  ? 'STARTING SET'
+                  : (secondsRemaining <= 5 && !isPaused ? 'GET READY' : 'RECOVERY REST')}
+              </Text>
               <Text style={styles.restTotalTarget}>Target: {targetRestSeconds}s</Text>
             </View>
           </CircularProgressRing>
 
-          {/* Option A Auto-Advance Pill */}
-          <View style={styles.autoAdvanceBanner}>
-            <Ionicons name="flash" size={14} color="#059669" />
-            <Text style={styles.autoAdvanceText}>
-              {isPaused
-                ? 'Rest timer paused'
-                : `Auto-advancing to Next Set in ${secondsRemaining}s`}
-            </Text>
-          </View>
+          {/* Rest Complete 1s Pause, Prep Alert (last 5s), or Auto-Advance Pill */}
+          {isRestTransitioning || secondsRemaining === 0 ? (
+            <View style={[styles.prepNoticeBanner, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
+              <View style={[styles.prepNoticeIconWrap, { backgroundColor: '#D1FAE5' }]}>
+                <Ionicons name="checkmark-circle" size={16} color="#059669" />
+              </View>
+              <View style={styles.prepNoticeTextWrap}>
+                <Text style={[styles.prepNoticeTitle, { color: '#047857' }]}>
+                  REST COMPLETE · STARTING SET NOW
+                </Text>
+                <Text style={[styles.prepNoticeSub, { color: '#059669' }]}>
+                  Begin repetitions
+                </Text>
+              </View>
+            </View>
+          ) : secondsRemaining <= 5 && !isPaused ? (
+            <View style={styles.prepNoticeBanner}>
+              <View style={styles.prepNoticeIconWrap}>
+                <Ionicons name="flash" size={15} color="#D97706" />
+              </View>
+              <View style={styles.prepNoticeTextWrap}>
+                <Text style={styles.prepNoticeTitle}>
+                  GET READY · SET STARTS IN {secondsRemaining}s
+                </Text>
+                <Text style={styles.prepNoticeSub}>
+                  Assume starting position now
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.autoAdvanceBanner}>
+              <Ionicons name="flash" size={14} color="#059669" />
+              <Text style={styles.autoAdvanceText}>
+                {isPaused
+                  ? 'Rest timer paused'
+                  : `Auto-advancing to Next Set in ${secondsRemaining}s`}
+              </Text>
+            </View>
+          )}
 
           {/* Rest Controls */}
           <View style={styles.restControlsRow}>
@@ -1191,6 +1320,47 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#047857',
   },
+  prepNoticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 14,
+    marginTop: 12,
+    borderWidth: 1.5,
+    borderColor: '#FCD34D',
+    width: '100%',
+    shadowColor: '#D97706',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  prepNoticeIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FDE68A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  prepNoticeTextWrap: {
+    flex: 1,
+  },
+  prepNoticeTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#B45309',
+    letterSpacing: 0.3,
+  },
+  prepNoticeSub: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#D97706',
+    marginTop: 1,
+  },
   restControlsRow: {
     flexDirection: 'row',
     gap: 10,
@@ -1302,17 +1472,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#BFDBFE',
   },
+  cadenceModeToggleBtnInactive: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#CBD5E1',
+  },
   cadenceActiveDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     backgroundColor: '#0284C7',
   },
+  cadenceInactiveDot: {
+    backgroundColor: '#94A3B8',
+  },
   cadenceModeToggleText: {
     fontSize: 10,
     fontWeight: '800',
     color: '#0369A1',
     letterSpacing: 0.3,
+  },
+  cadenceModeToggleTextInactive: {
+    color: '#64748B',
   },
   audioPacerButtonGroup: {
     flexDirection: 'row',

@@ -49,6 +49,7 @@ export default function ActiveWorkoutFocusView({
     secondsRemaining,
     progress,
     workoutElapsedSeconds,
+    isRestTransitioning,
     actualReps,
     setActualReps,
     actualWeight,
@@ -366,10 +367,50 @@ export default function ActiveWorkoutFocusView({
           {/* 5. RESTING STATE */}
           {isResting && (
             <View style={styles.stageBox}>
-              <View style={[styles.stateNoticeBadge, styles.restNoticeBadge]}>
-                <Ionicons name="battery-charging" size={14} color="#38BDF8" />
-                <Text style={[styles.stateNoticeText, { color: '#38BDF8' }]}>
-                  REST & RECHARGE
+              <View
+                style={[
+                  styles.stateNoticeBadge,
+                  styles.restNoticeBadge,
+                  isRestTransitioning || secondsRemaining === 0
+                    ? { backgroundColor: '#064E3B', borderColor: '#10B981' }
+                    : secondsRemaining <= 5 && { backgroundColor: '#451A03', borderColor: '#F59E0B' },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    isRestTransitioning || secondsRemaining === 0
+                      ? 'checkmark-circle'
+                      : secondsRemaining <= 5
+                      ? 'flash'
+                      : 'battery-charging'
+                  }
+                  size={14}
+                  color={
+                    isRestTransitioning || secondsRemaining === 0
+                      ? '#10B981'
+                      : secondsRemaining <= 5
+                      ? '#F59E0B'
+                      : '#38BDF8'
+                  }
+                />
+                <Text
+                  style={[
+                    styles.stateNoticeText,
+                    {
+                      color:
+                        isRestTransitioning || secondsRemaining === 0
+                          ? '#10B981'
+                          : secondsRemaining <= 5
+                          ? '#F59E0B'
+                          : '#38BDF8',
+                    },
+                  ]}
+                >
+                  {isRestTransitioning || secondsRemaining === 0
+                    ? 'STARTING SET NOW'
+                    : secondsRemaining <= 5
+                    ? `GET READY (${secondsRemaining}s)`
+                    : 'REST & RECHARGE'}
                 </Text>
               </View>
 
@@ -377,13 +418,32 @@ export default function ActiveWorkoutFocusView({
                 size={240}
                 strokeWidth={16}
                 progress={progress}
-                color="#38BDF8"
+                color={
+                  isRestTransitioning || secondsRemaining === 0
+                    ? '#10B981'
+                    : secondsRemaining <= 5
+                    ? '#F59E0B'
+                    : '#38BDF8'
+                }
                 backgroundColor="#1E293B"
               >
-                <Text style={styles.restTimerDigits}>
-                  {formatTimerDigits(secondsRemaining)}
+                <Text
+                  style={[
+                    styles.restTimerDigits,
+                    (isRestTransitioning || secondsRemaining === 0)
+                      ? { color: '#10B981', fontSize: 48 }
+                      : (secondsRemaining <= 5 && { color: '#F59E0B' }),
+                  ]}
+                >
+                  {isRestTransitioning || secondsRemaining === 0 ? 'GO!' : formatTimerDigits(secondsRemaining)}
                 </Text>
-                <Text style={styles.restTimerLabel}>REST REMAINING</Text>
+                <Text style={styles.restTimerLabel}>
+                  {isRestTransitioning || secondsRemaining === 0
+                    ? 'STARTING SET'
+                    : secondsRemaining <= 5
+                    ? 'PREP FOR NEXT SET'
+                    : 'REST REMAINING'}
+                </Text>
               </CircularProgressRing>
 
               {/* Up Next Preview Card */}
