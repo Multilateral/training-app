@@ -849,7 +849,7 @@ export default function KinetixActiveWorkout({
   // Active Rest countdown interval for manual workout mode
   useEffect(() => {
     let interval: any = null;
-    if (isResting && restSecondsLeft > 0 && !isPaused) {
+    if (!isGuidedMode && isResting && restSecondsLeft > 0 && !isPaused) {
       interval = setInterval(() => {
         setRestSecondsLeft((prev) => {
           if (prev <= 1) {
@@ -875,12 +875,12 @@ export default function KinetixActiveWorkout({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isResting, restSecondsLeft, isPaused, currentSet, currentEx?.name, player]);
+  }, [isGuidedMode, isResting, restSecondsLeft, isPaused, currentSet, currentEx?.name, player]);
 
   // Manual mode isometric hold countdown timer interval with auditory and tactile cues
   useEffect(() => {
     let interval: any = null;
-    if (timerRunning && !isPaused && holdSeconds > 0) {
+    if (!isGuidedMode && timerRunning && !isPaused && holdSeconds > 0) {
       interval = setInterval(() => {
         setHoldSeconds((prev) => {
           if (prev <= 1) {
@@ -900,10 +900,13 @@ export default function KinetixActiveWorkout({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [timerRunning, isPaused, holdSeconds, player]);
+  }, [isGuidedMode, timerRunning, isPaused, holdSeconds, player]);
 
   const handleToggleMode = (enableGuided: boolean) => {
     if (enableGuided) {
+      setIsResting(false);
+      setRestSecondsLeft(0);
+      setTimerRunning(false);
       player.syncPosition(currentExIndex, Math.max(0, currentSet - 1));
       setIsGuidedMode(true);
     } else {

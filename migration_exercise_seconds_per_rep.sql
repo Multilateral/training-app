@@ -17,10 +17,10 @@ COMMENT ON COLUMN worksession_exercises.seconds_per_rep IS
 'Worksession-specific tempo in seconds per repetition.';
 
 -- 3. Update exercises tracking_type to 'reps' with tempo regulation
--- Cat-Cow: 10 reps @ 4.5s/rep (45s total cycle)
+-- Cat-Cow: 10 reps @ 4.0s/rep (Tempo 2-0-2-0: 2s arch, 2s dip -> 40s total cycle)
 UPDATE exercises
 SET tracking_type = 'reps',
-    seconds_per_rep = 4.5,
+    seconds_per_rep = 4.0,
     default_reps = 10
 WHERE name ILIKE '%cat-cow%' OR name ILIKE '%cat cow%';
 

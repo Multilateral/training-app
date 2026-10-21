@@ -120,6 +120,21 @@ const METRONOME_TICK_HIGH_ASSET = require('../../assets/sounds/metronome_tick_hi
 const METRONOME_EXTEND_ASSET = require('../../assets/sounds/metronome_extend.wav');
 const METRONOME_RETURN_ASSET = require('../../assets/sounds/metronome_return.wav');
 
+// Shared AudioContext singleton for low-latency Web Audio synthesis without context exhaustion
+let sharedWebAudioCtx: any = null;
+const getWebAudioContext = () => {
+  if (typeof window === 'undefined') return null;
+  const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!sharedWebAudioCtx || sharedWebAudioCtx.state === 'closed') {
+    sharedWebAudioCtx = new AudioContextClass();
+  }
+  if (sharedWebAudioCtx.state === 'suspended') {
+    sharedWebAudioCtx.resume().catch(() => {});
+  }
+  return sharedWebAudioCtx;
+};
+
 export type SoundType =
   | 'pip'
   | 'chime'
@@ -199,8 +214,8 @@ export const resolveExerciseCadence = (
         : typeof ex.hold_seconds_per_rep === 'number' && ex.hold_seconds_per_rep > 0
         ? ex.hold_seconds_per_rep
         : targetDurationSeconds > 0 && reps > 0
-        ? targetDurationSeconds / reps
-        : 5.0;
+        ? Math.round(targetDurationSeconds / reps)
+        : 4.0;
     const repMs = Math.round(secPerRep * 1000);
     const totalMs = repMs * reps;
     const halfMs = Math.round(repMs / 2);
@@ -711,6 +726,12 @@ export function useWorkoutPlayer({
   // Dedicated pre-loaded player pool for warning pitch metronome_tick_high (1520Hz)
   const tickHighPlayersPoolRef = useRef<any[]>([]);
   const tickHighPoolIndexRef = useRef<number>(0);
+  // Dedicated pre-loaded player pool for metronome_extend (1750Hz) for instant crest reversal
+  const extendPlayersPoolRef = useRef<any[]>([]);
+  const extendPoolIndexRef = useRef<number>(0);
+  // Dedicated pre-loaded player pool for metronome_return (880Hz) for instant base reversal
+  const returnPlayersPoolRef = useRef<any[]>([]);
+  const returnPoolIndexRef = useRef<number>(0);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
 
   // Initialize native audio session (silent mode bypass on iOS and mixing with other apps)
@@ -806,6 +827,38 @@ export function useWorkoutPlayer({
               console.log('[useWorkoutPlayer] High tick pool creation error:', poolErr);
             }
           }
+
+          // Preload pool of 2 dedicated players for metronome_extend to achieve zero-latency playback
+          const extendSrc = soundUrisRef.current['metronome_extend'] || SOUND_ASSETS['metronome_extend'];
+          if (extendSrc) {
+            try {
+              extendPlayersPoolRef.current = [
+                createAudioPlayer(extendSrc),
+                createAudioPlayer(extendSrc),
+              ];
+              extendPlayersPoolRef.current.forEach((p) => {
+                if (p) p.volume = 1.0;
+              });
+            } catch (poolErr) {
+              console.log('[useWorkoutPlayer] Extend pool creation error:', poolErr);
+            }
+          }
+
+          // Preload pool of 2 dedicated players for metronome_return to achieve zero-latency playback
+          const returnSrc = soundUrisRef.current['metronome_return'] || SOUND_ASSETS['metronome_return'];
+          if (returnSrc) {
+            try {
+              returnPlayersPoolRef.current = [
+                createAudioPlayer(returnSrc),
+                createAudioPlayer(returnSrc),
+              ];
+              returnPlayersPoolRef.current.forEach((p) => {
+                if (p) p.volume = 1.0;
+              });
+            } catch (poolErr) {
+              console.log('[useWorkoutPlayer] Return pool creation error:', poolErr);
+            }
+          }
           console.log('[useWorkoutPlayer] expo-audio players pre-created');
         }
       } catch (err) {
@@ -823,6 +876,16 @@ export function useWorkoutPlayer({
           if (p?.release) p.release();
           if (p?.unloadAsync) p.unloadAsync();
           soundPlayersRef.current[key] = null;
+        } catch {}
+      });
+      [
+        ...tickPlayersPoolRef.current,
+        ...tickHighPlayersPoolRef.current,
+        ...extendPlayersPoolRef.current,
+        ...returnPlayersPoolRef.current,
+      ].forEach((p) => {
+        try {
+          if (p?.release) p.release();
         } catch {}
       });
       if (restTransitionTimeoutRef.current) {
@@ -926,6 +989,8 @@ export function useWorkoutPlayer({
   const lastPeakRepRef = useRef<number>(-1);
   const lastMetronomeSecRef = useRef<number>(-1);
   const lastBeepMsRef = useRef<number>(-1);
+  const lastCountdownTickMsRef = useRef<number>(0);
+  const lastCountdownTickSecRef = useRef<number>(-1);
 
   // Update cadence phase defaults when exercise/set changes
   useEffect(() => {
@@ -937,10 +1002,11 @@ export function useWorkoutPlayer({
       setCadenceRepProgress(0);
     }
     lastCompletedRepIndexRef.current = 0;
-    lastPlayedPhaseKeyRef.current = '';
+    // Set to '0_0' so metronome_return doesn't fire at t = 0 on top of the transition chime
+    lastPlayedPhaseKeyRef.current = '0_0';
     lastPeakRepRef.current = -1;
-    lastMetronomeSecRef.current = -1;
-    lastBeepMsRef.current = -1;
+    lastMetronomeSecRef.current = 0;
+    lastBeepMsRef.current = 0;
   }, [currentExerciseIndex, currentSetIndex]);
 
   // Synchronize exercise-specific default audio pacer (e.g. Cat-Cow -> 'pulse')
@@ -958,12 +1024,8 @@ export function useWorkoutPlayer({
       // Web Audio API fallback for ultra low-latency synthesis on Web
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         try {
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          if (AudioContextClass) {
-            const ctx = new AudioContextClass();
-            if (ctx.state === 'suspended') {
-              await ctx.resume();
-            }
+          const ctx = getWebAudioContext();
+          if (ctx) {
 
             if (type === 'pip') {
               const osc = ctx.createOscillator();
@@ -1129,10 +1191,6 @@ export function useWorkoutPlayer({
               } else {
                 p.play();
               }
-              // Immediately schedule zeroing out position in background ready for next cycle
-              setTimeout(() => {
-                p.seekTo(0).catch(() => {});
-              }, 60);
               return;
             }
           }
@@ -1149,9 +1207,38 @@ export function useWorkoutPlayer({
               } else {
                 p.play();
               }
-              setTimeout(() => {
-                p.seekTo(0).catch(() => {});
-              }, 60);
+              return;
+            }
+          }
+
+          // Zero-latency round-robin pool for metronome_extend (crest reversal)
+          if (type === 'metronome_extend' && extendPlayersPoolRef.current.length > 0) {
+            const pool = extendPlayersPoolRef.current;
+            const idx = extendPoolIndexRef.current;
+            extendPoolIndexRef.current = (idx + 1) % pool.length;
+            const p = pool[idx];
+            if (p) {
+              if (p.currentTime > 0) {
+                p.seekTo(0).then(() => p.play()).catch(() => p.play());
+              } else {
+                p.play();
+              }
+              return;
+            }
+          }
+
+          // Zero-latency round-robin pool for metronome_return (base reversal)
+          if (type === 'metronome_return' && returnPlayersPoolRef.current.length > 0) {
+            const pool = returnPlayersPoolRef.current;
+            const idx = returnPoolIndexRef.current;
+            returnPoolIndexRef.current = (idx + 1) % pool.length;
+            const p = pool[idx];
+            if (p) {
+              if (p.currentTime > 0) {
+                p.seekTo(0).then(() => p.play()).catch(() => p.play());
+              } else {
+                p.play();
+              }
               return;
             }
           }
@@ -1245,6 +1332,8 @@ export function useWorkoutPlayer({
         lastPlayedPhaseKeyRef.current = '';
         lastMetronomeSecRef.current = -1;
         lastBeepMsRef.current = -1;
+        lastCountdownTickMsRef.current = 0;
+        lastCountdownTickSecRef.current = -1;
       }
 
       const currentRemainingMs = Math.max(0, endTimeRef.current - Date.now());
@@ -1256,7 +1345,19 @@ export function useWorkoutPlayer({
           : 0
       );
 
-      let lastReportedSec = initialRemainingSec;
+      // Throttled countdown tick function (strictly throttled to >= 700ms and once per second)
+      const playCountdownTick = (sec: number) => {
+        const now = Date.now();
+        if (now - lastCountdownTickMsRef.current < 700 || lastCountdownTickSecRef.current === sec) {
+          return;
+        }
+        lastCountdownTickMsRef.current = now;
+        lastCountdownTickSecRef.current = sec;
+        triggerHaptic('light');
+        if (audioPacerModeRef.current !== 'mute') {
+          playSound('metronome_tick');
+        }
+      };
 
       // When starting a countdown (e.g. 5s Lead-In or 5s Rest Prep),
       // play the first tick immediately on the exact first second (e.g. 5)!
@@ -1266,10 +1367,7 @@ export function useWorkoutPlayer({
         initialRemainingSec <= 5 &&
         initialRemainingSec > 0
       ) {
-        triggerHaptic('light');
-        if (audioPacerModeRef.current !== 'mute') {
-          playSound('metronome_tick');
-        }
+        playCountdownTick(initialRemainingSec);
       }
 
       timerIntervalRef.current = setInterval(() => {
@@ -1286,18 +1384,12 @@ export function useWorkoutPlayer({
         setProgress(calculatedProgress);
 
         // Sensory tick on countdown numbers (5, 4, 3, 2, 1) during lead-in or rest prep
-        if (remainingSec !== lastReportedSec) {
-          lastReportedSec = remainingSec;
-          if (
-            remainingSec <= 5 &&
-            remainingSec > 0 &&
-            (stateRef.current === 'LEAD_IN' || stateRef.current === 'RESTING')
-          ) {
-            triggerHaptic('light');
-            if (audioPacerModeRef.current !== 'mute') {
-              playSound('metronome_tick');
-            }
-          }
+        if (
+          remainingSec <= 5 &&
+          remainingSec > 0 &&
+          (stateRef.current === 'LEAD_IN' || stateRef.current === 'RESTING')
+        ) {
+          playCountdownTick(remainingSec);
         }
 
         // Live Cadence Engine when in ACTIVE_WORK
@@ -1356,26 +1448,32 @@ export function useWorkoutPlayer({
           // Active Cadence Audio Pacer:
           // In 'metronome' (Tick) mode: steady rhythmic ticks, with modified beeps
           // specifically at the EXTEND point (peak/crest reversal) and RETURN point (base reversal),
-          // with a subtle pitch change (metronome_tick_high) on the final countdown seconds of each phase.
+          // with a subtle pitch change (metronome_tick_high) on the final countdown seconds of long hold phases.
           if (audioPacerModeRef.current === 'metronome') {
             const isIsometricHoldProfile = profile.waveProfile === 'isometric_hold';
             const riseMs = profile.riseDurationMs || 1500;
+            const phaseKey = `${repIndex}_${foundPhaseIndex}`;
+
+            // At t = 0 of the entire worksession set, the transition chime already signals the start!
+            // Suppress metronome_return at t = 0 so it never clashes with the chime.
+            const isStartOfSet = repIndex === 0 && foundPhaseIndex === 0 && elapsedWorkMs < 300;
 
             if (isIsometricHoldProfile) {
               // 1. Isometric Hold Choreography:
-              const phaseKey = `${repIndex}_${foundPhaseIndex}`;
               if (lastPlayedPhaseKeyRef.current !== phaseKey) {
                 lastPlayedPhaseKeyRef.current = phaseKey;
                 lastBeepMsRef.current = elapsedWorkMs;
 
-                if (foundPhaseIndex === 0) {
-                  // Rep start (lift & engage from base)
-                  playSound('metronome_return');
-                  triggerHaptic('light');
-                } else if (foundPhaseIndex === 1) {
-                  // End of hold: start release & switch sides
-                  playSound('metronome_return');
-                  triggerHaptic('light');
+                if (!isStartOfSet) {
+                  if (foundPhaseIndex === 0) {
+                    // Rep start (lift & engage from base)
+                    playSound('metronome_return');
+                    triggerHaptic('light');
+                  } else if (foundPhaseIndex === 1) {
+                    // End of hold: start release & switch sides
+                    playSound('metronome_return');
+                    triggerHaptic('light');
+                  }
                 }
               }
 
@@ -1388,22 +1486,23 @@ export function useWorkoutPlayer({
                 triggerHaptic('light');
               }
             } else {
-              // 2. Symmetric Sine / Standard Wave Choreography:
-              const phaseKey = `${repIndex}_${foundPhaseIndex}`;
+              // 2. Symmetric Sine / Standard Wave Choreography (e.g. Cat-Cow):
               if (lastPlayedPhaseKeyRef.current !== phaseKey) {
                 lastPlayedPhaseKeyRef.current = phaseKey;
                 lastBeepMsRef.current = elapsedWorkMs;
 
-                if (foundPhaseIndex === 1) {
-                  // EXTEND POINT: Peak reversal (e.g. Cat Arch Crest / Concentric peak)
-                  // Higher-pitched crisp accented beep so user knows to reverse direction
-                  playSound('metronome_extend');
-                  triggerHaptic('light');
-                } else if (foundPhaseIndex === 0) {
-                  // RETURN POINT: Base reversal (e.g. Cow Dip Base / Starting position)
-                  // Distinct grounded resonant beep so user knows to reverse direction and extend
-                  playSound('metronome_return');
-                  triggerHaptic('light');
+                if (!isStartOfSet) {
+                  if (foundPhaseIndex === 1) {
+                    // EXTEND POINT: Peak reversal (e.g. Cat Arch Crest / Concentric peak)
+                    // Higher-pitched crisp accented beep so user knows to reverse direction
+                    playSound('metronome_extend');
+                    triggerHaptic('light');
+                  } else if (foundPhaseIndex === 0) {
+                    // RETURN POINT: Base reversal (e.g. Cow Dip Base / Starting position)
+                    // Distinct grounded resonant beep so user knows to reverse direction and extend
+                    playSound('metronome_return');
+                    triggerHaptic('light');
+                  }
                 }
               }
             }
@@ -1414,10 +1513,16 @@ export function useWorkoutPlayer({
               lastMetronomeSecRef.current = currentSecondFloor;
               const msSinceLastBeep = elapsedWorkMs - lastBeepMsRef.current;
               const msToNextPhase = currentPhase.durationMs - phaseElapsedMs;
-              // Avoid playing a regular click if an extend or return beep just occurred or is about to occur (< 280ms)
-              if (msSinceLastBeep >= 280 && msToNextPhase >= 280) {
-                // Subtle pitch change for the last 2 seconds before the phase ends
-                const isWarningSecond = msToNextPhase <= 2200 && msToNextPhase > 300;
+
+              // Avoid playing a click if an extend or return beep just occurred or is about to occur (< 650ms)
+              if (msSinceLastBeep >= 650 && msToNextPhase >= 650) {
+                // Warning pitch shift:
+                // Only activate warning pitch on phases long enough to benefit from it (duration >= 4000ms, like 10s isometric holds).
+                // For fast rhythmic continuous movements (e.g. Cat-Cow 2000ms), maintain pure neutral metronome ticks
+                // so the user does NOT hear beeps every single second!
+                const isEligibleForWarning = currentPhase.durationMs >= 4000;
+                const warningWindowMs = currentPhase.durationMs >= 6000 ? 2200 : 1200;
+                const isWarningSecond = isEligibleForWarning && msToNextPhase <= warningWindowMs;
                 if (isWarningSecond) {
                   playSound('metronome_tick_high');
                 } else {
@@ -1563,10 +1668,11 @@ export function useWorkoutPlayer({
     setState('ACTIVE_WORK');
 
     lastCompletedRepIndexRef.current = 0;
-    lastPlayedPhaseKeyRef.current = '';
+    // Set to '0_0' so metronome_return doesn't fire at t = 0 on top of the transition chime
+    lastPlayedPhaseKeyRef.current = '0_0';
     lastPeakRepRef.current = -1;
-    lastMetronomeSecRef.current = -1;
-    lastBeepMsRef.current = -1;
+    lastMetronomeSecRef.current = 0;
+    lastBeepMsRef.current = 0;
     setCurrentRepNumber(1);
     if (cadenceProfileRef.current) {
       setCurrentCadencePhase(cadenceProfileRef.current.phases[0] || null);
@@ -1721,10 +1827,11 @@ export function useWorkoutPlayer({
 
     // Reset cadence pointers for the upcoming set
     lastCompletedRepIndexRef.current = 0;
-    lastPlayedPhaseKeyRef.current = '';
+    // Set to '0_0' so metronome_return doesn't fire at t = 0 on top of the transition chime
+    lastPlayedPhaseKeyRef.current = '0_0';
     lastPeakRepRef.current = -1;
-    lastMetronomeSecRef.current = -1;
-    lastBeepMsRef.current = -1;
+    lastMetronomeSecRef.current = 0;
+    lastBeepMsRef.current = 0;
     setCurrentRepNumber(1);
     if (nextCadenceProfile) {
       setCurrentCadencePhase(nextCadenceProfile.phases[0] || null);
