@@ -145,6 +145,45 @@ const STANDBY_SESSIONS: WorksessionData[] = DATABASE_WORKSESSIONS.map((ws) => ({
   }),
 }));
 
+const WorkoutDurationBadge = React.memo(function WorkoutDurationBadge({
+  workoutStartTime,
+  isPaused,
+  hasActiveSession,
+}: {
+  workoutStartTime: number | null;
+  isPaused: boolean;
+  hasActiveSession: boolean;
+}) {
+  const [seconds, setSeconds] = useState<number>(() => {
+    if (!workoutStartTime) return 0;
+    return Math.max(0, Math.floor((Date.now() - workoutStartTime) / 1000));
+  });
+
+  useEffect(() => {
+    if (!hasActiveSession || isPaused) return;
+    const interval = setInterval(() => {
+      const start = workoutStartTime || Date.now();
+      setSeconds(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [hasActiveSession, isPaused, workoutStartTime]);
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSecs = seconds % 60;
+  const formatted =
+    hours > 0
+      ? `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSecs.toString().padStart(2, '0')}`
+      : `${minutes.toString().padStart(2, '0')}:${remainingSecs.toString().padStart(2, '0')}`;
+
+  return (
+    <View style={styles.workoutDurationBadge}>
+      <Ionicons name="time-outline" size={13} color={KinetixTheme.colors.primary} />
+      <Text style={styles.workoutDurationText}>{formatted}</Text>
+    </View>
+  );
+});
+
 export default function KinetixActiveWorkout({
   worksession,
   plan,
@@ -160,9 +199,11 @@ export default function KinetixActiveWorkout({
 
   useKeepAwake();
 
-  // Dual-Mode Training State (Restores previous mode if user was in Guided Trainer)
+  // Dual-Mode Training State: defaults to Guided Trainer (true) unless explicitly set to false
   const [isGuidedMode, setIsGuidedMode] = useState<boolean>(
-    Boolean(activeSessionMetadata?.isGuidedMode)
+    typeof activeSessionMetadata?.isGuidedMode === 'boolean'
+      ? activeSessionMetadata.isGuidedMode
+      : true
   );
 
   // Active workout states
@@ -348,12 +389,6 @@ export default function KinetixActiveWorkout({
     return Date.now();
   });
 
-  const [elapsedWorkoutSeconds, setElapsedWorkoutSeconds] = useState<number>(() => {
-    const start = activeSessionMetadata?.startTime && typeof activeSessionMetadata.startTime === 'number'
-      ? activeSessionMetadata.startTime
-      : Date.now();
-    return Math.max(0, Math.floor((Date.now() - start) / 1000));
-  });
 
   const [showCompletionModal, setShowCompletionModal] = useState<boolean>(false);
   const [completionSummary, setCompletionSummary] = useState<WorkoutFinishSummary | null>(null);
@@ -459,15 +494,6 @@ export default function KinetixActiveWorkout({
     return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  // Live stopwatch timer for overall workout session duration
-  useEffect(() => {
-    if (!hasActiveSession || isPaused) return;
-    const interval = setInterval(() => {
-      const start = workoutStartTime || Date.now();
-      setElapsedWorkoutSeconds(Math.max(0, Math.floor((Date.now() - start) / 1000)));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [hasActiveSession, isPaused, workoutStartTime]);
 
 
 
@@ -514,7 +540,6 @@ export default function KinetixActiveWorkout({
   const handleLaunchSession = (sessionData: WorksessionData) => {
     const now = Date.now();
     setWorkoutStartTime(now);
-    setElapsedWorkoutSeconds(0);
     setCurrentSessionName(sessionData.name);
     setCurrentExercises(sessionData.exercises);
     setCurrentExIndex(0);
@@ -667,6 +692,8 @@ export default function KinetixActiveWorkout({
     initialWasAutoPaused: activeSessionMetadata?.wasAutoPaused,
     initialCadenceMode: activeSessionMetadata?.cadenceMode || 'auto',
     initialAudioPacerMode: activeSessionMetadata?.audioPacerMode,
+    initialCurrentRepNumber: activeSessionMetadata?.guidedCurrentRepNumber,
+    initialElapsedWorkMs: activeSessionMetadata?.guidedElapsedWorkMs,
     onSetCompleted: (log) => {
       const completedSetNum = log.setNumber;
       const totalSetsForEx = currentEx?.totalSets || 4;
@@ -753,6 +780,8 @@ export default function KinetixActiveWorkout({
       guidedSecondsRemaining: player.secondsRemaining,
       guidedEndTime: player.endTime,
       guidedTotalDurationMs: player.totalDurationMs,
+      guidedCurrentRepNumber: player.currentRepNumber,
+      guidedElapsedWorkMs: player.elapsedWorkMs,
       wasAutoPaused: player.wasAutoPaused,
       cadenceMode: player.cadenceMode,
       audioPacerMode: player.audioPacerMode,
@@ -773,6 +802,9 @@ export default function KinetixActiveWorkout({
     workoutStartTime,
     isGuidedMode,
     player.state,
+    player.endTime,
+    player.totalDurationMs,
+    player.currentRepNumber,
     player.cadenceMode,
     player.audioPacerMode,
     isResting,
@@ -810,12 +842,24 @@ export default function KinetixActiveWorkout({
           const curState = snapshot.state;
           if (curState === 'ACTIVE_WORK' || curState === 'LEAD_IN') {
             playerRef.current?.pause?.(true);
+            const updatedSnapshot = playerRef.current?.getSessionSnapshot?.() || snapshot;
             updateActiveSessionMetadata({
               isGuidedMode: true,
               guidedPlayerState: 'PAUSED',
               wasAutoPaused: true,
+              guidedSecondsRemaining: updatedSnapshot.secondsRemaining,
+              guidedTotalDurationMs: updatedSnapshot.totalDurationMs,
+              guidedCurrentRepNumber: updatedSnapshot.currentRepNumber,
+              guidedElapsedWorkMs: updatedSnapshot.elapsedWorkMs,
+            });
+          } else if (curState === 'PAUSED') {
+            updateActiveSessionMetadata({
+              isGuidedMode: true,
+              guidedPlayerState: 'PAUSED',
               guidedSecondsRemaining: snapshot.secondsRemaining,
               guidedTotalDurationMs: snapshot.totalDurationMs,
+              guidedCurrentRepNumber: snapshot.currentRepNumber,
+              guidedElapsedWorkMs: snapshot.elapsedWorkMs,
             });
           } else if (curState === 'RESTING') {
             // Keep recovery rest running in background!
@@ -886,7 +930,7 @@ export default function KinetixActiveWorkout({
           if (prev <= 1) {
             setTimerRunning(false);
             player.triggerHaptic('success');
-            player.playSound('chime');
+            player.playSound('gong');
             return 0;
           }
           if (prev <= 4 && prev > 1) {
@@ -928,7 +972,7 @@ export default function KinetixActiveWorkout({
 
     // Audible and tactile feedback on set completion
     player.triggerHaptic('success');
-    player.playSound('chime');
+    player.playSound('gong');
 
     if (currentSet < totalSetsForEx) {
       const completedSetNum = currentSet;
@@ -1237,10 +1281,11 @@ export default function KinetixActiveWorkout({
 
         <View style={styles.topActiveRight}>
           {/* Live Workout Duration Stopwatch Pill - The one timer on top */}
-          <View style={styles.workoutDurationBadge}>
-            <Ionicons name="time-outline" size={13} color={KinetixTheme.colors.primary} />
-            <Text style={styles.workoutDurationText}>{formatWorkoutDuration(elapsedWorkoutSeconds)}</Text>
-          </View>
+          <WorkoutDurationBadge
+            workoutStartTime={workoutStartTime}
+            isPaused={isPaused || player.isPaused}
+            hasActiveSession={hasActiveSession}
+          />
 
           <TouchableOpacity
             style={styles.closeBtn}
@@ -1434,21 +1479,6 @@ export default function KinetixActiveWorkout({
         <View style={styles.modeToggleRow}>
           <View style={styles.modeSegmentedContainer}>
             <TouchableOpacity
-              style={[styles.modeTab, !isGuidedMode && styles.modeTabActive]}
-              onPress={() => handleToggleMode(false)}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name="create-outline"
-                size={14}
-                color={!isGuidedMode ? '#FFFFFF' : KinetixTheme.colors.textSecondary}
-              />
-              <Text style={[styles.modeTabText, !isGuidedMode && styles.modeTabTextActive]}>
-                Manual Log
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
               style={[styles.modeTab, isGuidedMode && styles.modeTabActiveGuided]}
               onPress={() => handleToggleMode(true)}
               activeOpacity={0.8}
@@ -1464,6 +1494,21 @@ export default function KinetixActiveWorkout({
               <View style={styles.guidedLiveBadge}>
                 <Text style={styles.guidedLiveBadgeText}>AUTO</Text>
               </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modeTab, !isGuidedMode && styles.modeTabActive]}
+              onPress={() => handleToggleMode(false)}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="create-outline"
+                size={14}
+                color={!isGuidedMode ? '#FFFFFF' : KinetixTheme.colors.textSecondary}
+              />
+              <Text style={[styles.modeTabText, !isGuidedMode && styles.modeTabTextActive]}>
+                Manual Log
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1515,6 +1560,8 @@ export default function KinetixActiveWorkout({
             cadenceRepProgress={player.cadenceRepProgress}
             elapsedWorkMs={player.elapsedWorkMs}
             isRestTransitioning={player.isRestTransitioning}
+            isTransitionRest={player.isTransitionRest}
+            upcomingExercise={player.upcomingExercise}
           />
         ) : (
           <View style={styles.counterCard}>
@@ -1962,7 +2009,7 @@ export default function KinetixActiveWorkout({
                   <Text style={styles.summaryLabelHighlight}>Total Duration</Text>
                 </View>
                 <Text style={styles.summaryValueHighlight}>
-                  {completionSummary?.durationFormatted || formatWorkoutDuration(elapsedWorkoutSeconds)}
+                  {completionSummary?.durationFormatted || '00:00'}
                 </Text>
               </View>
             </View>

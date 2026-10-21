@@ -10,7 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { KinetixTheme } from '../../constants/theme';
 import CircularProgressRing from './CircularProgressRing';
-import SineWaveCadenceVisualizer from './SineWaveCadenceVisualizer';
+import TrapezoidCadenceVisualizer from './TrapezoidCadenceVisualizer';
 import {
   WorkoutState,
   ExerciseTrackingType,
@@ -52,6 +52,10 @@ interface GuidedCounterCardProps {
   addRestSeconds: (seconds: number) => void;
   onOpenTargetModal?: () => void;
   isRestTransitioning?: boolean;
+
+  // Transition Rest Additions:
+  isTransitionRest?: boolean;
+  upcomingExercise?: PlayerExercise | null;
 
   // Cadence Pacing Additions:
   isCadenceActive?: boolean;
@@ -100,6 +104,10 @@ export default function GuidedCounterCard({
   addRestSeconds,
   onOpenTargetModal,
   isRestTransitioning = false,
+
+  // Transition Rest Additions:
+  isTransitionRest = false,
+  upcomingExercise = null,
 
   isCadenceActive = false,
   cadenceProfile = null,
@@ -207,16 +215,18 @@ export default function GuidedCounterCard({
               {state === 'ACTIVE_WORK' && (trackingType === 'duration' ? 'HOLD ACTIVE' : 'ACTIVE SET')}
               {state === 'RESTING' &&
                 (isRestTransitioning || secondsRemaining === 0
-                  ? 'STARTING SET'
+                  ? (isTransitionRest ? 'STARTING NEXT EXERCISE' : 'STARTING SET')
                   : secondsRemaining <= 5 && !isPaused
-                  ? 'PREP FOR SET'
-                  : 'REST & RECOVER')}
+                  ? (isTransitionRest ? 'PREP NEXT EXERCISE' : 'PREP FOR SET')
+                  : (isTransitionRest ? 'EXERCISE TRANSITION' : 'REST & RECOVER'))}
               {state === 'PAUSED' && 'PAUSED'}
             </Text>
           </View>
 
           <Text style={styles.setCounterText}>
-            Set {currentSet} of {totalSets}
+            {isTransitionRest
+              ? `Set ${totalSets} of ${totalSets} Done`
+              : `Set ${currentSet} of ${totalSets}`}
           </Text>
         </View>
 
@@ -457,9 +467,9 @@ export default function GuidedCounterCard({
                 </View>
               </View>
 
-              {/* Cadence Visualizer: Sine Wave for continuous flow (Cat-Cow) or Circular Ring for Holds */}
-              {cadenceProfile.visualType === 'sine_wave' ? (
-                <SineWaveCadenceVisualizer
+              {/* Cadence Visualizer: Universal Trapezoid for all guided cadence exercises */}
+              {cadenceProfile.visualType === 'trapezoid' || cadenceProfile.visualType === 'sine_wave' ? (
+                <TrapezoidCadenceVisualizer
                   elapsedWorkMs={elapsedWorkMs}
                   repProgress={cadenceRepProgress}
                   currentRepNumber={currentRepNumber}
@@ -470,10 +480,13 @@ export default function GuidedCounterCard({
                   exerciseName={currentExercise?.name}
                   trackingType={trackingType}
                   audioPacerMode={audioPacerMode}
-                  waveProfile={cadenceProfile.waveProfile}
-                  holdDurationMs={cadenceProfile.holdDurationMs}
-                  resetDurationMs={cadenceProfile.resetDurationMs}
-                  riseDurationMs={cadenceProfile.riseDurationMs}
+                  lowDurationMs={cadenceProfile.lowDurationMs}
+                  rampUpDurationMs={cadenceProfile.rampUpDurationMs}
+                  highDurationMs={cadenceProfile.highDurationMs}
+                  rampDownDurationMs={cadenceProfile.rampDownDurationMs}
+                  highPhaseName={cadenceProfile.highPhaseName}
+                  lowPhaseName={cadenceProfile.lowPhaseName}
+                  isUnilateral={cadenceProfile.isUnilateral}
                 />
               ) : (
                 <>
@@ -758,12 +771,68 @@ export default function GuidedCounterCard({
                 ]}
               >
                 {(isRestTransitioning || secondsRemaining === 0)
-                  ? 'STARTING SET'
-                  : (secondsRemaining <= 5 && !isPaused ? 'GET READY' : 'RECOVERY REST')}
+                  ? (isTransitionRest ? 'STARTING NEXT' : 'STARTING SET')
+                  : (secondsRemaining <= 5 && !isPaused
+                    ? (isTransitionRest ? 'GET READY FOR NEXT' : 'GET READY')
+                    : (isTransitionRest ? 'TRANSITION REST' : 'RECOVERY REST'))}
               </Text>
-              <Text style={styles.restTotalTarget}>Target: {targetRestSeconds}s</Text>
+              <Text style={styles.restTotalTarget}>
+                Target: {targetRestSeconds}s {isTransitionRest ? 'Transition' : 'Rest'}
+              </Text>
             </View>
           </CircularProgressRing>
+
+          {/* If Transition Rest, show Next Exercise Announcement Card */}
+          {isTransitionRest && upcomingExercise && (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#EFF6FF',
+                borderRadius: 12,
+                paddingVertical: 10,
+                paddingHorizontal: 14,
+                borderWidth: 1,
+                borderColor: '#BFDBFE',
+                marginHorizontal: 16,
+                marginBottom: 8,
+                gap: 10,
+              }}
+            >
+              <View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: '#3B82F6',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#1D4ED8', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Upcoming Exercise
+                </Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }} numberOfLines={1}>
+                  {upcomingExercise.name}
+                </Text>
+              </View>
+              <View
+                style={{
+                  backgroundColor: '#DBEAFE',
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 6,
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#1E40AF' }}>
+                  {upcomingExercise.totalSets} {upcomingExercise.totalSets === 1 ? 'Set' : 'Sets'}
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Rest Complete 1s Pause, Prep Alert (last 5s), or Auto-Advance Pill */}
           {isRestTransitioning || secondsRemaining === 0 ? (
@@ -773,10 +842,14 @@ export default function GuidedCounterCard({
               </View>
               <View style={styles.prepNoticeTextWrap}>
                 <Text style={[styles.prepNoticeTitle, { color: '#047857' }]}>
-                  REST COMPLETE · STARTING SET NOW
+                  {isTransitionRest && upcomingExercise
+                    ? `TRANSITION COMPLETE · STARTING ${upcomingExercise.name.toUpperCase()}`
+                    : 'REST COMPLETE · STARTING SET NOW'}
                 </Text>
                 <Text style={[styles.prepNoticeSub, { color: '#059669' }]}>
-                  Begin repetitions
+                  {isTransitionRest && upcomingExercise
+                    ? `Transition to ${upcomingExercise.name}`
+                    : 'Begin repetitions'}
                 </Text>
               </View>
             </View>
@@ -787,19 +860,25 @@ export default function GuidedCounterCard({
               </View>
               <View style={styles.prepNoticeTextWrap}>
                 <Text style={styles.prepNoticeTitle}>
-                  GET READY · SET STARTS IN {secondsRemaining}s
+                  {isTransitionRest && upcomingExercise
+                    ? `GET READY · ${upcomingExercise.name.toUpperCase()} IN ${secondsRemaining}s`
+                    : `GET READY · SET STARTS IN ${secondsRemaining}s`}
                 </Text>
                 <Text style={styles.prepNoticeSub}>
-                  Assume starting position now
+                  {isTransitionRest && upcomingExercise
+                    ? `Prepare setup for ${upcomingExercise.name}`
+                    : 'Assume starting position now'}
                 </Text>
               </View>
             </View>
           ) : (
             <View style={styles.autoAdvanceBanner}>
-              <Ionicons name="flash" size={14} color="#059669" />
+              <Ionicons name={isTransitionRest ? 'swap-horizontal' : 'flash'} size={14} color="#059669" />
               <Text style={styles.autoAdvanceText}>
                 {isPaused
-                  ? 'Rest timer paused'
+                  ? (isTransitionRest ? 'Transition timer paused' : 'Rest timer paused')
+                  : isTransitionRest && upcomingExercise
+                  ? `Next Exercise: ${upcomingExercise.name} in ${secondsRemaining}s`
                   : `Auto-advancing to Next Set in ${secondsRemaining}s`}
               </Text>
             </View>
@@ -821,7 +900,9 @@ export default function GuidedCounterCard({
               onPress={skipRest}
               activeOpacity={0.88}
             >
-              <Text style={styles.skipRestBtnText}>Skip Rest</Text>
+              <Text style={styles.skipRestBtnText}>
+                {isTransitionRest ? 'Skip Transition' : 'Skip Rest'}
+              </Text>
               <Ionicons name="play-forward" size={16} color="#FFFFFF" />
             </TouchableOpacity>
           </View>

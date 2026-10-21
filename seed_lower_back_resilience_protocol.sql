@@ -36,7 +36,8 @@ END $$;
 
 -- Ensure column existence on exercises and worksession_exercises
 ALTER TABLE exercises 
-  ADD COLUMN IF NOT EXISTS default_rest_seconds INTEGER DEFAULT 60,
+  ADD COLUMN IF NOT EXISTS default_inter_set_rest_seconds INTEGER DEFAULT 60,
+  ADD COLUMN IF NOT EXISTS default_transition_rest_seconds INTEGER DEFAULT 30,
   ADD COLUMN IF NOT EXISTS default_duration_seconds INTEGER DEFAULT 45,
   ADD COLUMN IF NOT EXISTS default_reps INTEGER DEFAULT 10;
 
@@ -52,7 +53,8 @@ BEGIN
 END $$;
 
 ALTER TABLE worksession_exercises 
-  ADD COLUMN IF NOT EXISTS target_rest_seconds INTEGER,
+  ADD COLUMN IF NOT EXISTS inter_set_rest_seconds INTEGER DEFAULT 30,
+  ADD COLUMN IF NOT EXISTS transition_rest_seconds INTEGER DEFAULT 30,
   ADD COLUMN IF NOT EXISTS target_duration_seconds INTEGER,
   ADD COLUMN IF NOT EXISTS target_reps INTEGER DEFAULT 10;
 
@@ -269,7 +271,7 @@ BEGIN
     'Phase 2: Leverage & Anti-Rotation',
     'Increase rotational core stiffness, lengthen lever arms, and challenge dynamic stability through transitions and anti-rotational forces.',
     10,
-    3.0,
+    2.0,
     now()
   )
   ON CONFLICT (program_id, phase_order) DO UPDATE
@@ -296,7 +298,7 @@ BEGIN
     'Phase 3: Load Integration & Functional Hinging',
     'Integrate loaded hip hinge mechanics, kettlebell resistance, and loaded carries to build long-term tissue capacity and real-world resilience.',
     12,
-    3.0,
+    2.0,
     now()
   )
   ON CONFLICT (program_id, phase_order) DO UPDATE
@@ -354,39 +356,39 @@ BEGIN
   -- Populate Phase 1 Worksession Exercises
   DELETE FROM worksession_exercises WHERE worksession_id = v_ws1_id;
   
-  -- Ex 1: Cat-Cow Stretch | 2 Sets | 10 reps | 30s rest
+  -- Ex 1: Cat-Cow Stretch | 2 Sets | 10 reps | Inter-set: 15s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws1_id, v_cat_cow, 'reps', 2, 10, 45, 45, 30, 'Segmental flexion and extension with rhythmic breathing'
+    v_ws1_id, v_cat_cow, 'reps', 2, 10, 45, 45, 15, 30, 'Segmental flexion and extension with rhythmic breathing'
   );
 
-  -- Ex 2: Psoas March (Supine) | 2 Sets | 10 reps / side | 30s rest
+  -- Ex 2: Psoas March (Supine) | 2 Sets | 10 reps / side | Inter-set: 15s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws1_id, v_psoas_march, 'reps', 2, 10, 45, 45, 30, '10 reps / side. Maintain neutral lumbar posture'
+    v_ws1_id, v_psoas_march, 'reps', 2, 10, 45, 45, 15, 30, '10 reps / side. Maintain neutral lumbar posture'
   );
 
-  -- Ex 3: McGill Curl-up | 3 Sets | 50s, 30s, 10s (Descending) | 45s rest
+  -- Ex 3: McGill Curl-up | 3 Sets | 50s, 30s, 10s | Inter-set: 20s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws1_id, v_mcgill_curlup, 'time', 3, 10, 50, 50, 45, 'Descending holds: 50s, 30s, 10s. Hands under lumbar spine'
+    v_ws1_id, v_mcgill_curlup, 'time', 3, 10, 50, 50, 20, 30, 'Descending holds: 50s, 30s, 10s. Hands under lumbar spine'
   );
 
-  -- Ex 4: Bird-Dog | 3 Sets | 50s, 30s, 10s (Descending) | 45s rest
+  -- Ex 4: Bird-Dog | 3 Sets | 50s, 30s, 10s | Inter-set: 20s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws1_id, v_bird_dog, 'time', 3, 10, 50, 50, 45, 'Descending holds: 50s, 30s, 10s. Reach long through heel'
+    v_ws1_id, v_bird_dog, 'time', 3, 10, 50, 50, 20, 30, 'Descending holds: 50s, 30s, 10s. Reach long through heel'
   );
 
-  -- Ex 5: Side Plank (Short Lever/Knees) | 3 Sets | 30s / side | 45s rest
+  -- Ex 5: Side Plank (Short Lever/Knees) | 3 Sets | 30s / side | Inter-set: 20s | Transition: 0s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws1_id, v_side_plank_knees, 'time', 3, 10, 30, 30, 45, '30s / side. Knees bent at 90 degrees, elevate hips'
+    v_ws1_id, v_side_plank_knees, 'time', 3, 10, 30, 30, 20, 0, '30s / side. Knees bent at 90 degrees, elevate hips'
   );
 
   -- === PHASE 2 WORKSESSION ===
@@ -408,46 +410,46 @@ BEGIN
   -- Populate Phase 2 Worksession Exercises
   DELETE FROM worksession_exercises WHERE worksession_id = v_ws2_id;
 
-  -- Ex 1: Cat-Cow Stretch | 2 Sets | 10 reps | 30s rest
+  -- Ex 1: Cat-Cow Stretch | 2 Sets | 10 reps | Inter-set: 15s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws2_id, v_cat_cow, 'reps', 2, 10, 45, 45, 30, 'Warmup mobility'
+    v_ws2_id, v_cat_cow, 'reps', 2, 10, 45, 45, 15, 30, 'Warmup mobility'
   );
 
-  -- Ex 2: Active Straight Leg Raise | 2 Sets | 12 reps / side | 30s rest
+  -- Ex 2: Active Straight Leg Raise | 2 Sets | 12 reps / side | Inter-set: 15s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws2_id, v_active_slr, 'reps', 2, 12, 45, 45, 30, '12 reps / side. Keep pelvis quiet on floor'
+    v_ws2_id, v_active_slr, 'reps', 2, 12, 45, 45, 15, 30, '12 reps / side. Keep pelvis quiet on floor'
   );
 
-  -- Ex 3: Bird-Dog Squares | 3 Sets | 45s / side | 60s rest
+  -- Ex 3: Bird-Dog Squares | 3 Sets | 45s / side | Inter-set: 20s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws2_id, v_bird_dog_squares, 'time', 3, 10, 45, 45, 60, '45s / side. Trace 6-inch square without spine rotation'
+    v_ws2_id, v_bird_dog_squares, 'time', 3, 10, 45, 45, 20, 30, '45s / side. Trace 6-inch square without spine rotation'
   );
 
-  -- Ex 4: Rolling Side Planks | 3 Sets | 60s total | 60s rest
+  -- Ex 4: Rolling Side Planks | 3 Sets | 60s total | Inter-set: 30s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws2_id, v_rolling_side_planks, 'time', 3, 10, 60, 60, 60, '60s total. Smooth controlled rotation'
+    v_ws2_id, v_rolling_side_planks, 'time', 3, 10, 60, 60, 30, 30, '60s total. Smooth controlled rotation'
   );
 
-  -- Ex 5: Pallof Press (Isometric Hold) | 3 Sets | 20s / side | 45s rest
+  -- Ex 5: Pallof Press (Isometric Hold) | 3 Sets | 20s / side | Inter-set: 20s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws2_id, v_pallof_press, 'time', 3, 10, 20, 20, 45, '20s / side. Resist band rotational pull'
+    v_ws2_id, v_pallof_press, 'time', 3, 10, 20, 20, 20, 30, '20s / side. Resist band rotational pull'
   );
 
-  -- Ex 6: 90/90 Diaphragmatic Breathing | 1 Set | 120s | 0s rest
+  -- Ex 6: 90/90 Diaphragmatic Breathing | 1 Set | 120s | Inter-set: 0s | Transition: 0s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws2_id, v_diaphragmatic_breathing, 'time', 1, 1, 120, 120, 0, '120s diaphragmatic breathing'
+    v_ws2_id, v_diaphragmatic_breathing, 'time', 1, 1, 120, 120, 0, 0, '120s diaphragmatic breathing'
   );
 
   -- === PHASE 3 WORKSESSION ===
@@ -469,46 +471,46 @@ BEGIN
   -- Populate Phase 3 Worksession Exercises
   DELETE FROM worksession_exercises WHERE worksession_id = v_ws3_id;
 
-  -- Ex 1: McGill Curl-up (Warmup) | 1 Set | 30s | 30s rest
+  -- Ex 1: McGill Curl-up (Warmup) | 1 Set | 30s | Inter-set: 0s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws3_id, v_mcgill_warmup, 'time', 1, 10, 30, 30, 30, 'Activation warmup hold 30s'
+    v_ws3_id, v_mcgill_warmup, 'time', 1, 10, 30, 30, 0, 30, 'Activation warmup hold 30s'
   );
 
-  -- Ex 2: Bird-Dog (Warmup) | 1 Set | 30s / side | 30s rest
+  -- Ex 2: Bird-Dog (Warmup) | 1 Set | 30s / side | Inter-set: 0s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws3_id, v_bird_dog_warmup, 'time', 1, 10, 30, 30, 30, 'Activation warmup hold 30s / side'
+    v_ws3_id, v_bird_dog_warmup, 'time', 1, 10, 30, 30, 0, 30, 'Activation warmup hold 30s / side'
   );
 
-  -- Ex 3: Kettlebell Romanian Deadlift (RDL) | 4 Sets | 8 reps | 90s rest
+  -- Ex 3: Kettlebell Romanian Deadlift (RDL) | 4 Sets | 8 reps | Inter-set: 90s | Transition: 60s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws3_id, v_kb_rdl, 'weight_reps', 4, 8, 45, 45, 90, '8 reps. Hinge deeply from hips, neutral spine'
+    v_ws3_id, v_kb_rdl, 'weight_reps', 4, 8, 45, 45, 90, 60, '8 reps. Hinge deeply from hips, neutral spine'
   );
 
-  -- Ex 4: Kettlebell Goblet Squat | 3 Sets | 10 reps | 90s rest
+  -- Ex 4: Kettlebell Goblet Squat | 3 Sets | 10 reps | Inter-set: 90s | Transition: 45s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws3_id, v_kb_goblet_squat, 'weight_reps', 3, 10, 45, 45, 90, '10 reps. Vertical torso, deep hip crease'
+    v_ws3_id, v_kb_goblet_squat, 'weight_reps', 3, 10, 45, 45, 90, 45, '10 reps. Vertical torso, deep hip crease'
   );
 
-  -- Ex 5: Suitcase Carries | 3 Sets | 30 meters / side | 60s rest
+  -- Ex 5: Suitcase Carries | 3 Sets | 30m / side | Inter-set: 30s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws3_id, v_suitcase_carries, 'reps', 3, 30, 45, 45, 60, '30 meters / side. Strict vertical posture'
+    v_ws3_id, v_suitcase_carries, 'weight_distance', 3, 30, 45, 45, 30, 30, '30m / side. Strict vertical posture'
   );
 
-  -- Ex 6: 90/90 Diaphragmatic Breathing | 1 Set | 180s | 0s rest
+  -- Ex 6: 90/90 Diaphragmatic Breathing | 1 Set | 180s | Inter-set: 0s | Transition: 0s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, target_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
   ) VALUES (
-    v_ws3_id, v_diaphragmatic_breathing, 'time', 1, 1, 180, 180, 0, '180s parasympathetic recovery breathing'
+    v_ws3_id, v_diaphragmatic_breathing, 'time', 1, 1, 180, 180, 0, 0, '180s parasympathetic recovery breathing'
   );
 
   RAISE NOTICE 'Successfully seeded protocol "Lower Back & Lumbar Spine Resilience (Postural Syndrome)"';

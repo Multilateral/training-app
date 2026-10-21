@@ -63,7 +63,7 @@ export const TrainingProvider = ({ children, session }) => {
   }, []);
 
   useEffect(() => {
-    const saveActiveSession = async () => {
+    const timer = setTimeout(async () => {
       try {
         if (activeSessionMetadata) {
           await AsyncStorage.setItem('@active_session_metadata', JSON.stringify(activeSessionMetadata));
@@ -75,8 +75,8 @@ export const TrainingProvider = ({ children, session }) => {
           await AsyncStorage.removeItem('@active_session_timer');
         }
       } catch (e) { console.error('Failed to save active session', e); }
-    };
-    saveActiveSession();
+    }, 500);
+    return () => clearTimeout(timer);
   }, [activeSessionMetadata, activeSessionState, activeSessionTimer]);
 
   const updateActiveSessionMetadata = useCallback((updater) => {

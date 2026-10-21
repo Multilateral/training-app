@@ -957,6 +957,7 @@ export default function KinetixDashboard() {
         worksessionName: selectedWs.title,
         worksessionType: selectedWs.type,
         isRehab,
+        isGuidedMode: true,
         currentExerciseName: selectedWs.exercises?.[0]?.name || 'Exercise 1',
         currentExerciseIndex: 0,
         totalExercises: selectedWs.exercises?.length || 0,

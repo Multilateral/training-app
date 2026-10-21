@@ -16,11 +16,18 @@ export interface Exercise {
   video_url?: string | null;
   video_thumbnail_url?: string | null;
   is_default?: boolean;
-  default_rest_seconds?: number;
+  default_inter_set_rest_seconds?: number;
+  default_transition_rest_seconds?: number;
+  default_rest_seconds?: number; // Backward compatibility alias
   default_duration_seconds?: number;
   default_reps?: number;
   seconds_per_rep?: number | null;
+  hold_seconds_per_rep?: number | null;
   reset_seconds_per_rep?: number | null;
+  transition_seconds?: number | null;
+  high_phase_name?: string | null;
+  low_phase_name?: string | null;
+  is_unilateral?: boolean | null;
   user_id?: string | null;
   created_at?: string;
 }
@@ -44,13 +51,19 @@ export interface WorksessionExercise {
   target_reps?: number | null;
   tracking_type?: TrackingType | string;
   target_time?: number | null;
-  target_rest_seconds?: number | null;
+  inter_set_rest_seconds?: number | null;
+  transition_rest_seconds?: number | null;
+  target_rest_seconds?: number | null; // Backward compatibility alias
   target_duration_seconds?: number | null;
   hold_seconds_per_rep?: number | null;
   seconds_per_rep?: number | null;
   reps_per_set?: number[] | null;
   durations_per_set?: number[] | null;
   reset_seconds_per_rep?: number | null;
+  transition_seconds?: number | null;
+  high_phase_name?: string | null;
+  low_phase_name?: string | null;
+  is_unilateral?: boolean | null;
   notes?: string | null;
   created_at?: string;
   exercises?: Exercise;
@@ -113,4 +126,3 @@ export interface WeeklyScheduleSlot {
   created_at?: string;
   updated_at?: string;
 }
-
