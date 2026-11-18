@@ -249,6 +249,8 @@ export async function logAndEvaluateRehabSession(params: {
   painScore: number;
   sessionId?: string;
   durationMinutes?: number;
+  caloriesBurned?: number;
+  startedAt?: string;
   notes?: string;
   autoAdvance?: boolean;
 }): Promise<GatekeeperEvaluationResult> {
@@ -296,6 +298,8 @@ export async function logAndEvaluateRehabSession(params: {
         program_phase_id: params.programPhaseId,
         pain_score_recorded: Math.round(params.painScore),
         duration_minutes: params.durationMinutes || 30,
+        calories_burned: params.caloriesBurned || null,
+        started_at: params.startedAt || null,
         notes: params.notes || null,
         completed_at: new Date().toISOString(),
       })

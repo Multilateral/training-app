@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { KinetixTheme } from '../constants/theme';
+import { TrainingContext } from '../context/TrainingContext';
+import {
+  estimateSportCalories,
+  getUserWeightKg,
+  DEFAULT_USER_WEIGHT_KG,
+} from '../utils/calorieEngine';
 
 export interface SportQuickLogModalProps {
   visible: boolean;
@@ -18,6 +24,7 @@ export interface SportQuickLogModalProps {
   defaultDurationMinutes?: number;
   defaultIntensity?: string;
   targetDateLabel?: string;
+  userWeightKg?: number;
   onClose: () => void;
   onSaveLog: (logData: {
     sportTitle: string;
@@ -27,6 +34,9 @@ export interface SportQuickLogModalProps {
     rpe: number;
     notes: string;
     exerciseId?: string | null;
+    caloriesBurned?: number;
+    startedAt?: string;
+    completedAt?: string;
   }) => Promise<void> | void;
 }
 
@@ -45,12 +55,20 @@ export default function SportQuickLogModal({
   exerciseId,
   defaultDurationMinutes = 120,
   targetDateLabel,
+  userWeightKg: propWeightKg,
   onClose,
   onSaveLog,
 }: SportQuickLogModalProps) {
+  const { userProfile } = useContext(TrainingContext) || {};
+  const effectiveWeightKg =
+    typeof propWeightKg === 'number' && propWeightKg > 0
+      ? propWeightKg
+      : getUserWeightKg(userProfile);
+
   const [hoursInput, setHoursInput] = useState<string>('2.0');
   const [selectedRpe, setSelectedRpe] = useState<number>(8);
   const [selectedIntensity, setSelectedIntensity] = useState<string>('High');
+  const [customCalories, setCustomCalories] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
@@ -60,12 +78,35 @@ export default function SportQuickLogModal({
       setHoursInput(String(initialHours > 0 ? initialHours : 2.0));
       setSelectedRpe(8);
       setSelectedIntensity('High');
+      setCustomCalories('');
       setNotes('');
     }
   }, [visible, defaultDurationMinutes, sportTitle]);
 
   const parsedHours = Math.max(0.25, Math.min(8, parseFloat(hoursInput) || 2.0));
   const computedMinutes = Math.round(parsedHours * 60);
+
+  // Dynamic clinical calorie burn estimation based on sport MET, RPE, and body mass
+  const calEstimate = estimateSportCalories(
+    sportTitle,
+    { hours: parsedHours },
+    selectedIntensity || selectedRpe,
+    effectiveWeightKg
+  );
+
+  const parsedOverrideCal = parseInt(customCalories.replace(/[^0-9]/g, ''), 10);
+  const effectiveCalories =
+    !isNaN(parsedOverrideCal) && parsedOverrideCal > 0
+      ? parsedOverrideCal
+      : calEstimate.estimatedCalories;
+
+  const now = new Date();
+  const startTimeStamp = new Date(now.getTime() - computedMinutes * 60 * 1000);
+  const endTimeStamp = now;
+
+  const formatClockTime = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  };
 
   const handleStepHours = (delta: number) => {
     const next = Math.max(0.5, Math.min(6.0, Number((parsedHours + delta).toFixed(1))));
@@ -83,6 +124,9 @@ export default function SportQuickLogModal({
         rpe: selectedRpe,
         notes: notes.trim(),
         exerciseId,
+        caloriesBurned: effectiveCalories,
+        startedAt: startTimeStamp.toISOString(),
+        completedAt: endTimeStamp.toISOString(),
       });
       onClose();
     } finally {
@@ -212,6 +256,46 @@ export default function SportQuickLogModal({
                   </TouchableOpacity>
                 );
               })}
+            </View>
+
+            {/* Calorie Burn Counter & Smartwatch Sync Window */}
+            <Text style={styles.sectionLabel}>ESTIMATED ENERGY EXPENDITURE</Text>
+            <View style={styles.calorieBox}>
+              <View style={styles.calorieHeaderRow}>
+                <View style={styles.calorieIconBadge}>
+                  <Ionicons name="flame" size={20} color="#EA580C" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.calorieValueText}>{effectiveCalories} kcal</Text>
+                  <Text style={styles.calorieSubText}>
+                    {calEstimate.effectiveMET} METs · ~{Math.round((calEstimate.effectiveMET * 3.5 * effectiveWeightKg / 200) * 60)} kcal/hr ({effectiveWeightKg}kg baseline)
+                  </Text>
+                </View>
+              </View>
+
+              {/* Timestamp interval display for smartwatch sync */}
+              <View style={styles.timestampRow}>
+                <Ionicons name="watch-outline" size={14} color="#64748B" />
+                <Text style={styles.timestampText}>
+                  Sync Window: {formatClockTime(startTimeStamp)} – {formatClockTime(endTimeStamp)} ({computedMinutes}m)
+                </Text>
+              </View>
+
+              {/* Optional Smartwatch Manual Override Input */}
+              <View style={styles.overrideRow}>
+                <Text style={styles.overrideLabel}>Smartwatch Override (Optional):</Text>
+                <View style={styles.overrideInputContainer}>
+                  <TextInput
+                    style={styles.overrideInput}
+                    placeholder={`e.g. ${calEstimate.estimatedCalories}`}
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="numeric"
+                    value={customCalories}
+                    onChangeText={setCustomCalories}
+                  />
+                  <Text style={styles.overrideUnit}>kcal</Text>
+                </View>
+              </View>
             </View>
 
             {/* Optional Notes */}
@@ -418,6 +502,95 @@ const styles = StyleSheet.create({
     minHeight: 60,
     textAlignVertical: 'top',
     marginBottom: 16,
+  },
+  calorieBox: {
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1.5,
+    borderColor: '#FFEDD5',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  calorieHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  calorieIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calorieValueText: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#EA580C',
+  },
+  calorieSubText: {
+    fontSize: 11,
+    color: '#9A3412',
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  timestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+  },
+  timestampText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  overrideRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#FED7AA',
+  },
+  overrideLabel: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#7C2D12',
+    flex: 1,
+  },
+  overrideInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  overrideInput: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#EA580C',
+    minWidth: 50,
+    textAlign: 'right',
+    padding: 0,
+  },
+  overrideUnit: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9A3412',
+    marginLeft: 4,
   },
   saveBtn: {
     flexDirection: 'row',

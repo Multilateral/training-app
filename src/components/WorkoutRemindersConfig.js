@@ -155,7 +155,7 @@ export default function WorkoutRemindersConfig({
             <Ionicons 
               name={enabled ? "notifications" : "notifications-outline"} 
               size={20} 
-              color={enabled ? "#00D09E" : "#888"} 
+              color={enabled ? "#004AC6" : "#737686"} 
             />
           </View>
           <View style={{ flex: 1 }}>
@@ -171,7 +171,7 @@ export default function WorkoutRemindersConfig({
         <Switch
           value={enabled}
           onValueChange={handleToggleMaster}
-          trackColor={{ false: '#333', true: '#00D09E' }}
+          trackColor={{ false: '#E2E8F0', true: '#004AC6' }}
           thumbColor={enabled ? '#FFF' : '#888'}
         />
       </View>
@@ -201,7 +201,7 @@ export default function WorkoutRemindersConfig({
               </View>
 
               <View style={styles.timeDisplayWrapper}>
-                <Ionicons name="time-outline" size={16} color="#00D09E" />
+                <Ionicons name="time-outline" size={16} color="#004AC6" />
                 <Text style={styles.timeDisplayText}>{formatTime(hour, minute)}</Text>
               </View>
 
@@ -306,9 +306,9 @@ export default function WorkoutRemindersConfig({
               {defaultPlan?.schedule_type === 'anchored' && (
                 <TouchableOpacity 
                   onPress={() => applyDayPreset('plan')} 
-                  style={[styles.shortcutBtn, { backgroundColor: '#00D09E18', borderColor: '#00D09E66' }]}
+                  style={[styles.shortcutBtn, { backgroundColor: '#EAEDFF', borderColor: '#004AC6' }]}
                 >
-                  <Text style={[styles.shortcutBtnText, { color: '#00D09E' }]}>Sync from Plan</Text>
+                  <Text style={[styles.shortcutBtnText, { color: '#004AC6' }]}>Sync from Plan</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -318,7 +318,7 @@ export default function WorkoutRemindersConfig({
           <View style={styles.previewCard}>
             <View style={styles.previewHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Ionicons name="fitness" size={14} color="#00D09E" />
+                <Ionicons name="fitness" size={14} color="#004AC6" />
                 <Text style={styles.previewAppName}>TRAINING APP</Text>
               </View>
               <Text style={styles.previewTimeLabel}>{formatTime(hour, minute)}</Text>
@@ -335,7 +335,7 @@ export default function WorkoutRemindersConfig({
               <Ionicons 
                 name={soundEnabled ? "volume-high-outline" : "volume-mute-outline"} 
                 size={18} 
-                color="#888" 
+                color="#737686" 
               />
               <Text style={styles.soundLabel}>Play Sound</Text>
               <Switch
@@ -345,7 +345,7 @@ export default function WorkoutRemindersConfig({
                   setSoundEnabled(val);
                   applySettings(enabled, hour, minute, selectedDays, val);
                 }}
-                trackColor={{ false: '#333', true: '#00D09E' }}
+                trackColor={{ false: '#E2E8F0', true: '#004AC6' }}
                 thumbColor={soundEnabled ? '#FFF' : '#888'}
               />
             </View>
@@ -355,7 +355,7 @@ export default function WorkoutRemindersConfig({
               style={styles.testBtn}
               activeOpacity={0.7}
             >
-              <Ionicons name="paper-plane-outline" size={14} color="#00D09E" />
+              <Ionicons name="paper-plane-outline" size={14} color="#004AC6" />
               <Text style={styles.testBtnText}>Send Test Notification</Text>
             </TouchableOpacity>
           </View>
@@ -367,19 +367,19 @@ export default function WorkoutRemindersConfig({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#222',
-    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
     overflow: 'hidden',
   },
   masterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 15,
+    padding: 14,
   },
   borderBottom: {
     borderBottomWidth: 1,
-    borderBottomColor: '#2D2D38',
+    borderBottomColor: '#F1F5F9',
   },
   masterInfo: {
     flex: 1,
@@ -391,35 +391,37 @@ const styles = StyleSheet.create({
   iconCircle: {
     width: 38,
     height: 38,
-    borderRadius: 19,
-    backgroundColor: '#2A2A35',
+    borderRadius: 12,
+    backgroundColor: '#F2F3FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconCircleActive: {
-    backgroundColor: '#00D09E18',
+    backgroundColor: '#EAEDFF',
   },
   masterLabel: {
-    color: '#FFF',
-    fontSize: 16,
+    color: '#131B2E',
+    fontSize: 14,
     fontWeight: '700',
   },
   masterSubtitle: {
-    color: '#888',
-    fontSize: 12,
+    color: '#737686',
+    fontSize: 11,
     marginTop: 2,
   },
   contentContainer: {
-    padding: 16,
-    gap: 18,
-    backgroundColor: '#1E1E26',
+    padding: 14,
+    gap: 14,
+    backgroundColor: '#F8FAFC',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
   },
   sectionBlock: {
     gap: 8,
   },
   subSectionTitle: {
-    color: '#D0D0E0',
-    fontSize: 13,
+    color: '#434655',
+    fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -428,24 +430,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#262634',
+    backgroundColor: '#FFFFFF',
     padding: 10,
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#363648',
+    borderColor: '#E2E8F0',
   },
   stepperGroup: {
     flexDirection: 'row',
     gap: 4,
   },
   timeStepBtn: {
-    backgroundColor: '#323244',
+    backgroundColor: '#F1F5F9',
     paddingHorizontal: 8,
     paddingVertical: 8,
     borderRadius: 8,
   },
   timeStepBtnText: {
-    color: '#DDD',
+    color: '#131B2E',
     fontSize: 11,
     fontWeight: '700',
   },
@@ -453,16 +455,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#1E1E28',
+    backgroundColor: '#F2F3FF',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#00D09E55',
+    borderColor: '#EAEDFF',
   },
   timeDisplayText: {
-    color: '#FFF',
-    fontSize: 16,
+    color: '#004AC6',
+    fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
@@ -473,28 +475,28 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   presetChip: {
-    backgroundColor: '#282836',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#343446',
+    borderColor: '#E2E8F0',
   },
   presetChipActive: {
-    backgroundColor: '#00D09E22',
-    borderColor: '#00D09E',
+    backgroundColor: '#EAEDFF',
+    borderColor: '#004AC6',
   },
   presetChipText: {
-    color: '#9E9EB2',
+    color: '#737686',
     fontSize: 11,
     fontWeight: '600',
   },
   presetChipTextActive: {
-    color: '#00D09E',
+    color: '#004AC6',
     fontWeight: '700',
   },
   daysCountText: {
-    color: '#8E8E9F',
+    color: '#737686',
     fontSize: 11,
   },
   daysRow: {
@@ -506,22 +508,22 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#282836',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#343446',
+    borderColor: '#E2E8F0',
   },
   dayBtnActive: {
-    backgroundColor: '#00D09E',
-    borderColor: '#00D09E',
+    backgroundColor: '#004AC6',
+    borderColor: '#004AC6',
   },
   dayBtnText: {
-    color: '#9E9EB2',
-    fontSize: 12,
+    color: '#737686',
+    fontSize: 11,
     fontWeight: '700',
   },
   dayBtnTextActive: {
-    color: '#111',
+    color: '#FFFFFF',
     fontWeight: '800',
   },
   dayShortcutsRow: {
@@ -531,24 +533,24 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   shortcutBtn: {
-    backgroundColor: '#262634',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#363648',
+    borderColor: '#E2E8F0',
   },
   shortcutBtnText: {
-    color: '#AAA',
+    color: '#434655',
     fontSize: 11,
     fontWeight: '600',
   },
   previewCard: {
-    backgroundColor: '#242432',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#343446',
+    borderColor: '#E2E8F0',
     gap: 4,
   },
   previewHeader: {
@@ -558,30 +560,30 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   previewAppName: {
-    color: '#00D09E',
+    color: '#004AC6',
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
   previewTimeLabel: {
-    color: '#7E7E91',
+    color: '#737686',
     fontSize: 10,
   },
   previewNotificationTitle: {
-    color: '#FFF',
+    color: '#131B2E',
     fontSize: 13,
     fontWeight: '700',
   },
   previewNotificationBody: {
-    color: '#9E9EB2',
+    color: '#434655',
     fontSize: 12,
     lineHeight: 16,
   },
   footerRow: {
     gap: 12,
-    paddingTop: 4,
+    paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: '#2C2C3A',
+    borderTopColor: '#E2E8F0',
   },
   soundRow: {
     flexDirection: 'row',
@@ -590,7 +592,7 @@ const styles = StyleSheet.create({
   },
   soundLabel: {
     flex: 1,
-    color: '#AAA',
+    color: '#131B2E',
     fontSize: 13,
     marginLeft: 8,
   },
@@ -601,12 +603,12 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#00D09E18',
+    backgroundColor: '#EAEDFF',
     borderWidth: 1,
-    borderColor: '#00D09E55',
+    borderColor: '#004AC6',
   },
   testBtnText: {
-    color: '#00D09E',
+    color: '#004AC6',
     fontSize: 13,
     fontWeight: '700',
   },

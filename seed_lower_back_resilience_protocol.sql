@@ -128,8 +128,8 @@ INSERT INTO exercises (name, category, muscle_group, equipment, instructions, de
 SELECT 'Bird-Dog', 'Core', 'Posterior Chain / Core', 'Floor Mat', 'Reach opposite arm and leg out horizontally. Resist rotational torque in torso.', 45, 50, 10, true
 WHERE NOT EXISTS (SELECT 1 FROM exercises WHERE lower(trim(name)) = lower('Bird-Dog'));
 
-INSERT INTO exercises (name, category, muscle_group, equipment, instructions, default_rest_seconds, default_duration_seconds, default_reps, is_default)
-SELECT 'Side Plank (Short Lever/Knees)', 'Core', 'Quadratus Lumborum / Obliques', 'Floor Mat', 'Knees bent 90 degrees. Bridge hips high, establishing stiff lateral pillar.', 45, 30, 10, true
+INSERT INTO exercises (name, category, muscle_group, equipment, instructions, default_inter_set_rest_seconds, default_transition_rest_seconds, default_duration_seconds, default_reps, is_unilateral, unilateral_mode, hold_seconds_per_rep, switch_seconds_per_rep, is_default)
+SELECT 'Side Plank (Short Lever/Knees)', 'Core', 'Quadratus Lumborum / Obliques', 'Floor Mat', 'Knees bent 90 degrees. Bridge hips high, establishing stiff lateral pillar.', 20, 0, 60, 1, true, 'alternating_rep', 30, 3, true
 WHERE NOT EXISTS (SELECT 1 FROM exercises WHERE lower(trim(name)) = lower('Side Plank (Short Lever/Knees)'));
 
 INSERT INTO exercises (name, category, muscle_group, equipment, instructions, default_rest_seconds, default_duration_seconds, default_reps, is_default)
@@ -377,18 +377,18 @@ BEGIN
     v_ws1_id, v_mcgill_curlup, 'time', 3, 10, 50, 50, 20, 30, 'Descending holds: 50s, 30s, 10s. Hands under lumbar spine'
   );
 
-  -- Ex 4: Bird-Dog | 3 Sets | 50s, 30s, 10s | Inter-set: 20s | Transition: 30s
+  -- Ex 4: Bird-Dog | 3 Sets | 50s, 30s, 10s / side (5-3-1 paired reps) | Inter-set: 20s | Transition: 30s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, is_unilateral, unilateral_mode, hold_seconds_per_rep, switch_seconds_per_rep, notes
   ) VALUES (
-    v_ws1_id, v_bird_dog, 'time', 3, 10, 50, 50, 20, 30, 'Descending holds: 50s, 30s, 10s. Reach long through heel'
+    v_ws1_id, v_bird_dog, 'time', 3, 5, 50, 50, 20, 30, true, 'alternating_rep', 10, 2, 'Descending holds: 50s, 30s, 10s per side (5-3-1 paired reps)'
   );
 
-  -- Ex 5: Side Plank (Short Lever/Knees) | 3 Sets | 30s / side | Inter-set: 20s | Transition: 0s
+  -- Ex 5: Side Plank (Short Lever/Knees) | 3 Sets | 30s / side (60s paired hold) | Inter-set: 20s | Transition: 0s
   INSERT INTO worksession_exercises (
-    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, notes
+    worksession_id, exercise_id, tracking_type, target_sets, target_reps, target_time, target_duration_seconds, inter_set_rest_seconds, transition_rest_seconds, is_unilateral, unilateral_mode, hold_seconds_per_rep, switch_seconds_per_rep, notes
   ) VALUES (
-    v_ws1_id, v_side_plank_knees, 'time', 3, 10, 30, 30, 20, 0, '30s / side. Knees bent at 90 degrees, elevate hips'
+    v_ws1_id, v_side_plank_knees, 'time', 3, 1, 60, 60, 20, 0, true, 'alternating_rep', 30, 3, '30s / side (30s right + 30s left). 3 sets'
   );
 
   -- === PHASE 2 WORKSESSION ===

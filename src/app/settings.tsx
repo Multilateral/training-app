@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Switch,
   Modal,
   TextInput,
   ActivityIndicator,
@@ -27,7 +26,15 @@ import TrainingOnboardingSurveyModal, {
 } from '../components/TrainingOnboardingSurveyModal';
 
 export default function SettingsScreen() {
-  const { session, workspaces, updateWorkspaces, userProfile, updateUserProfile, saveToCloud } = useContext(TrainingContext) || {};
+  const {
+    session,
+    workspaces,
+    updateWorkspaces,
+    userProfile,
+    updateUserProfile,
+    saveToCloud,
+  } = useContext(TrainingContext) || {};
+
   const [defaultPlan, setDefaultPlan] = useState<any>(null);
 
   // Biometrics editing state
@@ -51,16 +58,16 @@ export default function SettingsScreen() {
 
   // Resolved training goals metadata
   const currentGoalId = workspaces?.training_goal || 'hypertrophy';
-  const currentGoalMeta = TRAINING_GOALS.find(g => g.id === currentGoalId) || TRAINING_GOALS[0];
+  const currentGoalMeta = TRAINING_GOALS.find((g) => g.id === currentGoalId) || TRAINING_GOALS[0];
   const currentWeeklySessions = workspaces?.weekly_target_sessions || 4;
   const currentFitnessLevel = workspaces?.fitness_level
-    ? EXPERIENCE_LEVELS.find(l => l.id === workspaces.fitness_level)?.title || workspaces.fitness_level
+    ? EXPERIENCE_LEVELS.find((l) => l.id === workspaces.fitness_level)?.title || workspaces.fitness_level
     : 'Intermediate';
   const currentEquipment = workspaces?.equipment_access
-    ? EQUIPMENT_OPTIONS.find(e => e.id === workspaces.equipment_access)?.title || workspaces.equipment_access
+    ? EQUIPMENT_OPTIONS.find((e) => e.id === workspaces.equipment_access)?.title || workspaces.equipment_access
     : 'Commercial Gym';
   const currentJoints = (workspaces?.joint_focus || []).map(
-    (j: string) => JOINT_CARE_AREAS.find(a => a.id === j)?.label || j
+    (j: string) => JOINT_CARE_AREAS.find((a) => a.id === j)?.label || j
   );
 
   // Profile photo updating state
@@ -172,6 +179,8 @@ export default function SettingsScreen() {
 
   const openEditNameModal = () => {
     const currentName =
+      userProfile?.name ||
+      workspaces?.name ||
       session?.user?.user_metadata?.full_name ||
       session?.user?.user_metadata?.name ||
       session?.user?.user_metadata?.username ||
@@ -198,6 +207,15 @@ export default function SettingsScreen() {
       if (error) {
         Alert.alert('Update Failed', error.message);
       } else {
+        if (updateUserProfile) {
+          await updateUserProfile({ name: trimmed });
+        }
+        if (updateWorkspaces) {
+          updateWorkspaces({
+            ...workspaces,
+            name: trimmed,
+          });
+        }
         setIsEditNameModalVisible(false);
         Alert.alert('Profile Updated', `Your display name is now "${trimmed}".`);
       }
@@ -205,6 +223,22 @@ export default function SettingsScreen() {
       Alert.alert('Error', err?.message || 'Failed to update name');
     } finally {
       setIsSavingName(false);
+    }
+  };
+
+  // Unit System Toggle (Metric vs Imperial)
+  const handleToggleUnits = async (system: 'metric' | 'imperial') => {
+    const newWeightUnit = system === 'metric' ? 'kg' : 'lbs';
+    const newHeightUnit = system === 'metric' ? 'cm' : 'in';
+    if (updateUserProfile) {
+      await updateUserProfile({ weightUnit: newWeightUnit, heightUnit: newHeightUnit });
+    }
+    if (updateWorkspaces) {
+      updateWorkspaces({
+        ...workspaces,
+        weightUnit: newWeightUnit,
+        heightUnit: newHeightUnit,
+      });
     }
   };
 
@@ -237,8 +271,9 @@ export default function SettingsScreen() {
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
+      router.replace('/auth');
     } catch (error) {
-      console.error("Error logging out:", error);
+      console.error('Error logging out:', error);
     }
   };
 
@@ -246,293 +281,378 @@ export default function SettingsScreen() {
     if (updateWorkspaces) {
       updateWorkspaces({
         ...workspaces,
-        reminders: updatedReminders
+        reminders: updatedReminders,
       });
     }
   };
 
+  const athleteDisplayName =
+    userProfile?.name ||
+    workspaces?.name ||
+    session?.user?.user_metadata?.full_name ||
+    session?.user?.user_metadata?.name ||
+    session?.user?.user_metadata?.username ||
+    (session?.user?.email
+      ? session.user.email.split('@')[0].charAt(0).toUpperCase() +
+        session.user.email.split('@')[0].slice(1)
+      : 'Athlete');
+
+  const athleteEmail = session?.user?.email || '';
+
+  const isMetric = weightUnit === 'kg';
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        
-        {/* Account Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account</Text>
-          <View style={styles.card}>
-            {/* Profile Picture Row (Shared with NutraLife) */}
+      {/* Top Header Bar (Stitch Spec) */}
+      <View style={styles.headerBar}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={22} color="#131B2E" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Settings & Preferences</Text>
+        <View style={styles.headerAvatarCircle}>
+          {userProfile?.avatar || workspaces?.avatar ? (
+            <Image
+              source={{ uri: userProfile?.avatar || workspaces?.avatar }}
+              style={styles.headerAvatarImg}
+            />
+          ) : (
+            <Ionicons name="person" size={16} color="#FFFFFF" />
+          )}
+        </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* 1. Athlete Profile Card (Stitch Spec) */}
+        <View style={styles.card}>
+          <View style={styles.profileRow}>
+            {/* Avatar with Live Sync Green Dot */}
             <TouchableOpacity
-              style={[styles.row, styles.borderBottom, { paddingVertical: 14 }]}
+              style={styles.avatarWrapper}
               onPress={showAvatarPickerActionSheet}
-              activeOpacity={0.7}
+              activeOpacity={0.8}
               disabled={isUpdatingAvatar}
             >
-              <View style={styles.rowTextWithIcon}>
-                <View style={styles.settingsAvatarContainer}>
-                  {userProfile?.avatar || workspaces?.avatar ? (
-                    <Image
-                      source={{ uri: userProfile?.avatar || workspaces?.avatar }}
-                      style={styles.settingsAvatarImage}
-                    />
-                  ) : (
-                    <View style={styles.settingsAvatarPlaceholder}>
-                      <Ionicons name="person" size={26} color="#00D09E" />
-                    </View>
-                  )}
-                  {isUpdatingAvatar ? (
-                    <View style={styles.avatarLoadingBadge}>
-                      <ActivityIndicator size="small" color="#00D09E" />
-                    </View>
-                  ) : (
-                    <View style={styles.avatarCameraBadge}>
-                      <Ionicons name="camera" size={11} color="#111" />
-                    </View>
-                  )}
-                </View>
-
-                <View style={{ flex: 1, marginLeft: 14 }}>
-                  <Text style={styles.label}>Profile Picture</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                    <Ionicons name="sync-circle" size={13} color="#00D09E" />
-                    <Text style={{ fontSize: 12, color: '#00D09E', fontWeight: '600' }}>
-                      NutraLife Sync Active
-                    </Text>
+              <View style={styles.avatarContainer}>
+                {userProfile?.avatar || workspaces?.avatar ? (
+                  <Image
+                    source={{ uri: userProfile?.avatar || workspaces?.avatar }}
+                    style={styles.avatarImage}
+                  />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <Ionicons name="person" size={32} color="#004AC6" />
                   </View>
-                </View>
+                )}
+                {isUpdatingAvatar && (
+                  <View style={styles.avatarLoadingBadge}>
+                    <ActivityIndicator size="small" color="#004AC6" />
+                  </View>
+                )}
               </View>
-
-              <View style={styles.editActionRow}>
-                <Text style={styles.editText}>Change</Text>
-                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
-              </View>
-            </TouchableOpacity>
-
-            {/* Display Name Row (Editable) */}
-            <TouchableOpacity
-              style={[styles.row, styles.borderBottom]}
-              onPress={openEditNameModal}
-              activeOpacity={0.7}
-            >
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="person-circle-outline" size={24} color="#00D09E" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Display Name</Text>
-                  <Text style={styles.value}>
-                    {session?.user?.user_metadata?.full_name || 
-                     session?.user?.user_metadata?.name || 
-                     session?.user?.user_metadata?.username || 
-                     'Tap to set your name'}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.editActionRow}>
-                <Text style={styles.editText}>Edit</Text>
-                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+              <View style={styles.avatarStatusBadge}>
+                <View style={styles.avatarStatusDot} />
               </View>
             </TouchableOpacity>
 
-            {/* Email Row (Read-only) */}
-            <View style={styles.row}>
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="mail-outline" size={22} color="#888" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Email</Text>
-                  <Text style={styles.value}>
-                    {session?.user?.email || 'Not logged in'}
-                  </Text>
-                </View>
+            {/* Profile Info & Edit Pill */}
+            <View style={styles.profileInfoCol}>
+              <View style={styles.profileNameRow}>
+                <Text style={styles.profileName} numberOfLines={1}>
+                  {athleteDisplayName}
+                </Text>
+                <TouchableOpacity
+                  style={styles.editPillBtn}
+                  onPress={openEditNameModal}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="create-outline" size={13} color="#004AC6" />
+                  <Text style={styles.editPillText}>EDIT</Text>
+                </TouchableOpacity>
               </View>
+              <Text style={styles.profileEmail} numberOfLines={1}>
+                {athleteEmail}
+              </Text>
+            </View>
+          </View>
+
+          {/* Quick Telemetry Chips (3 Columns: Age, Height, Weight) */}
+          <View style={styles.telemetryGrid}>
+            <View style={styles.telemetryChip}>
+              <Text style={styles.telemetryLabel}>AGE</Text>
+              <Text style={styles.telemetryValue}>
+                {resolvedAge ? `${resolvedAge}` : '—'}
+              </Text>
+              <Text style={styles.telemetryUnit}>yrs</Text>
+            </View>
+
+            <View style={styles.telemetryDivider} />
+
+            <View style={styles.telemetryChip}>
+              <Text style={styles.telemetryLabel}>HEIGHT</Text>
+              <Text style={styles.telemetryValue}>
+                {resolvedHeight ? `${resolvedHeight}` : '—'}
+              </Text>
+              <Text style={styles.telemetryUnit}>{heightUnit}</Text>
+            </View>
+
+            <View style={styles.telemetryDivider} />
+
+            <View style={styles.telemetryChip}>
+              <Text style={styles.telemetryLabel}>WEIGHT</Text>
+              <Text style={styles.telemetryValue}>
+                {resolvedCurrentWeight ? Number(resolvedCurrentWeight).toFixed(1) : '—'}
+              </Text>
+              <Text style={styles.telemetryUnit}>{weightUnit}</Text>
             </View>
           </View>
         </View>
 
-        {/* Body Biometrics Section */}
-        <View style={styles.section}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text style={styles.sectionTitle}>Body Biometrics</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0, 208, 158, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
-              <Ionicons name="sync-circle" size={14} color="#00D09E" />
-              <Text style={{ fontSize: 11, color: '#00D09E', fontWeight: '700' }}>NutraLife Sync</Text>
+        {/* 2. Measurement System Segmented Switch (Stitch Spec) */}
+        <View style={styles.card}>
+          <View style={styles.settingItemRow}>
+            <View style={styles.settingLeft}>
+              <View style={styles.settingIconContainer}>
+                <Ionicons name="resize-outline" size={20} color="#004AC6" />
+              </View>
+              <View>
+                <Text style={styles.settingTitle}>Measurement System</Text>
+                <Text style={styles.settingSubtitle}>Units across training & biometrics</Text>
+              </View>
             </View>
-          </View>
 
-          <View style={styles.card}>
-            {/* Current Weight */}
-            <TouchableOpacity
-              style={[styles.row, styles.borderBottom]}
-              onPress={openEditBiometricsModal}
-              activeOpacity={0.7}
-            >
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="scale-outline" size={22} color="#00D09E" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Current Weight</Text>
-                  <Text style={styles.value}>
-                    {resolvedCurrentWeight ? `${Number(resolvedCurrentWeight).toFixed(1)} ${weightUnit}` : 'Tap to log weight'}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.editActionRow}>
-                <Text style={styles.editText}>Edit</Text>
-                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
-              </View>
-            </TouchableOpacity>
-
-            {/* Target Weight */}
-            <TouchableOpacity
-              style={[styles.row, styles.borderBottom]}
-              onPress={openEditBiometricsModal}
-              activeOpacity={0.7}
-            >
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="flag-outline" size={22} color="#00D09E" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Target Weight</Text>
-                  <Text style={styles.value}>
-                    {resolvedTargetWeight ? `${Number(resolvedTargetWeight).toFixed(1)} ${weightUnit}` : 'Not set'}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.editActionRow}>
-                <Text style={styles.editText}>Edit</Text>
-                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
-              </View>
-            </TouchableOpacity>
-
-            {/* Height & Age Row */}
-            <TouchableOpacity
-              style={styles.row}
-              onPress={openEditBiometricsModal}
-              activeOpacity={0.7}
-            >
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="body-outline" size={22} color="#00D09E" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Height & Age</Text>
-                  <Text style={styles.value}>
-                    {resolvedHeight ? `${resolvedHeight} ${heightUnit}` : '—'} · {resolvedAge ? `${resolvedAge} yrs` : '—'}{resolvedGender ? ` · ${resolvedGender}` : ''}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.editActionRow}>
-                <Text style={styles.editText}>Edit</Text>
-                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Training Goals & Blueprint Section */}
-        <View style={styles.section}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text style={styles.sectionTitle}>Training Goals & Blueprint</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0, 208, 158, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
-              <Ionicons name="sparkles" size={13} color="#00D09E" />
-              <Text style={{ fontSize: 11, color: '#00D09E', fontWeight: '700' }}>Active Blueprint</Text>
-            </View>
-          </View>
-
-          <View style={styles.card}>
-            {/* Primary Focus */}
-            <TouchableOpacity
-              style={[styles.row, styles.borderBottom]}
-              onPress={() => setIsSurveyModalVisible(true)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="barbell-outline" size={22} color="#00D09E" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Primary Training Focus</Text>
-                  <Text style={styles.value}>
-                    {workspaces?.training_goal_title || currentGoalMeta.title}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.editActionRow}>
-                <Text style={styles.editText}>Modify</Text>
-                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
-              </View>
-            </TouchableOpacity>
-
-            {/* Weekly Target Sessions */}
-            <TouchableOpacity
-              style={[styles.row, styles.borderBottom]}
-              onPress={() => setIsSurveyModalVisible(true)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="calendar-outline" size={22} color="#00D09E" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Weekly Commitment</Text>
-                  <Text style={styles.value}>
-                    {currentWeeklySessions} sessions / week
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.editActionRow}>
-                <Text style={styles.editText}>Modify</Text>
-                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
-              </View>
-            </TouchableOpacity>
-
-            {/* Equipment & Level */}
-            <TouchableOpacity
-              style={[styles.row, currentJoints.length > 0 ? styles.borderBottom : null]}
-              onPress={() => setIsSurveyModalVisible(true)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="fitness-outline" size={22} color="#00D09E" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Level & Equipment</Text>
-                  <Text style={styles.value}>
-                    {currentFitnessLevel} · {currentEquipment}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.editActionRow}>
-                <Text style={styles.editText}>Modify</Text>
-                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
-              </View>
-            </TouchableOpacity>
-
-            {/* Joint & Mobility Focus if present */}
-            {currentJoints.length > 0 && (
+            {/* Segmented Switcher */}
+            <View style={styles.segmentedToggle}>
               <TouchableOpacity
-                style={styles.row}
-                onPress={() => setIsSurveyModalVisible(true)}
-                activeOpacity={0.7}
+                style={[styles.toggleBtn, isMetric && styles.toggleBtnActive]}
+                onPress={() => handleToggleUnits('metric')}
+                activeOpacity={0.8}
               >
-                <View style={styles.rowTextWithIcon}>
-                  <Ionicons name="shield-checkmark-outline" size={22} color="#00D09E" style={styles.icon} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Joint Care & Resilience</Text>
-                    <Text style={styles.value}>
-                      {currentJoints.join(', ')}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.editActionRow}>
-                  <Text style={styles.editText}>Modify</Text>
-                  <Ionicons name="chevron-forward" size={18} color="#00D09E" />
-                </View>
+                <Text style={[styles.toggleBtnText, isMetric && styles.toggleBtnTextActive]}>
+                  Metric
+                </Text>
               </TouchableOpacity>
-            )}
+              <TouchableOpacity
+                style={[styles.toggleBtn, !isMetric && styles.toggleBtnActive]}
+                onPress={() => handleToggleUnits('imperial')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.toggleBtnText, !isMetric && styles.toggleBtnTextActive]}>
+                  Imperial
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* 3. Training Targets (Stitch Spec) */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.cardHeaderLeft}>
+              <Ionicons name="fitness-outline" size={18} color="#004AC6" />
+              <Text style={styles.cardHeaderTitle}>TRAINING TARGETS</Text>
+            </View>
           </View>
 
-          {/* Retake Diagnostic Survey Button */}
+          {/* Stepper Weekly Sessions */}
           <TouchableOpacity
-            style={styles.surveyCtaButton}
+            style={styles.innerSubCard}
             onPress={() => setIsSurveyModalVisible(true)}
             activeOpacity={0.8}
           >
-            <Ionicons name="compass-outline" size={18} color="#00D09E" />
-            <Text style={styles.surveyCtaText}>Retake Full Diagnostic Survey</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.innerSubCardTitle}>Weekly Training Target</Text>
+              <Text style={styles.innerSubCardSubtitle}>Combined rehab & load days</Text>
+            </View>
+            <View style={styles.innerNumberPill}>
+              <Text style={styles.innerNumberValue}>{currentWeeklySessions}</Text>
+              <Text style={styles.innerNumberUnit}>days</Text>
+            </View>
           </TouchableOpacity>
+
+          {/* Daily Calorie Target */}
+          <View style={[styles.innerSubCard, { marginTop: 8 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.innerSubCardTitle}>Active Calorie Burn Goal</Text>
+              <Text style={styles.innerSubCardSubtitle}>Daily movement threshold</Text>
+            </View>
+            <View style={styles.innerNumberPill}>
+              <Text style={styles.innerNumberValue}>
+                {userProfile?.targetCalories || 750}
+              </Text>
+              <Text style={styles.innerNumberUnit}>kcal</Text>
+            </View>
+          </View>
         </View>
 
-        {/* Training Reminders & Notifications Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Training Reminders</Text>
+        {/* 4. Baseline Biometrics (Stitch Spec) */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.cardHeaderLeft}>
+              <Ionicons name="scale-outline" size={18} color="#004AC6" />
+              <Text style={styles.cardHeaderTitle}>BASELINE BIOMETRICS</Text>
+            </View>
+            <TouchableOpacity
+              onPress={openEditBiometricsModal}
+              style={styles.headerActionBtn}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.headerActionText}>LOG NEW</Text>
+              <Ionicons name="add" size={14} color="#004AC6" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Weight & Composition 2-Column Grid */}
+          <View style={styles.biometricsGrid}>
+            {/* Card 1: Current Mass */}
+            <TouchableOpacity
+              style={styles.biometricColCard}
+              onPress={openEditBiometricsModal}
+              activeOpacity={0.8}
+            >
+              <View style={styles.biometricColHeader}>
+                <Text style={styles.biometricColLabel}>CURRENT MASS</Text>
+                <Ionicons name="trending-down" size={16} color="#006C49" />
+              </View>
+              <View style={styles.biometricNumberRow}>
+                <Text style={styles.biometricNumber}>
+                  {resolvedCurrentWeight ? Number(resolvedCurrentWeight).toFixed(1) : '—'}
+                </Text>
+                <Text style={styles.biometricUnit}>{weightUnit}</Text>
+              </View>
+              <View style={styles.biometricBarTrack}>
+                <View
+                  style={[
+                    styles.biometricBarFill,
+                    {
+                      width: resolvedCurrentWeight && resolvedTargetWeight
+                        ? `${Math.min(100, Math.max(10, Math.round((Number(resolvedTargetWeight) / Number(resolvedCurrentWeight)) * 100)))}%`
+                        : '75%',
+                      backgroundColor: '#004AC6',
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={styles.biometricSubText}>
+                {resolvedTargetWeight
+                  ? `Target: ${Number(resolvedTargetWeight).toFixed(1)} ${weightUnit}`
+                  : 'Target: Not set'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Card 2: Training Blueprint */}
+            <TouchableOpacity
+              style={styles.biometricColCard}
+              onPress={() => setIsSurveyModalVisible(true)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.biometricColHeader}>
+                <Text style={styles.biometricColLabel}>BLUEPRINT</Text>
+                <Ionicons name="sparkles" size={15} color="#004AC6" />
+              </View>
+              <View style={styles.biometricNumberRow}>
+                <Text style={[styles.biometricNumber, { fontSize: 16 }]} numberOfLines={1}>
+                  {workspaces?.training_goal_title || currentGoalMeta.title}
+                </Text>
+              </View>
+              <View style={styles.biometricBarTrack}>
+                <View style={[styles.biometricBarFill, { width: '70%', backgroundColor: '#006C49' }]} />
+              </View>
+              <Text style={styles.biometricSubText} numberOfLines={1}>
+                {currentEquipment}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 5. Account & Clinical Team / Plan (Stitch Spec) */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.cardHeaderLeft}>
+              <Ionicons name="shield-checkmark-outline" size={18} color="#004AC6" />
+              <Text style={styles.cardHeaderTitle}>ACCOUNT & CLINICAL TEAM</Text>
+            </View>
+            <View style={styles.statusBadgeGreen}>
+              <Text style={styles.statusBadgeGreenText}>Active Plan</Text>
+            </View>
+          </View>
+
+          {/* Tier Card */}
+          <View style={styles.innerSubCard}>
+            <View style={styles.tierIconBadge}>
+              <Ionicons name="ribbon-outline" size={20} color="#FFFFFF" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.innerSubCardTitle}>
+                {defaultPlan?.name || 'Pro Athletic + Rehab Tier'}
+              </Text>
+              <Text style={styles.innerSubCardSubtitle}>Clinical Telemetry · Active Blueprint</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.manageBtn}
+              onPress={() => router.push('/plans')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.manageBtnText}>MANAGE</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Connected Health Integrations */}
+          <View style={styles.integrationsContainer}>
+            <Text style={styles.integrationsHeader}>SYNCHRONIZED SYSTEMS</Text>
+
+            <View style={styles.integrationRow}>
+              <View style={styles.integrationLeft}>
+                <View style={[styles.integrationIcon, { backgroundColor: '#FFDADB' }]}>
+                  <Ionicons name="heart" size={16} color="#AD0033" />
+                </View>
+                <View>
+                  <Text style={styles.integrationTitle}>NutraLife Health Sync</Text>
+                  <Text style={styles.integrationSubtitle}>Body mass, caloric telemetry & biometrics</Text>
+                </View>
+              </View>
+              <View style={styles.liveSyncBadge}>
+                <Ionicons name="sync" size={13} color="#006C49" />
+                <Text style={styles.liveSyncText}>Live Sync</Text>
+              </View>
+            </View>
+
+            <View style={styles.integrationRow}>
+              <View style={styles.integrationLeft}>
+                <View style={[styles.integrationIcon, { backgroundColor: '#EAEDFF' }]}>
+                  <Ionicons name="fitness" size={16} color="#004AC6" />
+                </View>
+                <View>
+                  <Text style={styles.integrationTitle}>Apple Health / Google Fit</Text>
+                  <Text style={styles.integrationSubtitle}>Heart rate, step cadence & active kcal</Text>
+                </View>
+              </View>
+              <View style={styles.liveSyncBadge}>
+                <Ionicons name="checkmark-circle" size={13} color="#006C49" />
+                <Text style={styles.liveSyncText}>Connected</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* 6. Notifications & Training Reminders (Stitch Spec) */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.cardHeaderLeft}>
+              <Ionicons name="notifications-outline" size={18} color="#004AC6" />
+              <Text style={styles.cardHeaderTitle}>NOTIFICATIONS & REMINDERS</Text>
+            </View>
+            <View style={styles.statusBadgeBlue}>
+              <Text style={styles.statusBadgeBlueText}>Push Enabled</Text>
+            </View>
+          </View>
+
           <WorkoutRemindersConfig
             remindersData={workspaces?.reminders}
             onUpdateReminders={handleUpdateReminders}
@@ -540,73 +660,30 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* Preferences Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Preferences</Text>
-          <View style={styles.card}>
-            <TouchableOpacity style={[styles.row, styles.borderBottom]} onPress={() => router.push('/plans')}>
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="barbell-outline" size={24} color="#00D09E" style={styles.icon} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Default Workout Plan</Text>
-                  <Text style={{ color: '#888', fontSize: 13, marginTop: 2 }}>
-                    {defaultPlan?.name ? `Active: ${defaultPlan.name}` : 'Manage and set default training plan'}
-                  </Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
-            </TouchableOpacity>
+        {/* 7. App Info & Log Out Footer (Stitch Spec) */}
+        <View style={styles.footerSection}>
+          <Text style={styles.engineText}>KINETIX BIOMECHANICS ENGINE</Text>
+          <Text style={styles.versionText}>
+            v2.4.1 (Build 8820) · FDA Class II SaMD Tracked
+          </Text>
 
-            <View style={styles.row}>
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="moon-outline" size={24} color="#00D09E" style={styles.icon} />
-                <Text style={styles.label}>Dark Mode</Text>
-              </View>
-              <Switch
-                value={true}
-                disabled={true}
-                trackColor={{ false: '#333', true: '#00D09E' }}
-                thumbColor={'#fff'}
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* About Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>About</Text>
-          <View style={styles.card}>
-            <View style={[styles.row, styles.borderBottom]}>
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="information-circle-outline" size={24} color="#00D09E" style={styles.icon} />
-                <Text style={styles.label}>Version</Text>
-              </View>
-              <Text style={styles.value}>1.0.0</Text>
-            </View>
-            <TouchableOpacity style={styles.row}>
-              <View style={styles.rowTextWithIcon}>
-                <Ionicons name="document-text-outline" size={24} color="#00D09E" style={styles.icon} />
-                <Text style={styles.label}>Terms of Service</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#666" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Logout */}
-        {session && (
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={20} color="#FF453A" style={styles.logoutIcon} />
-            <Text style={styles.logoutText}>Log Out</Text>
+          <TouchableOpacity
+            style={styles.logoutBtn}
+            onPress={handleLogout}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="log-out-outline" size={19} color="#AD0033" />
+            <Text style={styles.logoutBtnText}>Log Out of Athlete Account</Text>
           </TouchableOpacity>
-        )}
+        </View>
 
+        <View style={{ height: 40 }} />
       </ScrollView>
 
       {/* Floating In-Progress Status Bar */}
       <ActiveWorkoutStatusBar />
 
-      {/* Edit Display Name Modal */}
+      {/* Edit Display Name Modal (Clean White Card) */}
       <Modal
         visible={isEditNameModalVisible}
         transparent={true}
@@ -616,20 +693,20 @@ export default function SettingsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Ionicons name="person-outline" size={22} color="#00D09E" />
+              <Ionicons name="person-outline" size={20} color="#004AC6" />
               <Text style={styles.modalTitle}>Edit Display Name</Text>
             </View>
 
             <Text style={styles.modalSubtitle}>
-              This is how your name will appear on the dashboard and workout greetings.
+              This is how your name will appear on the athlete dashboard and guided sessions.
             </Text>
 
             <TextInput
-              style={styles.nameInput}
+              style={styles.modalInput}
               value={nameInput}
               onChangeText={setNameInput}
-              placeholder="e.g. Vlad"
-              placeholderTextColor="#666"
+              placeholder="e.g. Marcus Vance"
+              placeholderTextColor="#737686"
               autoFocus={true}
               autoCapitalize="words"
               maxLength={40}
@@ -637,22 +714,22 @@ export default function SettingsScreen() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.cancelBtn}
+                style={styles.modalCancelBtn}
                 onPress={() => setIsEditNameModalVisible(false)}
                 disabled={isSavingName}
               >
-                <Text style={styles.cancelBtnText}>Cancel</Text>
+                <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.saveBtn}
+                style={styles.modalSaveBtn}
                 onPress={handleSaveName}
                 disabled={isSavingName}
               >
                 {isSavingName ? (
-                  <ActivityIndicator size="small" color="#111" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.saveBtnText}>Save</Text>
+                  <Text style={styles.modalSaveText}>Save</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -660,7 +737,7 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      {/* Edit Biometrics Modal */}
+      {/* Edit Biometrics Modal (Clean White Card) */}
       <Modal
         visible={isEditBiometricsModalVisible}
         transparent={true}
@@ -670,54 +747,54 @@ export default function SettingsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Ionicons name="fitness-outline" size={22} color="#00D09E" />
+              <Ionicons name="fitness-outline" size={20} color="#004AC6" />
               <Text style={styles.modalTitle}>Update Body Biometrics</Text>
             </View>
 
             <Text style={styles.modalSubtitle}>
-              These values sync in real-time across both NutraLife and Training apps.
+              These parameters calibrate kinetic load efficiency and synchronize with NutraLife.
             </Text>
 
-            <Text style={styles.inputLabel}>Current Weight ({weightUnit})</Text>
+            <Text style={styles.modalInputLabel}>Current Weight ({weightUnit})</Text>
             <TextInput
-              style={styles.nameInput}
+              style={styles.modalInput}
               value={editWeightInput}
               onChangeText={setEditWeightInput}
-              placeholder="e.g. 80.5"
-              placeholderTextColor="#666"
+              placeholder="e.g. 78.4"
+              placeholderTextColor="#737686"
               keyboardType="decimal-pad"
             />
 
-            <Text style={styles.inputLabel}>Target Weight ({weightUnit})</Text>
+            <Text style={styles.modalInputLabel}>Target Weight ({weightUnit})</Text>
             <TextInput
-              style={styles.nameInput}
+              style={styles.modalInput}
               value={editTargetWeightInput}
               onChangeText={setEditTargetWeightInput}
-              placeholder="e.g. 75.0"
-              placeholderTextColor="#666"
+              placeholder="e.g. 77.5"
+              placeholderTextColor="#737686"
               keyboardType="decimal-pad"
             />
 
-            <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.inputLabel}>Height ({heightUnit})</Text>
+                <Text style={styles.modalInputLabel}>Height ({heightUnit})</Text>
                 <TextInput
-                  style={styles.nameInput}
+                  style={styles.modalInput}
                   value={editHeightInput}
                   onChangeText={setEditHeightInput}
-                  placeholder="e.g. 180"
-                  placeholderTextColor="#666"
+                  placeholder="e.g. 188"
+                  placeholderTextColor="#737686"
                   keyboardType="numeric"
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.inputLabel}>Age (years)</Text>
+                <Text style={styles.modalInputLabel}>Age (years)</Text>
                 <TextInput
-                  style={styles.nameInput}
+                  style={styles.modalInput}
                   value={editAgeInput}
                   onChangeText={setEditAgeInput}
-                  placeholder="e.g. 35"
-                  placeholderTextColor="#666"
+                  placeholder="e.g. 28"
+                  placeholderTextColor="#737686"
                   keyboardType="numeric"
                 />
               </View>
@@ -725,22 +802,22 @@ export default function SettingsScreen() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={styles.cancelBtn}
+                style={styles.modalCancelBtn}
                 onPress={() => setIsEditBiometricsModalVisible(false)}
                 disabled={isSavingBiometrics}
               >
-                <Text style={styles.cancelBtnText}>Cancel</Text>
+                <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.saveBtn}
+                style={styles.modalSaveBtn}
                 onPress={handleSaveBiometrics}
                 disabled={isSavingBiometrics}
               >
                 {isSavingBiometrics ? (
-                  <ActivityIndicator size="small" color="#111" />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.saveBtnText}>Save & Sync</Text>
+                  <Text style={styles.modalSaveText}>Save & Sync</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -765,219 +842,88 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: '#FAF8FF',
   },
-  scrollContent: {
-    padding: 15,
-    paddingBottom: 40,
-  },
-  section: {
-    marginBottom: 25,
-  },
-  sectionTitle: {
-    color: '#888',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    marginLeft: 5,
-  },
-  card: {
-    backgroundColor: '#222',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  row: {
+  headerBar: {
+    height: 56,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 15,
-  },
-  borderBottom: {
+    backgroundColor: '#FAF8FF',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: '#EAEDFF',
   },
-  rowTextWithIcon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  rowText: {
-    flex: 1,
-  },
-  icon: {
-    marginRight: 15,
-  },
-  label: {
-    color: '#fff',
-    fontSize: 16,
-  },
-  value: {
-    color: '#888',
-    fontSize: 14,
-    marginTop: 2,
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    backgroundColor: '#2A1A1A',
-    padding: 15,
-    borderRadius: 12,
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#EAEDFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: '#4A2A2A',
   },
-  logoutIcon: {
-    marginRight: 10,
-  },
-  logoutText: {
-    color: '#FF453A',
-    fontWeight: 'bold',
+  headerTitle: {
     fontSize: 16,
+    fontWeight: '700',
+    color: '#131B2E',
   },
-  editActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  editText: {
-    color: '#00D09E',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: '#222',
+  headerAvatarCircle: {
+    width: 32,
+    height: 32,
     borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  modalHeader: {
-    flexDirection: 'row',
+    backgroundColor: '#004AC6',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  modalTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  headerAvatarImg: {
+    width: 32,
+    height: 32,
   },
-  modalSubtitle: {
-    color: '#888',
-    fontSize: 13,
-    marginBottom: 16,
-    lineHeight: 18,
-  },
-  inputLabel: {
-    color: '#AAA',
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  nameInput: {
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#444',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: '#fff',
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-  },
-  cancelBtn: {
-    paddingVertical: 10,
+  scrollContent: {
     paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: '#333',
+    paddingTop: 16,
+    paddingBottom: 40,
+    gap: 16,
   },
-  cancelBtnText: {
-    color: '#ccc',
-    fontWeight: '600',
-    fontSize: 14,
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  saveBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    backgroundColor: '#00D09E',
-    minWidth: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveBtnText: {
-    color: '#111',
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  surveyCtaButton: {
+  profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 10,
-    paddingVertical: 12,
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 208, 158, 0.3)',
+    gap: 14,
   },
-  surveyCtaText: {
-    color: '#00D09E',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  settingsAvatarContainer: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+  avatarWrapper: {
     position: 'relative',
-    backgroundColor: '#1E293B',
-    borderWidth: 2,
-    borderColor: '#334155',
   },
-  settingsAvatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 27,
-  },
-  settingsAvatarPlaceholder: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 27,
+  avatarContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
+    backgroundColor: '#EAEDFF',
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1E293B',
   },
-  avatarCameraBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#00D09E',
+  avatarImage: {
+    width: 64,
+    height: 64,
+  },
+  avatarPlaceholder: {
+    width: 64,
+    height: 64,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#222',
   },
   avatarLoadingBadge: {
     position: 'absolute',
@@ -985,9 +931,495 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderRadius: 27,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: 'rgba(255,255,255,0.7)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarStatusBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  avatarStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#006C49',
+  },
+  profileInfoCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  profileNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  profileName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#131B2E',
+    flex: 1,
+  },
+  editPillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EAEDFF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 9999,
+  },
+  editPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#004AC6',
+  },
+  profileEmail: {
+    fontSize: 12,
+    color: '#004AC6',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  telemetryGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  telemetryChip: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  telemetryDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#E2E8F0',
+  },
+  telemetryLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#737686',
+    letterSpacing: 0.5,
+  },
+  telemetryValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#131B2E',
+    marginTop: 2,
+  },
+  telemetryUnit: {
+    fontSize: 10,
+    color: '#737686',
+    fontWeight: '500',
+  },
+  settingItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  settingLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  settingIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#F2F3FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#131B2E',
+  },
+  settingSubtitle: {
+    fontSize: 11,
+    color: '#737686',
+    marginTop: 1,
+  },
+  segmentedToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    padding: 3,
+  },
+  toggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 7,
+  },
+  toggleBtnActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  toggleBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#737686',
+  },
+  toggleBtnTextActive: {
+    color: '#004AC6',
+    fontWeight: '700',
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  cardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  cardHeaderTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#131B2E',
+    letterSpacing: 0.8,
+  },
+  headerActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  headerActionText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#004AC6',
+  },
+  innerSubCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  innerSubCardTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#131B2E',
+  },
+  innerSubCardSubtitle: {
+    fontSize: 11,
+    color: '#737686',
+    marginTop: 2,
+  },
+  innerNumberPill: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  innerNumberValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#004AC6',
+  },
+  innerNumberUnit: {
+    fontSize: 11,
+    color: '#737686',
+  },
+  biometricsGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  biometricColCard: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    padding: 12,
+  },
+  biometricColHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  biometricColLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#737686',
+  },
+  biometricNumberRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+    marginVertical: 4,
+  },
+  biometricNumber: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#131B2E',
+  },
+  biometricUnit: {
+    fontSize: 12,
+    color: '#737686',
+    fontWeight: '600',
+  },
+  biometricBarTrack: {
+    height: 4,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginVertical: 4,
+  },
+  biometricBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  biometricSubText: {
+    fontSize: 10,
+    color: '#737686',
+    marginTop: 2,
+  },
+  statusBadgeGreen: {
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  statusBadgeGreenText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#006C49',
+  },
+  statusBadgeBlue: {
+    backgroundColor: '#EAEDFF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
+  },
+  statusBadgeBlueText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#004AC6',
+  },
+  tierIconBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#004AC6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manageBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  manageBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#004AC6',
+  },
+  integrationsContainer: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 10,
+  },
+  integrationsHeader: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#737686',
+    letterSpacing: 0.6,
+  },
+  integrationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  integrationLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  integrationIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  integrationTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#131B2E',
+  },
+  integrationSubtitle: {
+    fontSize: 10,
+    color: '#737686',
+  },
+  liveSyncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
+  },
+  liveSyncText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#006C49',
+  },
+  footerSection: {
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 6,
+  },
+  engineText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#737686',
+    letterSpacing: 1,
+  },
+  versionText: {
+    fontSize: 11,
+    color: '#737686',
+  },
+  logoutBtn: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FFF1F2',
+    borderWidth: 1,
+    borderColor: '#FFE4E6',
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginTop: 10,
+  },
+  logoutBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#AD0033',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 20,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#131B2E',
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: '#737686',
+    lineHeight: 17,
+    marginBottom: 14,
+  },
+  modalInputLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#434655',
+    marginBottom: 4,
+    marginTop: 6,
+  },
+  modalInput: {
+    backgroundColor: '#F2F3FF',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 46,
+    fontSize: 14,
+    color: '#131B2E',
+    marginBottom: 8,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#434655',
+  },
+  modalSaveBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#004AC6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalSaveText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

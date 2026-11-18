@@ -28,6 +28,9 @@ export interface Exercise {
   high_phase_name?: string | null;
   low_phase_name?: string | null;
   is_unilateral?: boolean | null;
+  unilateral_mode?: 'bilateral' | 'alternating_rep' | 'side_per_set' | string | null;
+  switch_seconds_per_rep?: number | null;
+  met_value?: number | null;
   user_id?: string | null;
   created_at?: string;
 }
@@ -64,6 +67,9 @@ export interface WorksessionExercise {
   high_phase_name?: string | null;
   low_phase_name?: string | null;
   is_unilateral?: boolean | null;
+  unilateral_mode?: 'bilateral' | 'alternating_rep' | 'side_per_set' | string | null;
+  switch_seconds_per_rep?: number | null;
+  met_value?: number | null;
   notes?: string | null;
   created_at?: string;
   exercises?: Exercise;
@@ -126,3 +132,30 @@ export interface WeeklyScheduleSlot {
   created_at?: string;
   updated_at?: string;
 }
+
+export interface WorkoutSessionLog {
+  id: string;
+  user_id: string;
+  session_id?: string | null;
+  program_phase_id?: string | null;
+  pain_score_recorded?: number | null;
+  duration_minutes?: number | null;
+  calories_burned?: number | null;
+  started_at?: string | null;
+  completed_at: string;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface ExerciseLog {
+  id: string;
+  session_id: string;
+  exercise_name: string;
+  set_number?: number | null;
+  reps?: number | null;
+  weight?: number | null;
+  rpe?: number | null;
+  calories_burned?: number | null;
+  created_at?: string;
+}
+

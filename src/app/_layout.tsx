@@ -54,7 +54,7 @@ export default function Layout() {
             <Stack.Screen name="active-workout" options={{ title: 'Active Workout' }} />
             <Stack.Screen name="rehab-program" options={{ title: 'Rehab Progression' }} />
             <Stack.Screen name="program-builder" options={{ title: 'Program Builder' }} />
-            <Stack.Screen name="settings" options={{ title: 'Settings', headerShown: true }} />
+            <Stack.Screen name="settings" options={{ headerShown: false }} />
             <Stack.Screen name="auth" options={{ headerShown: false, animation: 'none' }} />
           </Stack>
         </TrainingProvider>

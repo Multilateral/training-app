@@ -56,6 +56,7 @@ const SUGGESTED_EQUIPMENT = [
   'Dumbbell',
   'Barbell',
   'Kettlebell',
+  'Foam Roller',
   'Airex Pad',
   'Cable',
   'TRX',

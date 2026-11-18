@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import {
+  calculateSetWorkCalories,
+  calculateRestIntervalCalories,
+  DEFAULT_USER_WEIGHT_KG,
+} from '../utils/calorieEngine';
 
 // Safe dynamic resolution of native audio modules to prevent crashes in Expo Go or clients without ExponentAV
 let nativeAudioModule: {
@@ -80,6 +85,8 @@ export interface PlayerExercise {
   high_phase_name?: string;
   low_phase_name?: string;
   is_unilateral?: boolean;
+  unilateral_mode?: 'bilateral' | 'alternating_rep' | 'side_per_set' | string;
+  switch_seconds_per_rep?: number;
   reps_per_set?: number[];
   durations_per_set?: number[];
   tracking_type?: string;
@@ -96,6 +103,7 @@ export interface SetResultLog {
   weight: number;
   durationSeconds: number;
   completedAt: number;
+  caloriesBurned?: number;
 }
 
 export type AudioPacerMode = 'pulse' | 'tones' | 'metronome' | 'mute';
@@ -103,6 +111,8 @@ export type AudioPacerMode = 'pulse' | 'tones' | 'metronome' | 'mute';
 export interface UseWorkoutPlayerOptions {
   exercises: PlayerExercise[];
   leadInDurationSeconds?: number;
+  userWeightKg?: number;
+  initialTotalCaloriesBurned?: number;
   initialExerciseIndex?: number;
   initialSetIndex?: number;
   initialState?: WorkoutState;
@@ -115,7 +125,7 @@ export interface UseWorkoutPlayerOptions {
   initialCurrentRepNumber?: number;
   initialElapsedWorkMs?: number;
   onSetCompleted?: (log: SetResultLog) => void;
-  onWorkoutCompleted?: (allLogs: SetResultLog[], totalDurationSeconds: number) => void;
+  onWorkoutCompleted?: (allLogs: SetResultLog[], totalDurationSeconds: number, totalCaloriesBurned?: number) => void;
   onStateChange?: (snapshot: any) => void;
 }
 
@@ -187,6 +197,7 @@ export interface CadencePhase {
   soundType: 'cadence_up' | 'cadence_down' | 'pip' | 'none';
   accentColor: string;
   trapezoidType?: TrapezoidPhaseType;
+  side?: 'right' | 'left' | 'both' | 'switch';
 }
 
 export interface CadenceProfile {
@@ -207,6 +218,8 @@ export interface CadenceProfile {
   highPhaseName: string;
   lowPhaseName: string;
   isUnilateral?: boolean;
+  unilateralMode?: 'bilateral' | 'alternating_rep' | 'side_per_set' | string;
+  isDualPlateau?: boolean; // true when 1 rep = 2 holds (Right + Left)
 
   // Compatibility aliases
   waveProfile?: 'trapezoid' | 'symmetric_sine' | 'isometric_hold' | 'skewed_tempo';
@@ -214,6 +227,157 @@ export interface CadenceProfile {
   resetDurationMs?: number;
   riseDurationMs?: number;
 }
+
+/**
+ * Helper to build a clean 8-phase paired trapezoid profile for alternating unilateral exercises.
+ * 1 Paired Repetition = Right Hold (e.g. 10s) -> Switch (2s) -> Left Hold (10s) -> Switch/Base (2s).
+ */
+export const buildPairedTrapezoidProfile = ({
+  exerciseName,
+  totalReps,
+  rampUpMs = 1000,
+  highMs = 10000,
+  rampDownMs = 1000,
+  lowMs = 2000,
+  highPhaseName = 'Extend & Reach Hold',
+  lowPhaseName = 'Switch Sides',
+  highCue = 'Reach long through fingertips and heel, maintain rigid core',
+  lowCue = 'Controlled switch to opposite limbs',
+  defaultAudioPacer = 'metronome',
+}: {
+  exerciseName: string;
+  totalReps: number;
+  rampUpMs?: number;
+  highMs?: number;
+  rampDownMs?: number;
+  lowMs?: number;
+  highPhaseName?: string;
+  lowPhaseName?: string;
+  highCue?: string;
+  lowCue?: string;
+  defaultAudioPacer?: AudioPacerMode;
+}): CadenceProfile => {
+  const halfCycleMs = Math.max(1500, rampUpMs + highMs + rampDownMs + lowMs);
+  const repDurationMs = halfCycleMs * 2;
+  const totalDurationMs = repDurationMs * totalReps;
+
+  const phases: CadencePhase[] = [
+    // --- SIDE 1: RIGHT SIDE ---
+    {
+      id: 'ramp_up_right',
+      name: 'LIFT INTO RIGHT SIDE',
+      shortName: 'LIFT (R)',
+      cue: 'Lift right arm & left leg into extension',
+      durationMs: rampUpMs,
+      soundType: 'cadence_up',
+      accentColor: '#38BDF8',
+      trapezoidType: 'ramp_up',
+      side: 'right',
+    },
+    {
+      id: 'high_plateau_right',
+      name: 'RIGHT SIDE HOLD',
+      shortName: 'HOLD (R)',
+      cue: highCue,
+      durationMs: highMs,
+      soundType: 'none',
+      accentColor: '#0284C7',
+      trapezoidType: 'high_plateau',
+      side: 'right',
+    },
+    {
+      id: 'ramp_down_right',
+      name: 'LOWER TO BASE',
+      shortName: 'LOWER',
+      cue: 'Lower limbs smoothly back to floor',
+      durationMs: rampDownMs,
+      soundType: 'cadence_down',
+      accentColor: '#F59E0B',
+      trapezoidType: 'ramp_down',
+      side: 'right',
+    },
+    {
+      id: 'low_plateau_switch_left',
+      name: 'SWITCH TO LEFT SIDE',
+      shortName: 'SWITCH',
+      cue: 'Switch alignment to left arm & right leg',
+      durationMs: lowMs,
+      soundType: 'none',
+      accentColor: '#10B981',
+      trapezoidType: 'low_plateau',
+      side: 'switch',
+    },
+    // --- SIDE 2: LEFT SIDE ---
+    {
+      id: 'ramp_up_left',
+      name: 'LIFT INTO LEFT SIDE',
+      shortName: 'LIFT (L)',
+      cue: 'Lift left arm & right leg into extension',
+      durationMs: rampUpMs,
+      soundType: 'cadence_up',
+      accentColor: '#38BDF8',
+      trapezoidType: 'ramp_up',
+      side: 'left',
+    },
+    {
+      id: 'high_plateau_left',
+      name: 'LEFT SIDE HOLD',
+      shortName: 'HOLD (L)',
+      cue: highCue,
+      durationMs: highMs,
+      soundType: 'none',
+      accentColor: '#0284C7',
+      trapezoidType: 'high_plateau',
+      side: 'left',
+    },
+    {
+      id: 'ramp_down_left',
+      name: 'LOWER TO BASE',
+      shortName: 'LOWER',
+      cue: 'Lower limbs smoothly back to floor',
+      durationMs: rampDownMs,
+      soundType: 'cadence_down',
+      accentColor: '#F59E0B',
+      trapezoidType: 'ramp_down',
+      side: 'left',
+    },
+    {
+      id: 'low_plateau_rep_complete',
+      name: 'SWITCH SIDES · REP COMPLETE',
+      shortName: 'BASE',
+      cue: lowCue,
+      durationMs: lowMs,
+      soundType: 'none',
+      accentColor: '#10B981',
+      trapezoidType: 'low_plateau',
+      side: 'both',
+    },
+  ];
+
+  return {
+    enabled: true,
+    exerciseName,
+    totalReps,
+    totalDurationMs,
+    repDurationMs,
+    phases,
+    visualType: 'trapezoid',
+    defaultAudioPacer,
+    lowDurationMs: lowMs,
+    rampUpDurationMs: rampUpMs,
+    highDurationMs: highMs,
+    rampDownDurationMs: rampDownMs,
+    highPhaseName,
+    lowPhaseName,
+    isUnilateral: true,
+    unilateralMode: 'alternating_rep',
+    isDualPlateau: true,
+    waveProfile: 'trapezoid',
+    holdDurationMs: highMs,
+    resetDurationMs: lowMs,
+    riseDurationMs: rampUpMs,
+  };
+};
 
 /**
  * Helper to build a clean 4-phase universal trapezoid profile
@@ -412,9 +576,24 @@ export const resolveExerciseCadence = (
     nameLower.includes('bird-dog') ||
     (nameLower.includes('side plank') && cueLower.includes('pyramid'));
   if (isMcGill) {
-    const reps = targetReps > 0 ? targetReps : setIndex === 0 ? 5 : setIndex === 1 ? 3 : 1;
     const isMcGillCurl = nameLower.includes('mcgill');
     const isBirdDog = nameLower.includes('bird-dog') || nameLower.includes('bird dog');
+    const isAlternatingUnilateral =
+      isBirdDog ||
+      ex.unilateral_mode === 'alternating_rep' ||
+      (Boolean(ex.is_unilateral) && !nameLower.includes('side plank') && !nameLower.includes('squares'));
+
+    const reps =
+      Array.isArray(ex.reps_per_set) && typeof ex.reps_per_set[setIndex] === 'number'
+        ? ex.reps_per_set[setIndex]
+        : targetReps > 0
+        ? targetReps
+        : setIndex === 0
+        ? 5
+        : setIndex === 1
+        ? 3
+        : 1;
+
     const holdSec =
       typeof ex.hold_seconds_per_rep === 'number' && ex.hold_seconds_per_rep > 0
         ? ex.hold_seconds_per_rep
@@ -422,11 +601,30 @@ export const resolveExerciseCadence = (
     const resetSec =
       typeof ex.reset_seconds_per_rep === 'number' && ex.reset_seconds_per_rep >= 0
         ? ex.reset_seconds_per_rep
+        : typeof ex.switch_seconds_per_rep === 'number' && ex.switch_seconds_per_rep >= 0
+        ? ex.switch_seconds_per_rep
         : 2.0;
     const transSec =
       typeof ex.transition_seconds === 'number' && ex.transition_seconds > 0
         ? ex.transition_seconds
         : 1.0;
+
+    // For Bird-Dog and alternating unilateral holds, 1 rep = 1 full paired cycle (Right Hold + Left Hold)
+    if (isAlternatingUnilateral) {
+      return buildPairedTrapezoidProfile({
+        exerciseName: ex.name,
+        totalReps: reps,
+        rampUpMs: Math.round(transSec * 1000),
+        highMs: Math.round(holdSec * 1000),
+        rampDownMs: Math.round(transSec * 1000),
+        lowMs: Math.round(resetSec * 1000),
+        highPhaseName: 'Extend & Reach Hold',
+        lowPhaseName: 'Switch Sides',
+        highCue: 'Reach long through fingertips and heel, maintain rigid core',
+        lowCue: 'Controlled switch to opposite limbs',
+        defaultAudioPacer: 'metronome',
+      });
+    }
 
     return buildTrapezoidProfile({
       exerciseName: ex.name,
@@ -447,7 +645,7 @@ export const resolveExerciseCadence = (
       lowCue: isMcGillCurl
         ? 'Rest head and shoulders on hands on floor'
         : 'Controlled switch to opposite limbs for next rep',
-      isUnilateral: isBirdDog || Boolean(ex.is_unilateral),
+      isUnilateral: Boolean(ex.is_unilateral),
     });
   }
 
@@ -497,21 +695,45 @@ export const resolveExerciseCadence = (
     nameLower.includes('isometric');
 
   if (isPureDuration && targetDurationSeconds > 0) {
-    const durSec = targetDurationSeconds;
     const isSidePlank = nameLower.includes('side plank');
+
+    // For side planks, 1 set = 1 full paired cycle (Right side 30s + Left side 30s)
+    if (isSidePlank) {
+      const holdSec =
+        typeof ex.hold_seconds_per_rep === 'number' && ex.hold_seconds_per_rep > 0
+          ? ex.hold_seconds_per_rep
+          : 30.0;
+      const switchSec =
+        typeof ex.switch_seconds_per_rep === 'number' && ex.switch_seconds_per_rep >= 0
+          ? ex.switch_seconds_per_rep
+          : 3.0;
+
+      return buildPairedTrapezoidProfile({
+        exerciseName: ex.name,
+        totalReps: 1, // 1 complete paired cycle (Right 30s + Left 30s) per set
+        rampUpMs: 1000,
+        highMs: Math.round(holdSec * 1000),
+        rampDownMs: 1000,
+        lowMs: Math.round(switchSec * 1000),
+        highPhaseName: 'Side Plank Hold',
+        lowPhaseName: 'Switch Sides',
+        highCue: 'Elevate hips into rigid straight lateral line, engage obliques',
+        lowCue: 'Controlled switch to opposite side',
+        defaultAudioPacer: 'metronome',
+      });
+    }
+
+    const durSec = targetDurationSeconds;
     const resetSec =
       typeof ex.reset_seconds_per_rep === 'number' && ex.reset_seconds_per_rep >= 0
         ? ex.reset_seconds_per_rep
-        : isSidePlank
-        ? 3.0
         : 2.0;
     const transSec =
       typeof ex.transition_seconds === 'number' && ex.transition_seconds > 0
         ? ex.transition_seconds
         : 1.0;
 
-    // For side planks, 2 reps default = Left side and Right side
-    const reps = targetReps > 0 ? targetReps : isSidePlank ? 2 : 1;
+    const reps = targetReps > 0 && targetReps <= 10 ? targetReps : 1;
 
     return buildTrapezoidProfile({
       exerciseName: ex.name,
@@ -520,15 +742,11 @@ export const resolveExerciseCadence = (
       highMs: Math.round(durSec * 1000),
       rampDownMs: Math.round(transSec * 1000),
       lowMs: Math.round(resetSec * 1000),
-      highPhaseName: ex.high_phase_name || (isSidePlank ? 'Side Plank Hold' : 'Isometric Hold'),
-      lowPhaseName: ex.low_phase_name || (isSidePlank ? 'Switch Sides' : 'Rest / Reset'),
-      highCue: isSidePlank
-        ? 'Elevate hips into rigid straight lateral line, engage obliques'
-        : 'Maintain rigid full-body tension throughout the hold',
-      lowCue: isSidePlank
-        ? 'Lower hips smoothly and switch to opposite side'
-        : 'Controlled lower to resting position',
-      isUnilateral: isSidePlank || Boolean(ex.is_unilateral),
+      highPhaseName: ex.high_phase_name || 'Isometric Hold',
+      lowPhaseName: ex.low_phase_name || 'Rest / Reset',
+      highCue: 'Maintain rigid full-body tension throughout the hold',
+      lowCue: 'Controlled lower to resting position',
+      isUnilateral: Boolean(ex.is_unilateral),
     });
   }
 
@@ -612,8 +830,23 @@ export const getExerciseSetReps = (
     }
   }
 
+  // Side plank: 1 complete bilateral cycle per set (Right hold + Left hold)
+  if (nameLower.includes('side plank')) {
+    if (typeof ex.target_reps === 'number' && ex.target_reps > 0) return ex.target_reps;
+    return 1;
+  }
+
   if (typeof ex.target_reps === 'number' && ex.target_reps > 0) return ex.target_reps;
-  const parsedDigits = parseInt(String(ex.reps || '').replace(/[^0-9]/g, ''));
+
+  // Guard against parsing duration strings like "30s / side" or "60s" as rep count
+  const rawTracking = (ex.tracking_type || ex.trackingType || '').toLowerCase();
+  const isDurationType = rawTracking === 'duration' || rawTracking === 'time';
+  const repsStr = String(ex.reps || '').toLowerCase().trim();
+  if (isDurationType && repsStr.includes('s')) {
+    return 1;
+  }
+
+  const parsedDigits = parseInt(repsStr.replace(/[^0-9]/g, ''));
   if (!isNaN(parsedDigits) && parsedDigits > 0) return parsedDigits;
   return 10;
 };
@@ -629,6 +862,20 @@ export const getExerciseSetDuration = (
   setIndex: number
 ): number => {
   if (!ex) return 45;
+
+  const nameLower = (ex.name || '').toLowerCase();
+
+  // Special case: Side Plank (paired bilateral hold: Right 30s + Left 30s = 60s total hold)
+  if (nameLower.includes('side plank')) {
+    if (typeof ex.target_duration_seconds === 'number' && ex.target_duration_seconds > 0) {
+      return ex.target_duration_seconds;
+    }
+    const sideHold =
+      typeof ex.hold_seconds_per_rep === 'number' && ex.hold_seconds_per_rep > 0
+        ? ex.hold_seconds_per_rep
+        : 30;
+    return sideHold * 2;
+  }
 
   const holdSec = ex.hold_seconds_per_rep;
   const resetSec = typeof ex.reset_seconds_per_rep === 'number' ? ex.reset_seconds_per_rep : (holdSec ? 2 : 0);
@@ -659,7 +906,6 @@ export const getExerciseSetDuration = (
   }
 
   // 3. Stuart McGill protocol or descending pyramid hold (Default 10s hold + 2s switch = 12s per rep)
-  const nameLower = (ex.name || '').toLowerCase();
   const cueLower = (ex.cue || '').toLowerCase();
   const isMcGill = nameLower.includes('mcgill') || nameLower.includes('bird-dog');
   const isPyramid = cueLower.includes('descending') || cueLower.includes('pyramid') || cueLower.includes('5-3-1');
@@ -667,7 +913,12 @@ export const getExerciseSetDuration = (
 
   if ((isMcGill || isPyramid) && tSets >= 3 && !nameLower.includes('warmup')) {
     const mcgillReps = [5, 3, 1];
-    const repTime = secPerRep || 12;
+    const isBirdDog = nameLower.includes('bird-dog') || nameLower.includes('bird dog');
+    const isAlternatingUnilateral =
+      isBirdDog ||
+      ex.unilateral_mode === 'alternating_rep' ||
+      (Boolean(ex.is_unilateral) && !nameLower.includes('side plank') && !nameLower.includes('squares'));
+    const repTime = isAlternatingUnilateral ? (secPerRep ? secPerRep * 2 : 28) : (secPerRep || 14);
     if (setIndex < mcgillReps.length) {
       return mcgillReps[setIndex] * repTime;
     }
@@ -759,6 +1010,8 @@ export const getExerciseRestSeconds = (
 export function useWorkoutPlayer({
   exercises,
   leadInDurationSeconds = 5,
+  userWeightKg = DEFAULT_USER_WEIGHT_KG,
+  initialTotalCaloriesBurned = 0,
   initialExerciseIndex = 0,
   initialSetIndex = 0,
   initialState = 'READY',
@@ -774,6 +1027,12 @@ export function useWorkoutPlayer({
   onWorkoutCompleted,
   onStateChange,
 }: UseWorkoutPlayerOptions) {
+  // Resolved Biometrics for Calorie Expenditure
+  const resolvedUserWeightKg = typeof userWeightKg === 'number' && userWeightKg > 0 ? userWeightKg : DEFAULT_USER_WEIGHT_KG;
+  const [totalCaloriesBurned, setTotalCaloriesBurned] = useState<number>(initialTotalCaloriesBurned);
+  const totalCaloriesBurnedRef = useRef<number>(initialTotalCaloriesBurned);
+  const restStartTimeRef = useRef<number | null>(null);
+
   // State Machine
   const [state, setState] = useState<WorkoutState>(initialState);
   const [previousState, setPreviousState] = useState<WorkoutState>(
@@ -1744,9 +2003,12 @@ export function useWorkoutPlayer({
               lastPlayedPhaseKeyRef.current = phaseKey;
               lastBeepMsRef.current = elapsedWorkMs;
 
-              // Phase 1 (Entrance to high_plateau): Full extension / peak tension reached!
-              // Phase 3 (Entrance to low_plateau): Base / floor release / pause / switch sides reached!
-              if (foundPhaseIndex === 1 || foundPhaseIndex === 3) {
+              // High plateau entrance: Full extension / peak tension reached!
+              // Low plateau entrance: Base / floor release / pause / switch sides reached!
+              if (
+                currentPhase.trapezoidType === 'high_plateau' ||
+                currentPhase.trapezoidType === 'low_plateau'
+              ) {
                 playSound('state_beep');
                 triggerHaptic('light');
               }
@@ -1931,6 +2193,17 @@ export function useWorkoutPlayer({
       const durationLogged =
         currentTrackingType === 'duration' ? targetDurationSeconds : 0;
 
+      // Calculate work set calorie expenditure based on clinical MET and effective mass
+      const setWorkKcal = calculateSetWorkCalories(currentExercise, resolvedUserWeightKg, {
+        reps: repsToLog,
+        durationSeconds: targetDurationSeconds,
+        loadKg: weightToLog,
+        secondsPerRep: currentExercise?.seconds_per_rep || currentExercise?.hold_seconds_per_rep,
+      });
+
+      totalCaloriesBurnedRef.current = Math.round((totalCaloriesBurnedRef.current + setWorkKcal) * 10) / 10;
+      setTotalCaloriesBurned(Math.round(totalCaloriesBurnedRef.current));
+
       const newLog: SetResultLog = {
         exerciseIndex: curExIdx,
         exerciseName: currentExercise?.name || 'Exercise',
@@ -1939,6 +2212,7 @@ export function useWorkoutPlayer({
         weight: weightToLog,
         durationSeconds: durationLogged,
         completedAt: Date.now(),
+        caloriesBurned: setWorkKcal,
       };
 
       const updatedLogs = [...loggedSets, newLog];
@@ -1954,7 +2228,7 @@ export function useWorkoutPlayer({
         setIsTransitionRest(false);
         setState('COMPLETED');
         if (onWorkoutCompleted) {
-          onWorkoutCompleted(updatedLogs, getWorkoutElapsedSeconds());
+          onWorkoutCompleted(updatedLogs, getWorkoutElapsedSeconds(), Math.round(totalCaloriesBurnedRef.current));
         }
         return;
       }
@@ -1976,6 +2250,7 @@ export function useWorkoutPlayer({
       }
 
       setState('RESTING');
+      restStartTimeRef.current = Date.now();
       const restDurationMs = effectiveRestSeconds * 1000;
       startIntervalTimer(restDurationMs, () => handleRestCompleteRef.current());
     },
@@ -2003,6 +2278,17 @@ export function useWorkoutPlayer({
   const handleRestComplete = useCallback((autoPauseNext: boolean = false) => {
     if (isRestTransitioningRef.current) return;
 
+    // Calculate recovery rest interval calories
+    if (restStartTimeRef.current) {
+      const elapsedRestSec = Math.max(0, Math.round((Date.now() - restStartTimeRef.current) / 1000));
+      if (elapsedRestSec > 0) {
+        const restKcal = calculateRestIntervalCalories(resolvedUserWeightKg, elapsedRestSec);
+        totalCaloriesBurnedRef.current = Math.round((totalCaloriesBurnedRef.current + restKcal) * 10) / 10;
+        setTotalCaloriesBurned(Math.round(totalCaloriesBurnedRef.current));
+      }
+      restStartTimeRef.current = null;
+    }
+
     const curExIdx = currentExerciseIndexRef.current;
     const curSetIdx = currentSetIndexRef.current;
     const ex = exercises[curExIdx] || exercises[0];
@@ -2018,7 +2304,7 @@ export function useWorkoutPlayer({
       timerIntervalRef.current = null;
       endTimeRef.current = null;
       if (onWorkoutCompleted) {
-        onWorkoutCompleted(loggedSets, getWorkoutElapsedSeconds());
+        onWorkoutCompleted(loggedSets, getWorkoutElapsedSeconds(), Math.round(totalCaloriesBurnedRef.current));
       }
       return;
     }
@@ -2323,7 +2609,7 @@ export function useWorkoutPlayer({
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     setState('COMPLETED');
     if (onWorkoutCompleted) {
-      onWorkoutCompleted(loggedSets, getWorkoutElapsedSeconds());
+      onWorkoutCompleted(loggedSets, getWorkoutElapsedSeconds(), Math.round(totalCaloriesBurnedRef.current));
     }
   }, [loggedSets, getWorkoutElapsedSeconds, onWorkoutCompleted]);
 
@@ -2399,6 +2685,7 @@ export function useWorkoutPlayer({
     pausedRemainingMs: pausedRemainingMsRef.current,
     progress, // 0 -> 1 for SVG circular rings
     workoutElapsedSeconds: getWorkoutElapsedSeconds(),
+    totalCaloriesBurned,
 
     // User inputs for manual lifting
     actualReps,

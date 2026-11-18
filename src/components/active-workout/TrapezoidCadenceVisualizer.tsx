@@ -34,6 +34,7 @@ export interface TrapezoidCadenceVisualizerProps {
   highPhaseName?: string;
   lowPhaseName?: string;
   isUnilateral?: boolean;
+  isDualPlateau?: boolean;
 
   // Backward compatibility aliases
   waveProfile?: string;
@@ -60,6 +61,7 @@ function TrapezoidCadenceVisualizer({
   highPhaseName,
   lowPhaseName,
   isUnilateral,
+  isDualPlateau = false,
   holdDurationMs,
   resetDurationMs,
   riseDurationMs,
@@ -135,33 +137,39 @@ function TrapezoidCadenceVisualizer({
       ? 2000
       : Math.max(500, repDurationMs - resolvedRampUpMs - resolvedRampDownMs - resolvedHighMs);
 
-  // Total cycle period T per rep
+  // Total cycle period T per single crest
   const T = Math.max(1500, resolvedRampUpMs + resolvedHighMs + resolvedRampDownMs + resolvedLowMs);
 
   // Total duration of all reps in the set
   const resolvedTotalReps = Math.max(1, totalReps || 10);
-  const totalDurationMs = resolvedTotalReps * T;
+  const totalDurationMs = isDualPlateau ? resolvedTotalReps * 2 * T : resolvedTotalReps * T;
+
+  // Active side for dual-plateau alternating unilateral holds
+  const currentHalfCycleIdx = Math.floor(Math.max(0, elapsedWorkMs) / T);
+  const isRightSide = isDualPlateau ? currentHalfCycleIdx % 2 === 0 : true;
 
   // Semantic Labels
-  const resolvedHighLabel =
-    highPhaseName ||
-    (isCatCow
-      ? 'Cat (Arch Up)'
-      : isMcGill
-      ? 'Tensioned Core Hold'
-      : isPsoas
-      ? 'Knee Lift & Core Brace'
-      : 'Peak Contraction / Hold');
+  const resolvedHighLabel = isDualPlateau
+    ? (isRightSide ? 'Right Side Hold' : 'Left Side Hold')
+    : highPhaseName ||
+      (isCatCow
+        ? 'Cat (Arch Up)'
+        : isMcGill
+        ? 'Tensioned Core Hold'
+        : isPsoas
+        ? 'Knee Lift & Core Brace'
+        : 'Peak Contraction / Hold');
 
-  const resolvedLowLabel =
-    lowPhaseName ||
-    (isCatCow
-      ? 'Cow (Dip Down)'
-      : isMcGill
-      ? 'Release / Switch Sides'
-      : isPsoas
-      ? 'Switch Sides / Reset'
-      : 'Base / Switch Sides');
+  const resolvedLowLabel = isDualPlateau
+    ? (isRightSide ? 'Switch to Left Side' : 'Switch Sides / Rep Done')
+    : lowPhaseName ||
+      (isCatCow
+        ? 'Cow (Dip Down)'
+        : isMcGill
+        ? 'Release / Switch Sides'
+        : isPsoas
+        ? 'Switch Sides / Reset'
+        : 'Base / Switch Sides');
 
   // Focal position on screen where the athlete's dot rides the wave:
   // Placed at 38% of usable width so athlete sees completed work on left and approaching wave on right
@@ -462,8 +470,23 @@ function TrapezoidCadenceVisualizer({
               {Math.round(resolvedHighMs / 1000)}s hold plateau
             </Text>
           </View>
-          <View style={styles.plateauTagContainer}>
-            <Text style={styles.plateauTagText}>PEAK</Text>
+          <View
+            style={[
+              styles.plateauTagContainer,
+              isDualPlateau && {
+                backgroundColor: isRightSide ? '#E0F2FE' : '#F0FDF4',
+                borderColor: isRightSide ? '#BAE6FD' : '#BBF7D0',
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.plateauTagText,
+                isDualPlateau && { color: isRightSide ? '#0284C7' : '#16A34A' },
+              ]}
+            >
+              {isDualPlateau ? (isRightSide ? 'RIGHT' : 'LEFT') : 'PEAK'}
+            </Text>
           </View>
         </View>
 
@@ -476,7 +499,9 @@ function TrapezoidCadenceVisualizer({
             </Text>
           </View>
           <View style={[styles.plateauTagContainer, { backgroundColor: '#ECFDF5' }]}>
-            <Text style={[styles.plateauTagText, { color: '#059669' }]}>BASE</Text>
+            <Text style={[styles.plateauTagText, { color: '#059669' }]}>
+              {isDualPlateau ? 'SWITCH' : 'BASE'}
+            </Text>
           </View>
         </View>
       </View>

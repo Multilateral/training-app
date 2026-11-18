@@ -37,6 +37,10 @@ import {
 } from '../data/recoveryMetadata';
 import { useWorkoutPlayer, PlayerExercise, getExerciseSetDuration } from '../hooks/useWorkoutPlayer';
 import GuidedCounterCard from './active-workout/GuidedCounterCard';
+import {
+  getUserWeightKg,
+  calculateDurationCalories,
+} from '../utils/calorieEngine';
 
 interface ExerciseData {
   id?: string;
@@ -95,6 +99,7 @@ export interface WorkoutFinishSummary {
   sessionType?: 'rehab' | 'workout';
   isRehab?: boolean;
   category?: string;
+  caloriesBurned?: number;
 }
 
 interface KinetixActiveWorkoutProps {
@@ -190,7 +195,8 @@ export default function KinetixActiveWorkout({
   onFinish,
 }: KinetixActiveWorkoutProps) {
   const router = useRouter();
-  const { activeSessionMetadata, setActiveSessionMetadata, updateActiveSessionMetadata } = useContext(TrainingContext) || {};
+  const { activeSessionMetadata, setActiveSessionMetadata, updateActiveSessionMetadata, userProfile } = useContext(TrainingContext) || {};
+  const userWeightKg = getUserWeightKg(userProfile);
 
   // Check whether we have an active workout session in progress
   const hasActiveSession = Boolean(
@@ -628,7 +634,7 @@ export default function KinetixActiveWorkout({
     setIsTargetModalVisible(false);
   };
 
-  const triggerFinish = () => {
+  const triggerFinish = (playerCaloriesBurned?: number | any) => {
     const now = Date.now();
     const durationSecs = Math.max(1, Math.floor((now - workoutStartTime) / 1000));
     const durationMins = Math.max(1, Math.round(durationSecs / 60));
@@ -650,6 +656,20 @@ export default function KinetixActiveWorkout({
       currentSessionName.toLowerCase().includes('back')
     );
 
+    const customCal = typeof playerCaloriesBurned === 'number' && playerCaloriesBurned > 0 ? playerCaloriesBurned : undefined;
+    const resolvedCalories =
+      customCal !== undefined
+        ? customCal
+        : player?.totalCaloriesBurned > 0
+        ? player.totalCaloriesBurned
+        : Math.round(
+            calculateDurationCalories(
+              isRehab ? 3.5 : 5.0,
+              userWeightKg,
+              durationSecs
+            )
+          );
+
     const summary: WorkoutFinishSummary = {
       durationMins,
       durationSecs,
@@ -664,6 +684,7 @@ export default function KinetixActiveWorkout({
       category: worksession?.focus || (isRehab ? 'Clinical Rehab' : 'Strength & Power'),
       exercisesCompleted: Math.min(currentExercises.length, currentExIndex + 1),
       totalSets: currentExercises.slice(0, currentExIndex + 1).reduce((sum, e) => sum + (e.totalSets || 3), 0),
+      caloriesBurned: resolvedCalories,
     };
     setCompletionSummary(summary);
     setShowCompletionModal(true);
@@ -683,6 +704,8 @@ export default function KinetixActiveWorkout({
   const player = useWorkoutPlayer({
     exercises: currentExercises as PlayerExercise[],
     leadInDurationSeconds: 5,
+    userWeightKg,
+    initialTotalCaloriesBurned: activeSessionMetadata?.totalCaloriesBurned,
     initialExerciseIndex: currentExIndex,
     initialSetIndex: Math.max(0, currentSet - 1),
     initialState: activeSessionMetadata?.guidedPlayerState || 'READY',
@@ -711,8 +734,8 @@ export default function KinetixActiveWorkout({
         badgeText: `SET ${completedSetNum}/${totalSetsForEx}`,
       });
     },
-    onWorkoutCompleted: () => {
-      triggerFinish();
+    onWorkoutCompleted: (_logs, _elapsed, totalCal) => {
+      triggerFinish(totalCal);
     },
   });
 
@@ -792,6 +815,7 @@ export default function KinetixActiveWorkout({
       manualIsHolding: timerRunning,
       manualHoldSeconds: holdSecondsRef.current,
       isPaused: isPaused || player.isPaused,
+      totalCaloriesBurned: player.totalCaloriesBurned,
     });
   }, [
     hasActiveSession,
@@ -1052,7 +1076,7 @@ export default function KinetixActiveWorkout({
         },
         {
           text: 'Finish Workout Now',
-          onPress: triggerFinish,
+          onPress: () => triggerFinish(),
         },
         {
           text: 'Discard Session',
@@ -1562,6 +1586,7 @@ export default function KinetixActiveWorkout({
             isRestTransitioning={player.isRestTransitioning}
             isTransitionRest={player.isTransitionRest}
             upcomingExercise={player.upcomingExercise}
+            totalCaloriesBurned={player.totalCaloriesBurned}
           />
         ) : (
           <View style={styles.counterCard}>
@@ -1826,7 +1851,7 @@ export default function KinetixActiveWorkout({
 
                 <TouchableOpacity
                   style={[styles.subActionBtn, styles.finishActionBtn]}
-                  onPress={triggerFinish}
+                  onPress={() => triggerFinish()}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="flag-outline" size={18} color={KinetixTheme.colors.primary} />
@@ -1858,7 +1883,7 @@ export default function KinetixActiveWorkout({
 
               <TouchableOpacity
                 style={[styles.subActionBtn, styles.finishActionBtn]}
-                onPress={triggerFinish}
+                onPress={() => triggerFinish()}
                 activeOpacity={0.7}
               >
                 <Ionicons name="flag-outline" size={18} color={KinetixTheme.colors.primary} />
@@ -2010,6 +2035,18 @@ export default function KinetixActiveWorkout({
                 </View>
                 <Text style={styles.summaryValueHighlight}>
                   {completionSummary?.durationFormatted || '00:00'}
+                </Text>
+              </View>
+
+              <View style={styles.summaryDivider} />
+
+              <View style={styles.summaryRowHighlight}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="flame" size={18} color="#EA580C" />
+                  <Text style={styles.summaryLabelHighlight}>Calories Burned</Text>
+                </View>
+                <Text style={[styles.summaryValueHighlight, { color: '#EA580C' }]}>
+                  {completionSummary?.caloriesBurned || 0} kcal
                 </Text>
               </View>
             </View>

@@ -811,6 +811,7 @@ export default function KinetixLibrary() {
     { id: 'shoulder', label: 'Shoulder' },
     { id: 'upper', label: 'Upper Body' },
     { id: 'rehab', label: 'Rehab & Recovery' },
+    { id: 'foam_roller', label: 'Foam Roller' },
     { id: 'trx', label: 'TRX' },
     { id: 'kettlebell', label: 'Kettlebell' },
     { id: 'floor', label: 'Floor Mat & Yoga' },
@@ -953,6 +954,11 @@ export default function KinetixLibrary() {
           break;
         case 'rehab':
           if (catLower !== 'recovery' && !muscleLower.includes('rehab') && !muscleLower.includes('pain') && !muscleLower.includes('recovery')) {
+            return false;
+          }
+          break;
+        case 'foam_roller':
+          if (equipLower !== 'foam roller' && !nameLower.includes('foam roll') && !nameLower.includes('roller')) {
             return false;
           }
           break;

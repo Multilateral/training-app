@@ -14,6 +14,7 @@ export default function DaySummaryModal({
   if (!day) return null;
 
   const totalDuration = workouts.reduce((sum, w) => sum + (parseInt(w.duration) || 0), 0);
+  const totalCalories = workouts.reduce((sum, w) => sum + (parseInt(w.caloriesBurned) || 0), 0);
   const isCompleted = workouts.length > 0;
 
   return (
@@ -44,7 +45,7 @@ export default function DaySummaryModal({
               <View style={[styles.statusBadge, { backgroundColor: '#00D09E20', borderColor: '#00D09E66' }]}>
                 <Ionicons name="checkmark-circle" size={14} color="#00D09E" />
                 <Text style={[styles.statusBadgeText, { color: '#00D09E' }]}>
-                  {workouts.length} Workout{workouts.length > 1 ? 's' : ''} Completed • {totalDuration} min
+                  {workouts.length} Workout{workouts.length > 1 ? 's' : ''} Completed • {totalDuration} min{totalCalories > 0 ? ` • ${totalCalories} kcal` : ''}
                 </Text>
               </View>
             ) : hasPlannedSession ? (
@@ -73,6 +74,9 @@ export default function DaySummaryModal({
                     <Text style={styles.workoutName}>{w.type || 'Workout'}</Text>
                     <View style={styles.workoutMetaRow}>
                       <Text style={styles.workoutDuration}>⏱️ {w.duration} min</Text>
+                      {Boolean(w.caloriesBurned) && (
+                        <Text style={styles.workoutIntensity}>• 🔥 {w.caloriesBurned} kcal</Text>
+                      )}
                       {w.intensity && (
                         <Text style={styles.workoutIntensity}>• {w.intensity} Intensity</Text>
                       )}

@@ -70,6 +70,7 @@ interface GuidedCounterCardProps {
   cadencePhaseProgress?: number;
   cadenceRepProgress?: number;
   elapsedWorkMs?: number;
+  totalCaloriesBurned?: number;
 }
 
 export default function GuidedCounterCard({
@@ -121,6 +122,7 @@ export default function GuidedCounterCard({
   cadencePhaseProgress = 0,
   cadenceRepProgress = 0,
   elapsedWorkMs = 0,
+  totalCaloriesBurned = 0,
 }: GuidedCounterCardProps) {
   // Format MM:SS helper
   const formatTimer = (seconds: number) => {
@@ -230,18 +232,27 @@ export default function GuidedCounterCard({
           </Text>
         </View>
 
-        {/* Right audio mute toggle */}
-        <TouchableOpacity
-          style={styles.iconBtn}
-          onPress={() => setIsAudioMuted((prev) => !prev)}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name={isAudioMuted ? 'volume-mute' : 'volume-high'}
-            size={18}
-            color={isAudioMuted ? '#94A3B8' : KinetixTheme.colors.primary}
-          />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {typeof totalCaloriesBurned === 'number' && totalCaloriesBurned > 0 && (
+            <View style={styles.calorieRunningBadge}>
+              <Ionicons name="flame" size={13} color="#EA580C" />
+              <Text style={styles.calorieRunningText}>{totalCaloriesBurned} kcal</Text>
+            </View>
+          )}
+
+          {/* Right audio mute toggle */}
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => setIsAudioMuted((prev) => !prev)}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={isAudioMuted ? 'volume-mute' : 'volume-high'}
+              size={18}
+              color={isAudioMuted ? '#94A3B8' : KinetixTheme.colors.primary}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Dynamic Content Body */}
@@ -440,7 +451,13 @@ export default function GuidedCounterCard({
               <View style={styles.repTrackerCard}>
                 <View style={styles.repTrackerHeader}>
                   <Text style={styles.repTrackerTitle}>
-                    REP {currentRepNumber} OF {cadenceProfile.totalReps}
+                    {cadenceProfile.isDualPlateau && currentCadencePhase?.side === 'right'
+                      ? `REP ${currentRepNumber} OF ${cadenceProfile.totalReps} · RIGHT SIDE`
+                      : cadenceProfile.isDualPlateau && currentCadencePhase?.side === 'left'
+                      ? `REP ${currentRepNumber} OF ${cadenceProfile.totalReps} · LEFT SIDE`
+                      : cadenceProfile.isDualPlateau && currentCadencePhase?.side === 'switch'
+                      ? `REP ${currentRepNumber} OF ${cadenceProfile.totalReps} · SWITCH TO LEFT`
+                      : `REP ${currentRepNumber} OF ${cadenceProfile.totalReps}`}
                   </Text>
                   <Text style={styles.repTrackerTime}>
                     {secondsRemaining}s left ({Math.round(cadenceProfile.totalDurationMs / 1000)}s total)
@@ -487,6 +504,7 @@ export default function GuidedCounterCard({
                   highPhaseName={cadenceProfile.highPhaseName}
                   lowPhaseName={cadenceProfile.lowPhaseName}
                   isUnilateral={cadenceProfile.isUnilateral}
+                  isDualPlateau={cadenceProfile.isDualPlateau}
                 />
               ) : (
                 <>
@@ -1006,6 +1024,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  calorieRunningBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FFEDD5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  calorieRunningText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#EA580C',
   },
 
   // Ready State Styles

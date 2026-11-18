@@ -9,6 +9,7 @@ function getInferredEquipment(name, category) {
   const n = (name || '').toLowerCase();
   const c = (category || '').toLowerCase();
   if (n.includes('trx')) return 'TRX';
+  if (n.includes('foam roll') || n.includes('roller')) return 'Foam Roller';
   if (n.includes('pull-up') || n.includes('muscle-up')) return 'Pull-up Bar';
   if (n.includes('dip')) return 'Dip Station';
   if (n.includes('barbell') || n.includes('dumbbell') || n.includes('bench press') || n.includes('deadlift') || n.includes('overhead press') || n.includes('curl')) return 'Dumbbell / Barbell';

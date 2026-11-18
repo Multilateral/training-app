@@ -157,7 +157,15 @@ export default function ActiveWorkoutStatusBar() {
         </View>
 
         {/* Right: Live Rest / Elapsed Duration & Resume Pill */}
+        {/* Right: Rest/Elapsed Timer + Running Calories + Action Pill */}
         <View style={styles.rightCol}>
+          {typeof activeSessionMetadata?.totalCaloriesBurned === 'number' && activeSessionMetadata.totalCaloriesBurned > 0 && (
+            <View style={styles.caloriePill}>
+              <Ionicons name="flame" size={11} color="#FB923C" style={{ marginRight: 2 }} />
+              <Text style={styles.caloriePillText}>{activeSessionMetadata.totalCaloriesBurned} kcal</Text>
+            </View>
+          )}
+
           {isResting ? (
             <View style={styles.restPill}>
               <Ionicons name="battery-charging" size={12} color="#10B981" style={{ marginRight: 3 }} />
@@ -307,6 +315,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     color: '#34D399',
+    fontVariant: ['tabular-nums'],
+  },
+  caloriePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(234, 88, 12, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.4)',
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  caloriePillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FB923C',
     fontVariant: ['tabular-nums'],
   },
   restPill: {

@@ -122,6 +122,7 @@ export default function ActiveWorkoutScreen() {
             exercisesCompleted: summary?.exercisesCompleted,
             totalSets: summary?.totalSets,
             painScore: painScoreRecorded,
+            caloriesBurned: summary?.caloriesBurned,
           }
         );
       }
@@ -138,6 +139,8 @@ export default function ActiveWorkoutScreen() {
               painScore: painScoreRecorded,
               sessionId: typeof sessionId === 'string' ? sessionId : undefined,
               durationMinutes: durationMins,
+              caloriesBurned: summary?.caloriesBurned,
+              startedAt: summary?.startTime ? new Date(summary.startTime).toISOString() : undefined,
               notes: `Completed ${workoutTitle}`,
               autoAdvance: false,
             });
