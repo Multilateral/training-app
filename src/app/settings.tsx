@@ -1,11 +1,24 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Modal, TextInput, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Switch,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  Image,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TrainingContext, supabase } from '../context/TrainingContext';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import WorkoutRemindersConfig from '../components/WorkoutRemindersConfig';
 import ActiveWorkoutStatusBar from '../components/ActiveWorkoutStatusBar';
+import { pickAndUploadAvatar } from '../utils/avatarManager';
 import TrainingOnboardingSurveyModal, {
   TRAINING_GOALS,
   EXPERIENCE_LEVELS,
@@ -49,6 +62,54 @@ export default function SettingsScreen() {
   const currentJoints = (workspaces?.joint_focus || []).map(
     (j: string) => JOINT_CARE_AREAS.find(a => a.id === j)?.label || j
   );
+
+  // Profile photo updating state
+  const [isUpdatingAvatar, setIsUpdatingAvatar] = useState(false);
+
+  const handlePickAvatar = async (useCamera: boolean) => {
+    if (!session?.user?.id) {
+      Alert.alert('Notice', 'Please sign in to update your profile picture.');
+      return;
+    }
+    setIsUpdatingAvatar(true);
+    try {
+      const newAvatarUrl = await pickAndUploadAvatar(session.user.id, useCamera, workspaces);
+      if (newAvatarUrl) {
+        if (updateUserProfile) {
+          await updateUserProfile({ avatar: newAvatarUrl });
+        }
+        Alert.alert(
+          'Profile Photo Synchronized',
+          'Your profile photo has been updated and synchronized with NutraLife.'
+        );
+      }
+    } catch (err: any) {
+      console.error('Error changing avatar:', err);
+    } finally {
+      setIsUpdatingAvatar(false);
+    }
+  };
+
+  const showAvatarPickerActionSheet = () => {
+    Alert.alert(
+      'Profile Photo',
+      'Choose how you want to update your profile photo. This photo is shared with NutraLife.',
+      [
+        {
+          text: 'Take Photo',
+          onPress: () => handlePickAvatar(true),
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: () => handlePickAvatar(false),
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ]
+    );
+  };
 
   const openEditBiometricsModal = () => {
     setEditWeightInput(resolvedCurrentWeight ? String(resolvedCurrentWeight) : '');
@@ -198,6 +259,53 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.card}>
+            {/* Profile Picture Row (Shared with NutraLife) */}
+            <TouchableOpacity
+              style={[styles.row, styles.borderBottom, { paddingVertical: 14 }]}
+              onPress={showAvatarPickerActionSheet}
+              activeOpacity={0.7}
+              disabled={isUpdatingAvatar}
+            >
+              <View style={styles.rowTextWithIcon}>
+                <View style={styles.settingsAvatarContainer}>
+                  {userProfile?.avatar || workspaces?.avatar ? (
+                    <Image
+                      source={{ uri: userProfile?.avatar || workspaces?.avatar }}
+                      style={styles.settingsAvatarImage}
+                    />
+                  ) : (
+                    <View style={styles.settingsAvatarPlaceholder}>
+                      <Ionicons name="person" size={26} color="#00D09E" />
+                    </View>
+                  )}
+                  {isUpdatingAvatar ? (
+                    <View style={styles.avatarLoadingBadge}>
+                      <ActivityIndicator size="small" color="#00D09E" />
+                    </View>
+                  ) : (
+                    <View style={styles.avatarCameraBadge}>
+                      <Ionicons name="camera" size={11} color="#111" />
+                    </View>
+                  )}
+                </View>
+
+                <View style={{ flex: 1, marginLeft: 14 }}>
+                  <Text style={styles.label}>Profile Picture</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <Ionicons name="sync-circle" size={13} color="#00D09E" />
+                    <Text style={{ fontSize: 12, color: '#00D09E', fontWeight: '600' }}>
+                      NutraLife Sync Active
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.editActionRow}>
+                <Text style={styles.editText}>Change</Text>
+                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+              </View>
+            </TouchableOpacity>
+
             {/* Display Name Row (Editable) */}
             <TouchableOpacity
               style={[styles.row, styles.borderBottom]}
@@ -835,5 +943,51 @@ const styles = StyleSheet.create({
     color: '#00D09E',
     fontWeight: '700',
     fontSize: 13,
+  },
+  settingsAvatarContainer: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    position: 'relative',
+    backgroundColor: '#1E293B',
+    borderWidth: 2,
+    borderColor: '#334155',
+  },
+  settingsAvatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 27,
+  },
+  settingsAvatarPlaceholder: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1E293B',
+  },
+  avatarCameraBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#00D09E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#222',
+  },
+  avatarLoadingBadge: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 27,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { KinetixTheme } from '../constants/theme';
+import { TrainingContext } from '../context/TrainingContext';
 
 interface KinetixHeaderProps {
   subtitle?: string;
@@ -18,6 +19,8 @@ export default function KinetixHeader({
   showBack = false,
 }: KinetixHeaderProps) {
   const router = useRouter();
+  const { userProfile, workspaces } = useContext(TrainingContext) || {};
+  const avatarUri = userProfile?.avatar || workspaces?.avatar;
 
   return (
     <View style={styles.header}>
@@ -57,12 +60,16 @@ export default function KinetixHeader({
           onPress={() => router.push('/settings')}
           activeOpacity={0.7}
         >
-          <Image
-            source={{
-              uri: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-            }}
-            style={styles.avatar}
-          />
+          {avatarUri ? (
+            <Image
+              source={{ uri: avatarUri }}
+              style={styles.avatar}
+            />
+          ) : (
+            <View style={styles.avatarFallback}>
+              <Ionicons name="person" size={18} color={KinetixTheme.colors.primary} />
+            </View>
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -154,5 +161,12 @@ const styles = StyleSheet.create({
   avatar: {
     width: '100%',
     height: '100%',
+  },
+  avatarFallback: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
   },
 });

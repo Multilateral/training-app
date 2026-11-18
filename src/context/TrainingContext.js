@@ -2,6 +2,11 @@ import React, { useState, useEffect, createContext, useCallback } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+import {
+  getUserWeightKg,
+  calculateDurationCalories,
+  resolveSportMET,
+} from '../utils/calorieEngine';
 
 const isServer = Platform.OS === 'web' && typeof window === 'undefined';
 
@@ -44,6 +49,7 @@ export const TrainingProvider = ({ children, session }) => {
   const [userProfile, setUserProfile] = useState({
     name: '',
     email: '',
+    avatar: null,
     currentWeight: null,
     targetWeight: null,
     height: null,
@@ -149,7 +155,7 @@ export const TrainingProvider = ({ children, session }) => {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('history_data, workspaces_data, current_weight, target_weight, height, age, gender, weight_unit, height_unit, target_calories, target_protein, target_carbs, target_fat')
+        .select('history_data, workspaces_data, current_weight, target_weight, height, age, gender, weight_unit, height_unit, target_calories, target_protein, target_carbs, target_fat, avatar_url')
         .eq('id', session.user.id)
         .single();
 
@@ -177,10 +183,12 @@ export const TrainingProvider = ({ children, session }) => {
         const resolvedWeightUnit = data.weight_unit || rawWorkspaces.weightUnit || 'kg';
         const resolvedHeightUnit = data.height_unit || rawWorkspaces.heightUnit || 'cm';
         const resolvedName = session?.user?.user_metadata?.full_name || rawWorkspaces.name || '';
+        const resolvedAvatar = data.avatar_url || rawWorkspaces.avatar || null;
 
         const newProfile = {
           name: resolvedName,
           email: session?.user?.email || '',
+          avatar: resolvedAvatar,
           currentWeight: resolvedWeight,
           targetWeight: resolvedTargetWeight,
           height: resolvedHeight,
@@ -194,6 +202,7 @@ export const TrainingProvider = ({ children, session }) => {
         // Harmonize workspaces with both camelCase and snake_case conventions
         const harmonizedWorkspaces = {
           ...rawWorkspaces,
+          avatar: resolvedAvatar,
           currentWeight: resolvedWeight,
           latest_weight: resolvedWeight,
           targetWeight: resolvedTargetWeight,
@@ -309,6 +318,10 @@ export const TrainingProvider = ({ children, session }) => {
         payload.gender = mergedWorkspaces.gender;
       }
 
+      if (mergedWorkspaces.avatar !== undefined) {
+        payload.avatar_url = mergedWorkspaces.avatar;
+      }
+
       await supabase
         .from('user_profiles')
         .upsert(payload);
@@ -332,6 +345,7 @@ export const TrainingProvider = ({ children, session }) => {
       gender: updated.gender,
       weightUnit: updated.weightUnit,
       heightUnit: updated.heightUnit,
+      ...(updated.avatar !== undefined ? { avatar: updated.avatar } : {}),
     };
     setWorkspaces(mergedWorkspaces);
 
@@ -343,6 +357,7 @@ export const TrainingProvider = ({ children, session }) => {
         workspaces_data: mergedWorkspaces,
         updated_at: new Date().toISOString(),
       };
+      if (updated.avatar !== undefined) payload.avatar_url = updated.avatar;
       if (updated.currentWeight != null) payload.current_weight = Number(updated.currentWeight);
       if (updated.targetWeight != null) payload.target_weight = Number(updated.targetWeight);
       if (updated.height != null) payload.height = Number(updated.height);
@@ -424,6 +439,19 @@ export const TrainingProvider = ({ children, session }) => {
 
     const resolvedSessionType = isSport ? 'sport' : isRehab ? 'rehab' : 'workout';
 
+    // Calculate calories burned across all workout categories using clinical METs
+    const userWeightKg = getUserWeightKg(userProfile);
+    const resolvedCalories =
+      typeof extraDetails.caloriesBurned === 'number' && extraDetails.caloriesBurned > 0
+        ? Math.round(extraDetails.caloriesBurned)
+        : Math.round(
+            calculateDurationCalories(
+              isSport ? resolveSportMET(type) : isRehab ? 3.5 : 5.0,
+              userWeightKg,
+              durationSecs
+            )
+          );
+
     const newWorkout = { 
       id: Date.now().toString(), 
       type, 
@@ -434,6 +462,7 @@ export const TrainingProvider = ({ children, session }) => {
       duration: durationMins,
       durationSeconds: durationSecs,
       durationFormatted: extraDetails.durationFormatted || formatDurationStr(durationSecs),
+      caloriesBurned: resolvedCalories,
       hoursPlayed: extraDetails.hoursPlayed || (isSport ? Number((durationMins / 60).toFixed(2)) : null),
       rpe: extraDetails.rpe || null,
       notes: extraDetails.notes || null,
@@ -465,18 +494,21 @@ export const TrainingProvider = ({ children, session }) => {
         console.error('Failed to log to active_sessions:', err);
       }
 
-      if (isSport) {
-        try {
-          await supabase.from('workout_session_logs').insert([{
-            user_id: session.user.id,
-            session_id: extraDetails.exerciseId || planId || 'sport-session',
-            duration_minutes: durationMins,
-            notes: `${type} • ${extraDetails.hoursPlayed || (durationMins / 60).toFixed(1)}h${extraDetails.rpe ? ` • RPE ${extraDetails.rpe}/10` : ''}${extraDetails.notes ? ` • ${extraDetails.notes}` : ''}`,
-            completed_at: endTimeIso,
-          }]);
-        } catch (err) {
-          console.warn('Sport workout_session_logs insert skipped:', err);
-        }
+      // Universal workout session log insertion for all modalities
+      try {
+        await supabase.from('workout_session_logs').insert([{
+          user_id: session.user.id,
+          session_id: extraDetails.exerciseId || planId || (isSport ? 'sport-session' : 'workout-session'),
+          program_phase_id: extraDetails.programPhaseId || null,
+          duration_minutes: durationMins,
+          calories_burned: resolvedCalories,
+          started_at: startTimeIso,
+          completed_at: endTimeIso,
+          pain_score_recorded: extraDetails.painScore != null ? Math.round(extraDetails.painScore) : null,
+          notes: extraDetails.notes || `${type} • ${extraDetails.hoursPlayed ? `${extraDetails.hoursPlayed}h` : formatDurationStr(durationSecs)}${extraDetails.rpe ? ` • RPE ${extraDetails.rpe}/10` : ''}`,
+        }]);
+      } catch (err) {
+        console.warn('workout_session_logs insert skipped:', err);
       }
     }
   };
