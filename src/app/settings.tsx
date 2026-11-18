@@ -8,8 +8,78 @@ import WorkoutRemindersConfig from '../components/WorkoutRemindersConfig';
 import ActiveWorkoutStatusBar from '../components/ActiveWorkoutStatusBar';
 
 export default function SettingsScreen() {
-  const { session, workspaces, updateWorkspaces } = useContext(TrainingContext);
+  const { session, workspaces, updateWorkspaces, userProfile, updateUserProfile, saveToCloud } = useContext(TrainingContext) || {};
   const [defaultPlan, setDefaultPlan] = useState<any>(null);
+
+  // Biometrics editing state
+  const [isEditBiometricsModalVisible, setIsEditBiometricsModalVisible] = useState(false);
+  const [editWeightInput, setEditWeightInput] = useState('');
+  const [editTargetWeightInput, setEditTargetWeightInput] = useState('');
+  const [editHeightInput, setEditHeightInput] = useState('');
+  const [editAgeInput, setEditAgeInput] = useState('');
+  const [isSavingBiometrics, setIsSavingBiometrics] = useState(false);
+
+  const weightUnit = userProfile?.weightUnit || workspaces?.weightUnit || 'kg';
+  const heightUnit = userProfile?.heightUnit || workspaces?.heightUnit || 'cm';
+  const resolvedCurrentWeight = userProfile?.currentWeight || workspaces?.currentWeight || workspaces?.latest_weight;
+  const resolvedTargetWeight = userProfile?.targetWeight || workspaces?.targetWeight || workspaces?.target_weight;
+  const resolvedHeight = userProfile?.height || workspaces?.height;
+  const resolvedAge = userProfile?.age || workspaces?.age;
+  const resolvedGender = userProfile?.gender || workspaces?.gender;
+
+  const openEditBiometricsModal = () => {
+    setEditWeightInput(resolvedCurrentWeight ? String(resolvedCurrentWeight) : '');
+    setEditTargetWeightInput(resolvedTargetWeight ? String(resolvedTargetWeight) : '');
+    setEditHeightInput(resolvedHeight ? String(resolvedHeight) : '');
+    setEditAgeInput(resolvedAge ? String(resolvedAge) : '');
+    setIsEditBiometricsModalVisible(true);
+  };
+
+  const handleSaveBiometrics = async () => {
+    const parsedWeight = parseFloat(editWeightInput);
+    const parsedTarget = parseFloat(editTargetWeightInput);
+    const parsedHeight = parseFloat(editHeightInput);
+    const parsedAge = parseInt(editAgeInput, 10);
+
+    if (isNaN(parsedWeight) || parsedWeight < 20 || parsedWeight > 300) {
+      Alert.alert('Invalid Weight', 'Please enter a realistic weight (20-300 kg).');
+      return;
+    }
+
+    setIsSavingBiometrics(true);
+    try {
+      const updates: any = {
+        currentWeight: parsedWeight,
+        weightUnit,
+        heightUnit,
+      };
+      if (!isNaN(parsedTarget) && parsedTarget >= 20 && parsedTarget <= 300) {
+        updates.targetWeight = parsedTarget;
+      }
+      if (!isNaN(parsedHeight) && parsedHeight >= 50 && parsedHeight <= 250) {
+        updates.height = parsedHeight;
+      }
+      if (!isNaN(parsedAge) && parsedAge >= 10 && parsedAge <= 120) {
+        updates.age = parsedAge;
+      }
+
+      if (updateUserProfile) {
+        await updateUserProfile(updates);
+      }
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (saveToCloud) {
+        await saveToCloud(todayStr, { weight: parsedWeight });
+      }
+
+      setIsEditBiometricsModalVisible(false);
+      Alert.alert('Biometrics Saved', 'Your body parameters have been updated and synced with the database.');
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to update biometrics');
+    } finally {
+      setIsSavingBiometrics(false);
+    }
+  };
 
   // Profile Name Editing State
   const [isEditNameModalVisible, setIsEditNameModalVisible] = useState(false);
@@ -144,6 +214,82 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Body Biometrics Section */}
+        <View style={styles.section}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Text style={styles.sectionTitle}>Body Biometrics</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0, 208, 158, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+              <Ionicons name="sync-circle" size={14} color="#00D09E" />
+              <Text style={{ fontSize: 11, color: '#00D09E', fontWeight: '700' }}>NutraLife Sync</Text>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            {/* Current Weight */}
+            <TouchableOpacity
+              style={[styles.row, styles.borderBottom]}
+              onPress={openEditBiometricsModal}
+              activeOpacity={0.7}
+            >
+              <View style={styles.rowTextWithIcon}>
+                <Ionicons name="scale-outline" size={22} color="#00D09E" style={styles.icon} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Current Weight</Text>
+                  <Text style={styles.value}>
+                    {resolvedCurrentWeight ? `${Number(resolvedCurrentWeight).toFixed(1)} ${weightUnit}` : 'Tap to log weight'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.editActionRow}>
+                <Text style={styles.editText}>Edit</Text>
+                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+              </View>
+            </TouchableOpacity>
+
+            {/* Target Weight */}
+            <TouchableOpacity
+              style={[styles.row, styles.borderBottom]}
+              onPress={openEditBiometricsModal}
+              activeOpacity={0.7}
+            >
+              <View style={styles.rowTextWithIcon}>
+                <Ionicons name="flag-outline" size={22} color="#00D09E" style={styles.icon} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Target Weight</Text>
+                  <Text style={styles.value}>
+                    {resolvedTargetWeight ? `${Number(resolvedTargetWeight).toFixed(1)} ${weightUnit}` : 'Not set'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.editActionRow}>
+                <Text style={styles.editText}>Edit</Text>
+                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+              </View>
+            </TouchableOpacity>
+
+            {/* Height & Age Row */}
+            <TouchableOpacity
+              style={styles.row}
+              onPress={openEditBiometricsModal}
+              activeOpacity={0.7}
+            >
+              <View style={styles.rowTextWithIcon}>
+                <Ionicons name="body-outline" size={22} color="#00D09E" style={styles.icon} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Height & Age</Text>
+                  <Text style={styles.value}>
+                    {resolvedHeight ? `${resolvedHeight} ${heightUnit}` : '—'} · {resolvedAge ? `${resolvedAge} yrs` : '—'}{resolvedGender ? ` · ${resolvedGender}` : ''}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.editActionRow}>
+                <Text style={styles.editText}>Edit</Text>
+                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Training Reminders & Notifications Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Training Reminders</Text>
@@ -273,6 +419,94 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Edit Biometrics Modal */}
+      <Modal
+        visible={isEditBiometricsModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsEditBiometricsModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="fitness-outline" size={22} color="#00D09E" />
+              <Text style={styles.modalTitle}>Update Body Biometrics</Text>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              These values sync in real-time across both NutraLife and Training apps.
+            </Text>
+
+            <Text style={styles.inputLabel}>Current Weight ({weightUnit})</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={editWeightInput}
+              onChangeText={setEditWeightInput}
+              placeholder="e.g. 80.5"
+              placeholderTextColor="#666"
+              keyboardType="decimal-pad"
+            />
+
+            <Text style={styles.inputLabel}>Target Weight ({weightUnit})</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={editTargetWeightInput}
+              onChangeText={setEditTargetWeightInput}
+              placeholder="e.g. 75.0"
+              placeholderTextColor="#666"
+              keyboardType="decimal-pad"
+            />
+
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.inputLabel}>Height ({heightUnit})</Text>
+                <TextInput
+                  style={styles.nameInput}
+                  value={editHeightInput}
+                  onChangeText={setEditHeightInput}
+                  placeholder="e.g. 180"
+                  placeholderTextColor="#666"
+                  keyboardType="numeric"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.inputLabel}>Age (years)</Text>
+                <TextInput
+                  style={styles.nameInput}
+                  value={editAgeInput}
+                  onChangeText={setEditAgeInput}
+                  placeholder="e.g. 35"
+                  placeholderTextColor="#666"
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setIsEditBiometricsModalVisible(false)}
+                disabled={isSavingBiometrics}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleSaveBiometrics}
+                disabled={isSavingBiometrics}
+              >
+                {isSavingBiometrics ? (
+                  <ActivityIndicator size="small" color="#111" />
+                ) : (
+                  <Text style={styles.saveBtnText}>Save & Sync</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -392,6 +626,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 16,
     lineHeight: 18,
+  },
+  inputLabel: {
+    color: '#AAA',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   nameInput: {
     backgroundColor: '#111',

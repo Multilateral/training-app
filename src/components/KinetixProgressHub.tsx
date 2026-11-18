@@ -104,6 +104,7 @@ export default function KinetixProgressHub() {
     saveToCloud,
     logWorkout,
     setActiveSessionMetadata,
+    userProfile,
   } = useContext(TrainingContext) || {};
 
   // Calendar month state
@@ -742,7 +743,7 @@ export default function KinetixProgressHub() {
   // ----------------------------------------------------
   // 4. Bodyweight Trend Calculations
   // ----------------------------------------------------
-  const targetWeight = Number(workspaces?.target_weight) || 77.5;
+  const targetWeight = Number(workspaces?.target_weight) || Number(workspaces?.targetWeight) || Number(userProfile?.targetWeight) || 77.5;
 
   const allWeightEntries = useMemo(() => {
     const map = new Map<string, { date: string; weight: number; timestamp: number }>();
@@ -782,8 +783,8 @@ export default function KinetixProgressHub() {
     if (allWeightEntries.length > 0) {
       return allWeightEntries[allWeightEntries.length - 1].weight;
     }
-    return Number(workspaces?.latest_weight) || 78.4;
-  }, [allWeightEntries, workspaces]);
+    return Number(workspaces?.latest_weight) || Number(workspaces?.currentWeight) || Number(userProfile?.currentWeight) || 78.4;
+  }, [allWeightEntries, workspaces, userProfile]);
 
   const rangeEntries = useMemo(() => {
     const rangeDays = parseInt(selectedRange, 10);
@@ -942,7 +943,9 @@ export default function KinetixProgressHub() {
         ...(workspaces || {}),
         bodyweight_logs: updatedLogs,
         latest_weight: parsed,
+        currentWeight: parsed,
         target_weight: validTarget,
+        targetWeight: validTarget,
       });
     }
 

@@ -41,6 +41,17 @@ export const TrainingProvider = ({ children, session }) => {
   const [history, setHistory] = useState({});
   const [workspaces, setWorkspaces] = useState({ defaultPlanId: null });
   const [latestWorkout, setLatestWorkout] = useState(null);
+  const [userProfile, setUserProfile] = useState({
+    name: '',
+    email: '',
+    currentWeight: null,
+    targetWeight: null,
+    height: null,
+    age: null,
+    gender: null,
+    weightUnit: 'kg',
+    heightUnit: 'cm',
+  });
 
   const [activeSessionMetadata, setActiveSessionMetadata] = useState(null);
   const [activeSessionState, setActiveSessionState] = useState(null);
@@ -138,18 +149,65 @@ export const TrainingProvider = ({ children, session }) => {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('history_data, workspaces_data')
+        .select('history_data, workspaces_data, current_weight, target_weight, height, age, gender, weight_unit, height_unit, target_calories, target_protein, target_carbs, target_fat')
         .eq('id', session.user.id)
         .single();
 
       if (data) {
         if (data.history_data) setHistory(data.history_data);
-        if (data.workspaces_data) {
-          setWorkspaces(data.workspaces_data);
-          try {
-            await AsyncStorage.setItem('@workspaces_data', JSON.stringify(data.workspaces_data));
-          } catch (e) {}
-        }
+        const rawWorkspaces = data.workspaces_data || {};
+
+        const resolvedWeight = data.current_weight != null
+          ? Number(data.current_weight)
+          : (Number(rawWorkspaces.currentWeight) || Number(rawWorkspaces.latest_weight) || null);
+
+        const resolvedTargetWeight = data.target_weight != null
+          ? Number(data.target_weight)
+          : (Number(rawWorkspaces.targetWeight) || Number(rawWorkspaces.target_weight) || null);
+
+        const resolvedHeight = data.height != null
+          ? Number(data.height)
+          : (Number(rawWorkspaces.height) || null);
+
+        const resolvedAge = data.age != null
+          ? parseInt(data.age, 10)
+          : (parseInt(rawWorkspaces.age, 10) || null);
+
+        const resolvedGender = data.gender || rawWorkspaces.gender || null;
+        const resolvedWeightUnit = data.weight_unit || rawWorkspaces.weightUnit || 'kg';
+        const resolvedHeightUnit = data.height_unit || rawWorkspaces.heightUnit || 'cm';
+        const resolvedName = session?.user?.user_metadata?.full_name || rawWorkspaces.name || '';
+
+        const newProfile = {
+          name: resolvedName,
+          email: session?.user?.email || '',
+          currentWeight: resolvedWeight,
+          targetWeight: resolvedTargetWeight,
+          height: resolvedHeight,
+          age: resolvedAge,
+          gender: resolvedGender,
+          weightUnit: resolvedWeightUnit,
+          heightUnit: resolvedHeightUnit,
+        };
+        setUserProfile(newProfile);
+
+        // Harmonize workspaces with both camelCase and snake_case conventions
+        const harmonizedWorkspaces = {
+          ...rawWorkspaces,
+          currentWeight: resolvedWeight,
+          latest_weight: resolvedWeight,
+          targetWeight: resolvedTargetWeight,
+          target_weight: resolvedTargetWeight,
+          height: resolvedHeight,
+          age: resolvedAge,
+          gender: resolvedGender,
+          weightUnit: resolvedWeightUnit,
+          heightUnit: resolvedHeightUnit,
+        };
+        setWorkspaces(harmonizedWorkspaces);
+        try {
+          await AsyncStorage.setItem('@workspaces_data', JSON.stringify(harmonizedWorkspaces));
+        } catch (e) {}
       }
     } catch (error) {
       console.error("Failed to load database: ", error);
@@ -157,7 +215,10 @@ export const TrainingProvider = ({ children, session }) => {
   };
 
   const updateDayProfile = async (dateStr, newProfileData) => {
-    const newHistory = { ...history, [dateStr]: newProfileData };
+    // Merge into existing day profile so nutrition data (e.g., foods, water) is never erased
+    const existingDay = history[dateStr] || {};
+    const mergedDay = { ...existingDay, ...newProfileData };
+    const newHistory = { ...history, [dateStr]: mergedDay };
     setHistory(newHistory);
 
     if (!session?.user?.id) return;
@@ -168,9 +229,25 @@ export const TrainingProvider = ({ children, session }) => {
         history_data: newHistory,
         updated_at: new Date().toISOString()
       };
-      if (workspaces && Object.keys(workspaces).length > 0 && workspaces.defaultPlanId !== null) {
-        payload.workspaces_data = workspaces;
+
+      if (newProfileData.weight != null) {
+        const numWeight = Number(newProfileData.weight);
+        payload.current_weight = numWeight;
+        setUserProfile(prev => ({ ...prev, currentWeight: numWeight }));
+        setWorkspaces(prev => ({
+          ...prev,
+          currentWeight: numWeight,
+          latest_weight: numWeight,
+        }));
       }
+
+      if (workspaces && Object.keys(workspaces).length > 0) {
+        payload.workspaces_data = {
+          ...workspaces,
+          ...(newProfileData.weight != null ? { currentWeight: Number(newProfileData.weight), latest_weight: Number(newProfileData.weight) } : {})
+        };
+      }
+
       await supabase
         .from('user_profiles')
         .upsert(payload);
@@ -184,24 +261,101 @@ export const TrainingProvider = ({ children, session }) => {
   };
 
   const updateWorkspaces = async (newWorkspaces) => {
-    setWorkspaces(newWorkspaces);
+    const mergedWorkspaces = { ...workspaces, ...newWorkspaces };
+    setWorkspaces(mergedWorkspaces);
     try {
-      await AsyncStorage.setItem('@workspaces_data', JSON.stringify(newWorkspaces));
+      await AsyncStorage.setItem('@workspaces_data', JSON.stringify(mergedWorkspaces));
     } catch (e) {}
 
     if (!session?.user?.id) return;
 
     try {
+      const payload = {
+        id: session.user.id,
+        history_data: history,
+        workspaces_data: mergedWorkspaces,
+        updated_at: new Date().toISOString()
+      };
+
+      if (mergedWorkspaces.currentWeight != null || mergedWorkspaces.latest_weight != null) {
+        const w = Number(mergedWorkspaces.currentWeight ?? mergedWorkspaces.latest_weight);
+        if (!isNaN(w)) {
+          payload.current_weight = w;
+          mergedWorkspaces.currentWeight = w;
+          mergedWorkspaces.latest_weight = w;
+        }
+      }
+
+      if (mergedWorkspaces.targetWeight != null || mergedWorkspaces.target_weight != null) {
+        const tw = Number(mergedWorkspaces.targetWeight ?? mergedWorkspaces.target_weight);
+        if (!isNaN(tw)) {
+          payload.target_weight = tw;
+          mergedWorkspaces.targetWeight = tw;
+          mergedWorkspaces.target_weight = tw;
+        }
+      }
+
+      if (mergedWorkspaces.height != null) {
+        const h = Number(mergedWorkspaces.height);
+        if (!isNaN(h)) payload.height = h;
+      }
+
+      if (mergedWorkspaces.age != null) {
+        const a = parseInt(mergedWorkspaces.age, 10);
+        if (!isNaN(a)) payload.age = a;
+      }
+
+      if (mergedWorkspaces.gender != null) {
+        payload.gender = mergedWorkspaces.gender;
+      }
+
       await supabase
         .from('user_profiles')
-        .upsert({
-          id: session.user.id,
-          history_data: history,
-          workspaces_data: newWorkspaces,
-          updated_at: new Date().toISOString()
-        });
+        .upsert(payload);
     } catch (error) {
       console.error("Failed to save workspaces: ", error);
+    }
+  };
+
+  const updateUserProfile = async (profileUpdates) => {
+    const updated = { ...userProfile, ...profileUpdates };
+    setUserProfile(updated);
+
+    const mergedWorkspaces = {
+      ...workspaces,
+      currentWeight: updated.currentWeight,
+      latest_weight: updated.currentWeight,
+      targetWeight: updated.targetWeight,
+      target_weight: updated.targetWeight,
+      height: updated.height,
+      age: updated.age,
+      gender: updated.gender,
+      weightUnit: updated.weightUnit,
+      heightUnit: updated.heightUnit,
+    };
+    setWorkspaces(mergedWorkspaces);
+
+    if (!session?.user?.id) return;
+
+    try {
+      const payload = {
+        id: session.user.id,
+        workspaces_data: mergedWorkspaces,
+        updated_at: new Date().toISOString(),
+      };
+      if (updated.currentWeight != null) payload.current_weight = Number(updated.currentWeight);
+      if (updated.targetWeight != null) payload.target_weight = Number(updated.targetWeight);
+      if (updated.height != null) payload.height = Number(updated.height);
+      if (updated.age != null) payload.age = parseInt(updated.age, 10);
+      if (updated.gender != null) payload.gender = updated.gender;
+      if (updated.weightUnit != null) payload.weight_unit = updated.weightUnit;
+      if (updated.heightUnit != null) payload.height_unit = updated.heightUnit;
+
+      await supabase
+        .from('user_profiles')
+        .upsert(payload);
+    } catch (error) {
+      console.error("Failed to save user profile: ", error);
     }
   };
 
@@ -330,6 +484,7 @@ export const TrainingProvider = ({ children, session }) => {
   return (
     <TrainingContext.Provider value={{ 
       history, saveToCloud, workspaces, updateWorkspaces, logWorkout, latestWorkout,
+      userProfile, updateUserProfile,
       activeSessionMetadata, setActiveSessionMetadata, updateActiveSessionMetadata,
       activeSessionState, setActiveSessionState,
       activeSessionTimer, setActiveSessionTimer,
