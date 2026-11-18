@@ -12,6 +12,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { KinetixTheme } from '../constants/theme';
 import { TrainingContext, supabase } from '../context/TrainingContext';
 import KinetixHeader from './KinetixHeader';
@@ -31,6 +32,7 @@ import {
   buildDefaultHybridWeeklySchedule,
 } from '../services/scheduleService';
 import SportQuickLogModal from './SportQuickLogModal';
+import TrainingOnboardingSurveyModal from './TrainingOnboardingSurveyModal';
 import { getExerciseTrackingType } from '../data/recoveryMetadata';
 
 
@@ -91,6 +93,8 @@ export default function KinetixDashboard() {
     history,
     logWorkout,
     setActiveSessionMetadata,
+    activeSessionMetadata,
+    userProfile,
   } = useContext(TrainingContext) || {};
 
   // Available plans state: initialized with static database plans, augmented with live plans from DB
@@ -101,6 +105,36 @@ export default function KinetixDashboard() {
     buildDefaultHybridWeeklySchedule()
   );
   const [sportLogSlot, setSportLogSlot] = useState<WeeklyScheduleSlot | null>(null);
+  const [showSurveyModal, setShowSurveyModal] = useState(false);
+  const [hasCheckedSurvey, setHasCheckedSurvey] = useState(false);
+
+  // Check if new user needs to complete the initial training diagnostic survey
+  useEffect(() => {
+    const checkSurveyStatus = async () => {
+      if (!session?.user?.id || hasCheckedSurvey) return;
+
+      try {
+        const localFlag = await AsyncStorage.getItem(`@training_onboarding_completed_${session.user.id}`);
+        const isSurveyCompleted =
+          workspaces?.training_onboarding_completed === true ||
+          Boolean(workspaces?.training_goal) ||
+          localFlag === 'true';
+
+        if (!isSurveyCompleted) {
+          const timer = setTimeout(() => {
+            setShowSurveyModal(true);
+          }, 600);
+          return () => clearTimeout(timer);
+        }
+      } catch (err) {
+        console.warn('[KinetixDashboard] Error checking onboarding status:', err);
+      } finally {
+        setHasCheckedSurvey(true);
+      }
+    };
+
+    checkSurveyStatus();
+  }, [session?.user?.id, workspaces?.training_onboarding_completed, workspaces?.training_goal, hasCheckedSurvey]);
 
 
   const athleteName = useMemo(() => {
@@ -917,6 +951,100 @@ export default function KinetixDashboard() {
     };
   }, [history, activeWorkoutPlan, activeRehabPlan]);
 
+  // 7b. Dynamic Calorie Burn & Today's Activity Metrics (Stitch Athlete Dashboard spec)
+  const todayActivityMetrics = useMemo(() => {
+    let burned = 0;
+    let activeSecs = 0;
+    let loadKg = 0;
+    let setsCount = 0;
+    let primaryIntensity = 'Moderate';
+
+    const dayWorkouts = history?.[todayIsoKey]?.move?.workouts || [];
+    dayWorkouts.forEach((w: any) => {
+      // 1. Calories Burned
+      if (typeof w.caloriesBurned === 'number' && w.caloriesBurned > 0) {
+        burned += w.caloriesBurned;
+      } else if (w.duration || w.durationSeconds) {
+        // Fallback calculation using standard MET if legacy logged session didn't have caloriesBurned
+        const durSecs = w.durationSeconds || (w.duration ? w.duration * 60 : 0);
+        burned += Math.round(((5.0 * 3.5 * 75) / 200) * (durSecs / 60));
+      }
+
+      // 2. Active Duration
+      activeSecs += w.durationSeconds || (w.duration ? w.duration * 60 : 0);
+
+      // 3. Load Volume (kg) & Sets
+      if (typeof w.volume === 'number' && w.volume > 0) {
+        loadKg += w.volume;
+      } else if (typeof w.totalVolumeKg === 'number' && w.totalVolumeKg > 0) {
+        loadKg += w.totalVolumeKg;
+      }
+
+      if (Array.isArray(w.exerciseLogs)) {
+        w.exerciseLogs.forEach((el: any) => {
+          if (Array.isArray(el.sets)) {
+            setsCount += el.sets.length;
+            el.sets.forEach((s: any) => {
+              if (s.completed && typeof s.weightKg === 'number' && typeof s.repsCompleted === 'number') {
+                loadKg += s.weightKg * s.repsCompleted;
+              }
+            });
+          }
+        });
+      }
+
+      if (w.intensity) {
+        primaryIntensity = w.intensity;
+      }
+    });
+
+    // Augment with active session in progress (if any)
+    if (activeSessionMetadata?.isActive) {
+      if (typeof activeSessionMetadata.totalCaloriesBurned === 'number' && activeSessionMetadata.totalCaloriesBurned > 0) {
+        burned += Math.round(activeSessionMetadata.totalCaloriesBurned);
+      }
+      if (typeof activeSessionMetadata.elapsedSeconds === 'number' && activeSessionMetadata.elapsedSeconds > 0) {
+        activeSecs += activeSessionMetadata.elapsedSeconds;
+      }
+    }
+
+    const targetCalories = userProfile?.targetCalories || 750;
+    const targetMinutes = userProfile?.dailyActiveMinutesTarget || 60;
+    const todayMinutes = Math.round(activeSecs / 60);
+    const percentCompleted = Math.min(100, Math.round((burned / targetCalories) * 100));
+    const remainingCalories = Math.max(0, targetCalories - burned);
+
+    // Calculate pace vs daily average
+    let paceText = 'Pace: On track';
+    if (burned > 0) {
+      const currentHour = new Date().getHours();
+      const expectedBurnByNow = Math.round((targetCalories / 24) * Math.max(1, currentHour));
+      const diff = burned - expectedBurnByNow;
+      paceText = diff >= 0 ? `Pace: +${diff} kcal vs avg` : `Pace: ${diff} kcal vs avg`;
+    }
+
+    let intensityLabel = 'Moderate';
+    if (primaryIntensity.toLowerCase().includes('high') || loadKg > 2000) {
+      intensityLabel = 'High';
+    } else if (primaryIntensity.toLowerCase().includes('light') || (burned < 200 && loadKg === 0 && dayWorkouts.length > 0)) {
+      intensityLabel = 'Light';
+    }
+
+    return {
+      todayBurned: burned,
+      targetCalories,
+      percentCompleted,
+      remainingCalories,
+      paceText,
+      todayActiveMinutes: todayMinutes,
+      targetMinutes,
+      todayLoadKg: Math.round(loadKg),
+      todaySetsCount: setsCount,
+      intensityLabel,
+      isWorkoutActive: Boolean(activeSessionMetadata?.isActive),
+    };
+  }, [history, todayIsoKey, activeSessionMetadata, userProfile]);
+
   // 8. Launch active workout
   const startSession = (selectedWs: DatabaseWorksessionCard, planObj?: DatabasePlan | null) => {
     const isRehab =
@@ -1151,46 +1279,141 @@ export default function KinetixDashboard() {
           <Text style={styles.greetingDate}>{todayFormatted}</Text>
         </View>
 
-        {/* Weekly Consistency Card (Dynamic from History & Active Plan) */}
-        <View style={styles.consistencyCard}>
-          <View style={styles.consistencyHeader}>
-            <View style={styles.consistencyTitleRow}>
-              <Ionicons name="calendar-outline" size={17} color={KinetixTheme.colors.primary} />
-              <Text style={styles.consistencyTitle}>Weekly Consistency</Text>
+        {/* Active Calorie Burn Section (Stitch Athlete Dashboard Spec) */}
+        <TouchableOpacity
+          style={styles.calorieCard}
+          activeOpacity={0.88}
+          onPress={() => {
+            if (todayActivityMetrics.isWorkoutActive) {
+              router.push('/active-workout');
+            } else {
+              router.push('/history');
+            }
+          }}
+        >
+          {/* Calorie Burn & Activity Progress Header */}
+          <View style={styles.calorieHeader}>
+            <View style={styles.calorieHeaderLeft}>
+              <View style={styles.calorieIconContainer}>
+                <Ionicons name="flame" size={20} color="#E11D48" />
+              </View>
+              <View>
+                <View style={styles.calorieTitleRow}>
+                  <Text style={styles.calorieTitle}>Active Calorie Burn</Text>
+                  <View style={styles.pulsingDotWrapper}>
+                    <View
+                      style={[
+                        styles.pulsingDotOuter,
+                        todayActivityMetrics.isWorkoutActive && styles.pulsingDotOuterLive,
+                      ]}
+                    />
+                    <View
+                      style={[
+                        styles.pulsingDotInner,
+                        todayActivityMetrics.isWorkoutActive && styles.pulsingDotInnerLive,
+                      ]}
+                    />
+                  </View>
+                </View>
+                <Text style={styles.calorieSubtitle}>
+                  Daily Goal: {todayActivityMetrics.targetCalories} kcal
+                </Text>
+              </View>
             </View>
-            <View style={styles.consistencyBadge}>
-              <Text style={styles.consistencyBadgeText}>
-                {weeklyConsistency.percentMet}% Target Met
+
+            <View style={styles.calorieHeaderRight}>
+              <View style={styles.calorieNumberRow}>
+                <Text style={styles.calorieValueText}>{todayActivityMetrics.todayBurned}</Text>
+                <Text style={styles.calorieTargetText}>
+                  {' '}
+                  / {todayActivityMetrics.targetCalories} kcal
+                </Text>
+              </View>
+              <View style={styles.caloriePercentBadge}>
+                <Text style={styles.caloriePercentBadgeText}>
+                  {todayActivityMetrics.percentCompleted}% Completed
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Visual Calorie Progress Bar */}
+          <View style={styles.calorieProgressSection}>
+            <View style={styles.calorieProgressTrack}>
+              <LinearGradient
+                colors={['#F43F5E', '#F59E0B', '#10B981']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[
+                  styles.calorieProgressFill,
+                  { width: `${Math.max(4, Math.min(100, todayActivityMetrics.percentCompleted))}%` },
+                ]}
+              />
+            </View>
+            <View style={styles.caloriePaceRow}>
+              <Text style={styles.caloriePaceText}>{todayActivityMetrics.paceText}</Text>
+              <Text style={styles.calorieRemainingText}>
+                {todayActivityMetrics.remainingCalories > 0
+                  ? `${todayActivityMetrics.remainingCalories} kcal remaining`
+                  : 'Daily Goal Achieved! 🎉'}
               </Text>
             </View>
           </View>
 
-          <View style={styles.metricsGrid}>
-            <View style={styles.metricBlock}>
-              <Text style={styles.metricLabel}>Completed</Text>
-              <Text style={styles.metricValue}>
-                {weeklyConsistency.completedCount} / {weeklyConsistency.targetSessions}
+          {/* Quick Athletic Metric Badges Grid (3 Columns) */}
+          <View style={styles.calorieMetricsRow}>
+            {/* Metric 1: Active Time */}
+            <View style={styles.calorieMetricCol}>
+              <View style={styles.calorieMetricHeader}>
+                <Text style={styles.calorieMetricLabel}>Active Time</Text>
+                <Ionicons name="timer-outline" size={15} color="#2563EB" />
+              </View>
+              <Text style={styles.calorieMetricValue}>
+                {todayActivityMetrics.todayActiveMinutes}{' '}
+                <Text style={styles.calorieMetricUnit}>min</Text>
               </Text>
-              <Text style={styles.metricSub}>Sessions target</Text>
-            </View>
-
-            <View style={styles.metricBlock}>
-              <Text style={styles.metricLabel}>Schedule</Text>
-              <Text style={styles.metricValue} numberOfLines={1}>
-                {activeWorkoutPlan?.schedule_type === 'anchored' ? 'Anchored' : 'Floating'}
-              </Text>
-              <Text style={[styles.metricSub, { color: KinetixTheme.colors.primary }]}>
-                {activeWorkoutPlan?.goal_category || 'Active'}
+              <Text style={styles.calorieMetricSubBlue}>
+                {todayActivityMetrics.targetMinutes}m Target
               </Text>
             </View>
 
-            <View style={styles.metricBlock}>
-              <Text style={styles.metricLabel}>Active Time</Text>
-              <Text style={styles.metricValue}>{weeklyConsistency.activeTimeFormatted}</Text>
-              <Text style={styles.metricSub}>This week</Text>
+            {/* Metric 2: Today's Workload */}
+            <View style={styles.calorieMetricCol}>
+              <View style={styles.calorieMetricHeader}>
+                <Text style={styles.calorieMetricLabel}>Load Vol.</Text>
+                <Ionicons name="barbell-outline" size={15} color="#475569" />
+              </View>
+              <Text style={styles.calorieMetricValue}>
+                {todayActivityMetrics.todayLoadKg > 0
+                  ? todayActivityMetrics.todayLoadKg.toLocaleString()
+                  : todayActivityMetrics.todaySetsCount > 0
+                  ? todayActivityMetrics.todaySetsCount
+                  : '0'}{' '}
+                <Text style={styles.calorieMetricUnit}>
+                  {todayActivityMetrics.todayLoadKg > 0 ? 'kg' : 'sets'}
+                </Text>
+              </Text>
+              <Text style={styles.calorieMetricSubGreen}>
+                {todayActivityMetrics.intensityLabel} Intensity
+              </Text>
+            </View>
+
+            {/* Metric 3: Weekly Consistency */}
+            <View style={styles.calorieMetricCol}>
+              <View style={styles.calorieMetricHeader}>
+                <Text style={styles.calorieMetricLabel}>Weekly Plan</Text>
+                <Ionicons name="checkmark-circle-outline" size={15} color="#10B981" />
+              </View>
+              <Text style={styles.calorieMetricValue}>
+                {weeklyConsistency.completedCount} / {weeklyConsistency.targetSessions}{' '}
+                <Text style={styles.calorieMetricUnit}>done</Text>
+              </Text>
+              <Text style={styles.calorieMetricSubGreen}>
+                On Track ({weeklyConsistency.percentMet}%)
+              </Text>
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Active Plans Container (Workout Plan & Rehab Protocol) */}
         <View style={styles.activePlansContainer}>
@@ -1512,6 +1735,17 @@ export default function KinetixDashboard() {
         onSaveLog={handleSaveSportLog}
       />
 
+      {/* Onboarding Diagnostic Survey Modal for New Users */}
+      <TrainingOnboardingSurveyModal
+        visible={showSurveyModal}
+        onClose={() => setShowSurveyModal(false)}
+        initialProfile={userProfile}
+        workspaces={workspaces}
+        updateWorkspaces={updateWorkspaces}
+        userId={session?.user?.id}
+        isEditMode={false}
+      />
+
       {/* Persistent Bottom Nav */}
       <KinetixBottomNav activeTab="today" />
     </View>
@@ -1548,16 +1782,21 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     marginTop: 2,
   },
-  consistencyCard: {
-    backgroundColor: KinetixTheme.colors.surface,
-    borderRadius: KinetixTheme.borderRadius.xl,
+  // Active Calorie Burn Card (Stitch Athlete Dashboard spec)
+  calorieCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: KinetixTheme.colors.border,
+    borderColor: '#E2E8F0',
     marginBottom: 16,
-    ...KinetixTheme.shadows.card,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  consistencyHeader: {
+  calorieHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1565,59 +1804,176 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
   },
-  consistencyTitleRow: {
+  calorieHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
-  consistencyTitle: {
-    fontSize: 12,
+  calorieIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#FFF1F2',
+    borderWidth: 1,
+    borderColor: '#FFE4E6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calorieTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  calorieTitle: {
+    fontSize: 11,
     fontWeight: '700',
-    color: KinetixTheme.colors.textSecondary,
     textTransform: 'uppercase',
+    color: '#334155',
     letterSpacing: 0.8,
   },
-  consistencyBadge: {
-    backgroundColor: KinetixTheme.colors.secondaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: KinetixTheme.borderRadius.full,
+  pulsingDotWrapper: {
+    width: 10,
+    height: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pulsingDotOuter: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#FDA4AF',
+    opacity: 0.5,
+  },
+  pulsingDotOuterLive: {
+    backgroundColor: '#FB7185',
+    opacity: 0.85,
+    transform: [{ scale: 1.2 }],
+  },
+  pulsingDotInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#F43F5E',
+  },
+  pulsingDotInnerLive: {
+    backgroundColor: '#E11D48',
+  },
+  calorieSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  calorieHeaderRight: {
+    alignItems: 'flex-end',
+  },
+  calorieNumberRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  calorieValueText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F172A',
+    letterSpacing: -0.5,
+  },
+  calorieTargetText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  caloriePercentBadge: {
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 9999,
     borderWidth: 1,
     borderColor: '#A7F3D0',
+    marginTop: 2,
   },
-  consistencyBadgeText: {
-    fontSize: 11,
+  caloriePercentBadgeText: {
+    fontSize: 10,
     fontWeight: '700',
-    color: KinetixTheme.colors.secondaryDark,
+    color: '#059669',
   },
-  metricsGrid: {
+  calorieProgressSection: {
+    marginTop: 12,
+  },
+  calorieProgressTrack: {
+    width: '100%',
+    height: 10,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 9999,
+    padding: 2,
+    overflow: 'hidden',
+  },
+  calorieProgressFill: {
+    height: '100%',
+    borderRadius: 9999,
+  },
+  caloriePaceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+    paddingHorizontal: 2,
+  },
+  caloriePaceText: {
+    fontSize: 10,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  calorieRemainingText: {
+    fontSize: 10,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  calorieMetricsRow: {
     flexDirection: 'row',
     gap: 8,
-    paddingTop: 12,
+    marginTop: 12,
   },
-  metricBlock: {
+  calorieMetricCol: {
     flex: 1,
-    backgroundColor: KinetixTheme.colors.surfaceContainerLow,
-    padding: 10,
-    borderRadius: KinetixTheme.borderRadius.md,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#F1F5F9',
+    padding: 10,
+    justifyContent: 'space-between',
   },
-  metricLabel: {
+  calorieMetricHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  calorieMetricLabel: {
     fontSize: 11,
-    fontWeight: '600',
-    color: KinetixTheme.colors.textMuted,
+    fontWeight: '500',
+    color: '#64748B',
   },
-  metricValue: {
+  calorieMetricValue: {
     fontSize: 15,
-    fontWeight: '800',
-    color: KinetixTheme.colors.text,
-    marginTop: 3,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginTop: 4,
   },
-  metricSub: {
+  calorieMetricUnit: {
+    fontSize: 11,
+    fontWeight: '400',
+    color: '#64748B',
+  },
+  calorieMetricSubBlue: {
     fontSize: 10,
     fontWeight: '600',
-    color: KinetixTheme.colors.textMuted,
+    color: '#2563EB',
+    marginTop: 2,
+  },
+  calorieMetricSubGreen: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#059669',
     marginTop: 2,
   },
   activePlansContainer: {

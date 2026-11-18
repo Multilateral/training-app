@@ -6,6 +6,12 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import WorkoutRemindersConfig from '../components/WorkoutRemindersConfig';
 import ActiveWorkoutStatusBar from '../components/ActiveWorkoutStatusBar';
+import TrainingOnboardingSurveyModal, {
+  TRAINING_GOALS,
+  EXPERIENCE_LEVELS,
+  EQUIPMENT_OPTIONS,
+  JOINT_CARE_AREAS,
+} from '../components/TrainingOnboardingSurveyModal';
 
 export default function SettingsScreen() {
   const { session, workspaces, updateWorkspaces, userProfile, updateUserProfile, saveToCloud } = useContext(TrainingContext) || {};
@@ -26,6 +32,23 @@ export default function SettingsScreen() {
   const resolvedHeight = userProfile?.height || workspaces?.height;
   const resolvedAge = userProfile?.age || workspaces?.age;
   const resolvedGender = userProfile?.gender || workspaces?.gender;
+
+  // Training Goals Diagnostic & Survey state
+  const [isSurveyModalVisible, setIsSurveyModalVisible] = useState(false);
+
+  // Resolved training goals metadata
+  const currentGoalId = workspaces?.training_goal || 'hypertrophy';
+  const currentGoalMeta = TRAINING_GOALS.find(g => g.id === currentGoalId) || TRAINING_GOALS[0];
+  const currentWeeklySessions = workspaces?.weekly_target_sessions || 4;
+  const currentFitnessLevel = workspaces?.fitness_level
+    ? EXPERIENCE_LEVELS.find(l => l.id === workspaces.fitness_level)?.title || workspaces.fitness_level
+    : 'Intermediate';
+  const currentEquipment = workspaces?.equipment_access
+    ? EQUIPMENT_OPTIONS.find(e => e.id === workspaces.equipment_access)?.title || workspaces.equipment_access
+    : 'Commercial Gym';
+  const currentJoints = (workspaces?.joint_focus || []).map(
+    (j: string) => JOINT_CARE_AREAS.find(a => a.id === j)?.label || j
+  );
 
   const openEditBiometricsModal = () => {
     setEditWeightInput(resolvedCurrentWeight ? String(resolvedCurrentWeight) : '');
@@ -290,6 +313,115 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Training Goals & Blueprint Section */}
+        <View style={styles.section}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Text style={styles.sectionTitle}>Training Goals & Blueprint</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0, 208, 158, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+              <Ionicons name="sparkles" size={13} color="#00D09E" />
+              <Text style={{ fontSize: 11, color: '#00D09E', fontWeight: '700' }}>Active Blueprint</Text>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            {/* Primary Focus */}
+            <TouchableOpacity
+              style={[styles.row, styles.borderBottom]}
+              onPress={() => setIsSurveyModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.rowTextWithIcon}>
+                <Ionicons name="barbell-outline" size={22} color="#00D09E" style={styles.icon} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Primary Training Focus</Text>
+                  <Text style={styles.value}>
+                    {workspaces?.training_goal_title || currentGoalMeta.title}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.editActionRow}>
+                <Text style={styles.editText}>Modify</Text>
+                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+              </View>
+            </TouchableOpacity>
+
+            {/* Weekly Target Sessions */}
+            <TouchableOpacity
+              style={[styles.row, styles.borderBottom]}
+              onPress={() => setIsSurveyModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.rowTextWithIcon}>
+                <Ionicons name="calendar-outline" size={22} color="#00D09E" style={styles.icon} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Weekly Commitment</Text>
+                  <Text style={styles.value}>
+                    {currentWeeklySessions} sessions / week
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.editActionRow}>
+                <Text style={styles.editText}>Modify</Text>
+                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+              </View>
+            </TouchableOpacity>
+
+            {/* Equipment & Level */}
+            <TouchableOpacity
+              style={[styles.row, currentJoints.length > 0 ? styles.borderBottom : null]}
+              onPress={() => setIsSurveyModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.rowTextWithIcon}>
+                <Ionicons name="fitness-outline" size={22} color="#00D09E" style={styles.icon} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Level & Equipment</Text>
+                  <Text style={styles.value}>
+                    {currentFitnessLevel} · {currentEquipment}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.editActionRow}>
+                <Text style={styles.editText}>Modify</Text>
+                <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+              </View>
+            </TouchableOpacity>
+
+            {/* Joint & Mobility Focus if present */}
+            {currentJoints.length > 0 && (
+              <TouchableOpacity
+                style={styles.row}
+                onPress={() => setIsSurveyModalVisible(true)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.rowTextWithIcon}>
+                  <Ionicons name="shield-checkmark-outline" size={22} color="#00D09E" style={styles.icon} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Joint Care & Resilience</Text>
+                    <Text style={styles.value}>
+                      {currentJoints.join(', ')}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.editActionRow}>
+                  <Text style={styles.editText}>Modify</Text>
+                  <Ionicons name="chevron-forward" size={18} color="#00D09E" />
+                </View>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Retake Diagnostic Survey Button */}
+          <TouchableOpacity
+            style={styles.surveyCtaButton}
+            onPress={() => setIsSurveyModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="compass-outline" size={18} color="#00D09E" />
+            <Text style={styles.surveyCtaText}>Retake Full Diagnostic Survey</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Training Reminders & Notifications Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Training Reminders</Text>
@@ -507,6 +639,17 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Training Onboarding Diagnostic & Goal Modification Modal */}
+      <TrainingOnboardingSurveyModal
+        visible={isSurveyModalVisible}
+        onClose={() => setIsSurveyModalVisible(false)}
+        initialProfile={userProfile}
+        workspaces={workspaces}
+        updateWorkspaces={updateWorkspaces}
+        userId={session?.user?.id}
+        isEditMode={true}
+      />
     </SafeAreaView>
   );
 }
@@ -675,5 +818,22 @@ const styles = StyleSheet.create({
     color: '#111',
     fontWeight: '700',
     fontSize: 14,
+  },
+  surveyCtaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 12,
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 158, 0.3)',
+  },
+  surveyCtaText: {
+    color: '#00D09E',
+    fontWeight: '700',
+    fontSize: 13,
   },
 });
